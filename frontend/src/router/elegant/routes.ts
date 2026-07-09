@@ -40,6 +40,42 @@ export const generatedRoutes: GeneratedRoute[] = [
     }
   },
   {
+    name: 'analysis',
+    path: '/analysis',
+    component: 'layout.base$view.analysis',
+    meta: {
+      title: 'analysis',
+      i18nKey: 'route.analysis',
+      icon: 'mdi:chart-bar',
+      order: 6,
+      keepAlive: true
+    }
+  },
+  {
+    name: 'collector',
+    path: '/collector',
+    component: 'layout.base$view.collector',
+    meta: {
+      title: 'collector',
+      i18nKey: 'route.collector',
+      icon: 'mdi:cloud-upload',
+      order: 3,
+      keepAlive: true
+    }
+  },
+  {
+    name: 'dashboard',
+    path: '/dashboard',
+    component: 'layout.base$view.dashboard',
+    meta: {
+      title: 'dashboard',
+      i18nKey: 'route.dashboard',
+      icon: 'mdi:view-dashboard-outline',
+      order: 2,
+      keepAlive: true
+    }
+  },
+  {
     name: 'home',
     path: '/home',
     component: 'layout.base$view.home',
@@ -64,6 +100,30 @@ export const generatedRoutes: GeneratedRoute[] = [
     }
   },
   {
+    name: 'knowledge',
+    path: '/knowledge',
+    component: 'layout.base$view.knowledge',
+    meta: {
+      title: 'knowledge',
+      i18nKey: 'route.knowledge',
+      icon: 'mdi:book-open-variant',
+      order: 7,
+      keepAlive: true
+    }
+  },
+  {
+    name: 'live-sessions',
+    path: '/live-sessions',
+    component: 'layout.base$view.live-sessions',
+    meta: {
+      title: 'live-sessions',
+      i18nKey: 'route.live-sessions',
+      icon: 'mdi:video-vintage',
+      order: 4,
+      keepAlive: true
+    }
+  },
+  {
     name: 'login',
     path: '/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?',
     component: 'layout.blank$view.login',
@@ -73,6 +133,18 @@ export const generatedRoutes: GeneratedRoute[] = [
       i18nKey: 'route.login',
       constant: true,
       hideInMenu: true
+    }
+  },
+  {
+    name: 'transcripts',
+    path: '/transcripts',
+    component: 'layout.base$view.transcripts',
+    meta: {
+      title: 'transcripts',
+      i18nKey: 'route.transcripts',
+      icon: 'mdi:chat-processing',
+      order: 5,
+      keepAlive: true
     }
   }
 ];
