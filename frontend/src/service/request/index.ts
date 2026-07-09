@@ -127,6 +127,41 @@ export const request = createFlatRequest(
   }
 );
 
+export const backendRequest = createFlatRequest(
+  {
+    baseURL: otherBaseURL.backend
+  },
+  {
+    defaultState: {
+      errMsgStack: [],
+      refreshTokenPromise: null
+    } as RequestInstanceState,
+    transform(response: AxiosResponse<App.Service.Response<any>>) {
+      return response.data.data;
+    },
+    async onRequest(config) {
+      const { headers } = config;
+      const token = localStg.get('token');
+      const Authorization = token ? `Bearer ${token}` : null;
+      Object.assign(headers, { Authorization });
+      return config;
+    },
+    isBackendSuccess(response) {
+      return String(response.data.code) === import.meta.env.VITE_SERVICE_SUCCESS_CODE;
+    },
+    async onBackendFail(_response) {
+      // 由调用方自行处理
+    },
+    onError(error) {
+      let message = error.message;
+      if (error.code === BACKEND_ERROR_CODE) {
+        message = error.response?.data?.msg || message;
+      }
+      window.$message?.error(message);
+    }
+  }
+);
+
 export const demoRequest = createRequest(
   {
     baseURL: otherBaseURL.demo

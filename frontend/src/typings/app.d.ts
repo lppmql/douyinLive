@@ -743,7 +743,7 @@ declare namespace App {
   /** Service namespace */
   namespace Service {
     /** Other baseURL key */
-    type OtherBaseURLKey = 'demo';
+    type OtherBaseURLKey = 'demo' | 'backend';
 
     interface ServiceConfigItem {
       /** The backend service base url */
