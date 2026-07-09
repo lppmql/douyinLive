@@ -28,7 +28,7 @@ router = APIRouter(prefix="/collector", tags=["数据采集"])
 def get_collector_status(db: Session = Depends(get_db)):
     """获取采集器整体状态"""
     active_count = db.query(ScraperTask).filter(ScraperTask.status == "running").count()
-    default_account = db.query(ScraperAccount).order_by(ScraperAccount.last_login_at.desc().nullslast()).first()
+    default_account = db.query(ScraperAccount).order_by(ScraperAccount.last_login_at.desc()).first()
     return CollectorStatusResponse(
         connected=default_account is not None,
         active_task_count=active_count,
