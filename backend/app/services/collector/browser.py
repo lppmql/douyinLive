@@ -22,6 +22,11 @@ from app.core.logger import logger
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "storage_state"
 STORAGE_DIR.mkdir(exist_ok=True)
 
+# 抖音企业号后台地址
+LEADS_BASE = "https://leads.cluerich.com"
+LOGIN_URL = f"{LEADS_BASE}/pc/auth/login"
+HOME_URL = f"{LEADS_BASE}/pc/growth/home"
+
 
 class BrowserManager:
     """浏览器管理器单例"""
@@ -71,7 +76,6 @@ class BrowserManager:
 
         返回: {"qr_base64": str, "message": str}
         """
-        # 初始化登录会话状态
         self.login_sessions[task_id] = {
             "status": "pending",
             "qr_base64": "",
@@ -79,7 +83,6 @@ class BrowserManager:
             "message": "正在启动浏览器...",
         }
 
-        # 在后台任务中运行扫码流程
         asyncio.create_task(self._qr_login_worker(task_id, account_name))
 
         return {"qr_base64": "", "message": "登录任务已创建"}
@@ -98,46 +101,32 @@ class BrowserManager:
                 args=["--no-sandbox"],
             )
 
-            context = await browser.new_context()
+            context = await browser.new_context(
+                viewport={"width": 1280, "height": 800},
+            )
             page = await context.new_page()
 
-            # 导航到 cluerich 首页
-            await page.goto("https://cluerich.com/", wait_until="domcontentloaded")
-            self.login_sessions[task_id]["message"] = "页面已加载，等待登录入口..."
+            # 导航到抖音企业号登录页面
+            await page.goto(LOGIN_URL, wait_until="domcontentloaded")
+            self.login_sessions[task_id]["message"] = "页面已加载..."
 
-            # 查找并点击登录按钮（尝试多种可能的选择器）
-            await asyncio.sleep(3)
+            # 等待页面跳转到抖音 OAuth 授权页（显示二维码）
+            await asyncio.sleep(5)
+
+            # 截图整个页面作为二维码展示
             try:
-                login_btn = await page.wait_for_selector(
-                    "text=登录, [class*=login], [class*=Login]",
-                    timeout=10000,
-                )
-                await login_btn.click()
-                self.login_sessions[task_id]["message"] = "已打开登录窗口..."
-            except Exception:
-                self.login_sessions[task_id]["message"] = "可能已登录，正在检查..."
-
-            # 等待二维码出现
-            await asyncio.sleep(2)
-            qr_selector = (
-                "img[src*=qr], img[src*=qrcode], [class*=qrcode] img, "
-                "[class*=QRCode] img, canvas[class*=qrcode]"
-            )
-
-            try:
-                qr_element = await page.wait_for_selector(qr_selector, timeout=15000)
-                qr_bytes = await qr_element.screenshot()
-                qr_b64 = base64.b64encode(qr_bytes).decode("utf-8")
-                self.login_sessions[task_id]["qr_base64"] = qr_b64
+                screenshot = await page.screenshot(full_page=False)
+                self.login_sessions[task_id]["qr_base64"] = base64.b64encode(screenshot).decode()
+                self.login_sessions[task_id]["page_url"] = page.url
                 self.login_sessions[task_id]["message"] = "请使用抖音扫码登录"
-            except Exception:
-                self.login_sessions[task_id]["message"] = "未找到二维码，尝试直接等待登录..."
-                qr_b64 = ""
+                logger.info(f"登录页面截图完成: {len(screenshot)} 字节, URL: {page.url}")
+            except Exception as e:
+                self.login_sessions[task_id]["message"] = f"页面截图失败: {str(e)[:50]}"
 
             # 等待登录成功（最长 120 秒）
             try:
                 await page.wait_for_url(
-                    lambda url: "/dashboard" in url or "/home" in url or "/main" in url,
+                    lambda url: LEADS_BASE in url and "/auth/" not in url,
                     timeout=120000,
                 )
                 self.login_sessions[task_id]["status"] = "success"
@@ -203,9 +192,11 @@ class BrowserManager:
         """检查登录是否过期"""
         page = await context.new_page()
         try:
-            await page.goto("https://cluerich.com/", wait_until="domcontentloaded")
-            expired = "login" in page.url.lower()
+            await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=15000)
+            expired = "login" in page.url.lower() or "/auth/" in page.url
             return expired
+        except Exception:
+            return True
         finally:
             await page.close()
 

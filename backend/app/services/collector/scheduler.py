@@ -142,7 +142,7 @@ class SchedulerManager:
 
             rooms = db.query(LiveRoom).filter(LiveRoom.status == True).all()
             for room in rooms:
-                dashboard_url = f"https://cluerich.com/dashboard/{room.id}" if not settings.MONITOR_MOCK_MODE else ""
+                dashboard_url = f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room.id}" if not settings.MONITOR_MOCK_MODE else ""
                 result = await detector.detect(dashboard_url)
 
                 if result.is_live and room.id not in self.get_active_sessions():
@@ -164,7 +164,7 @@ class SchedulerManager:
             session_title=result.session_title or f"{room.anchor_name} 直播",
             live_start_time=result.start_time or datetime.utcnow(),
             live_status="live",
-            dashboard_url=f"https://cluerich.com/dashboard/{room.id}",
+            dashboard_url=f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room.id}",
         )
         db.add(session)
         db.commit()
