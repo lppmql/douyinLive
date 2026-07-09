@@ -96,8 +96,10 @@ class BrowserManager:
             self.login_sessions[task_id]["message"] = "正在打开浏览器..."
 
             playwright = await async_playwright().start()
+            # 无头模式下抖音 OAuth 不渲染二维码，使用有头模式
+            # 浏览器窗口不会在前端显示，二维码会截图传到前端弹窗
             browser = await playwright.chromium.launch(
-                headless=True,
+                headless=False,
                 args=[
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
@@ -107,6 +109,7 @@ class BrowserManager:
 
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 800},
+                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             )
             page = await context.new_page()
 
