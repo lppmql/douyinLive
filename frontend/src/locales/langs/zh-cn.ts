@@ -391,7 +391,17 @@ const local: App.I18n.Schema = {
       copyFullText: '复制全文',
       copySuccess: '复制成功',
       timeline: '时间轴',
-      seconds: '秒'
+      seconds: '秒',
+      realtimeTranscript: '实时转写',
+      selectSession: '选择直播场次',
+      wsConnected: '已连接',
+      wsDisconnected: '未连接',
+      transcribing: '转写中...',
+      noSession: '暂无直播场次',
+      statusPending: '待处理',
+      statusProcessing: '处理中',
+      statusCompleted: '已完成',
+      statusFailed: '失败'
     },
     analysis: {
       title: 'AI 分析报告',

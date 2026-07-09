@@ -63,11 +63,16 @@ export function deleteCollectorAccount(accountId: number) {
   return request<void>({ url: `/collector/accounts/${accountId}`, method: 'DELETE' });
 }
 
-/* ---------- 话术 ---------- */
+/* ---------- 话术/ASR ---------- */
 
 /** 获取话术分段列表 */
 export function fetchTranscriptSegments(sessionId: number) {
   return request<Api.Douyin.TranscriptSegment[]>({ url: `/transcripts/${sessionId}/segments` });
+}
+
+/** 获取完整话术文本 */
+export function fetchTranscriptFullText(sessionId: number) {
+  return request<Api.Douyin.TranscriptFullText>({ url: `/transcripts/${sessionId}/full-text` });
 }
 
 /* ---------- AI 分析 ---------- */

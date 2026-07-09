@@ -14,6 +14,7 @@ from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_tasks import ScraperTask
 from app.models.scraper_logs import ScraperLog
 from app.models.stream_sources import StreamSource
+from app.models.asr_tasks import AsrTask
 
 __all__ = [
     "Base",
@@ -32,4 +33,5 @@ __all__ = [
     "ScraperTask",
     "ScraperLog",
     "StreamSource",
+    "AsrTask",
 ]

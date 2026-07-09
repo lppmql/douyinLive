@@ -113,15 +113,21 @@ declare namespace Api {
       monitored: boolean;
     }
 
-    /* ---------- 话术 ---------- */
+    /* ---------- 话术/ASR ---------- */
     interface TranscriptSegment {
       id: number;
-      sessionId: number;
-      timePoint: string;
-      content: string;
-      duration: number;
-      score: number;
-      label: string;
+      session_id: number;
+      segment_start: number;
+      segment_end: number;
+      text_content: string;
+      segment_type: string;
+      asr_status: 'pending' | 'processing' | 'completed' | 'failed';
+      ai_score: number | null;
+    }
+
+    interface TranscriptFullText {
+      id: number;
+      full_text: string;
     }
 
     /* ---------- AI 分析 ---------- */

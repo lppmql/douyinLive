@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     SAVE_AUDIO: bool = False
     SAVE_VIDEO: bool = False
 
+    # Phase 5: FunASR
+    FUNASR_HOST: str = "localhost"
+    FUNASR_PORT: int = 9090
+    FUNASR_WS_URL: str = "ws://localhost:9090"
+    ASR_SAMPLE_RATE: int = 16000
+    ASR_MAX_QUEUED: int = 5
+
     # Playwright / 采集
     PLAYWRIGHT_HEADLESS: bool = True
 

@@ -32,6 +32,20 @@ services:
       - redis_data:/data
     command: redis-server --appendonly yes
 
+  funasr:
+    image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-ws-server-2.0
+    container_name: douyin_live_funasr
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - funasr_models:/workspace/models
+    environment:
+      - GPU_ID=-1
+    profiles:
+      - funasr
+
 volumes:
   mysql_data:
   redis_data:
+  funasr_models:

@@ -638,6 +638,16 @@ declare namespace App {
           copySuccess: string;
           timeline: string;
           seconds: string;
+          realtimeTranscript: string;
+          selectSession: string;
+          wsConnected: string;
+          wsDisconnected: string;
+          transcribing: string;
+          noSession: string;
+          statusPending: string;
+          statusProcessing: string;
+          statusCompleted: string;
+          statusFailed: string;
         };
         analysis: {
           title: string;

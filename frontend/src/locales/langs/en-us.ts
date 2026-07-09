@@ -366,7 +366,17 @@ const local: App.I18n.Schema = {
       copyFullText: 'Copy Full Text',
       copySuccess: 'Copied successfully',
       timeline: 'Timeline',
-      seconds: 's'
+      seconds: 's',
+      realtimeTranscript: 'Real-time Transcript',
+      selectSession: 'Select Session',
+      wsConnected: 'Connected',
+      wsDisconnected: 'Disconnected',
+      transcribing: 'Transcribing...',
+      noSession: 'No sessions available',
+      statusPending: 'Pending',
+      statusProcessing: 'Processing',
+      statusCompleted: 'Completed',
+      statusFailed: 'Failed'
     },
     analysis: {
       title: 'AI Analysis Report',
