@@ -82,6 +82,38 @@ export function fetchAnalysisAlerts(sessionId: number) {
   return request<Api.Douyin.AlertItem[]>({ url: `/analysis/${sessionId}/alerts` });
 }
 
+/* ---------- 监控管理 ---------- */
+
+/** 获取监控器状态 */
+export function fetchMonitorStatus() {
+  return request<Api.Douyin.MonitorStatus>({ url: '/monitor/status' });
+}
+
+/** 启动监控 */
+export function startMonitor() {
+  return request<Api.Douyin.MonitorAction>({ url: '/monitor/start', method: 'POST' });
+}
+
+/** 停止监控 */
+export function stopMonitor() {
+  return request<Api.Douyin.MonitorAction>({ url: '/monitor/stop', method: 'POST' });
+}
+
+/** 获取已配置监控的房间列表 */
+export function fetchMonitorRooms() {
+  return request<Api.Douyin.MonitorRoom[]>({ url: '/monitor/rooms' });
+}
+
+/** Mock 模式模拟开播 */
+export function triggerMockLive() {
+  return request<Api.Douyin.MonitorAction>({ url: '/monitor/test/trigger-live', method: 'POST' });
+}
+
+/** Mock 模式模拟下播 */
+export function triggerMockEnd() {
+  return request<Api.Douyin.MonitorAction>({ url: '/monitor/test/trigger-end', method: 'POST' });
+}
+
 /* ---------- 知识库 ---------- */
 
 /** 获取知识库条目 */

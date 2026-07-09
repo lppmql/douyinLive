@@ -10,7 +10,12 @@ import {
   fetchLoginQR,
   fetchLoginStatus,
   reCollectorLogin,
-  deleteCollectorAccount
+  deleteCollectorAccount,
+  fetchMonitorStatus,
+  startMonitor,
+  stopMonitor,
+  triggerMockLive,
+  triggerMockEnd
 } from '@/service/api/douyin';
 
 defineOptions({
@@ -35,6 +40,48 @@ const loginTaskId = ref<number | null>(null);
 const loginStatus = ref<LoginState>('idle');
 const loginMessage = ref('');
 let loginPollTimer: ReturnType<typeof setInterval> | null = null;
+
+/* ---------- 监控 ---------- */
+const monitorStatus = ref<Api.Douyin.MonitorStatus | null>(null);
+const monitorLoading = ref(false);
+
+async function loadMonitorStatus() {
+  const res = await fetchMonitorStatus();
+  if (res.data) monitorStatus.value = res.data;
+}
+
+async function handleStartMonitor() {
+  monitorLoading.value = true;
+  try {
+    const res = await startMonitor();
+    if (res.data?.success) message.success(res.data.message);
+    await loadMonitorStatus();
+  } catch { message.error('启动监控失败'); }
+  finally { monitorLoading.value = false; }
+}
+
+async function handleStopMonitor() {
+  monitorLoading.value = true;
+  try {
+    const res = await stopMonitor();
+    if (res.data?.success) message.success(res.data.message);
+    await loadMonitorStatus();
+  } catch { message.error('停止监控失败'); }
+  finally { monitorLoading.value = false; }
+}
+
+async function handleTriggerLive() {
+  const res = await triggerMockLive();
+  if (res.data?.success) message.success(res.data.message);
+  else message.warning(res.data?.message || '模拟开播失败');
+  await loadMonitorStatus();
+}
+
+async function handleTriggerEnd() {
+  const res = await triggerMockEnd();
+  if (res.data?.success) message.success(res.data.message);
+  await loadMonitorStatus();
+}
 
 /* ---------- 加载数据 ---------- */
 async function loadData() {
@@ -240,6 +287,7 @@ const logColumns = [
 /* ---------- 生命周期 ---------- */
 onMounted(() => {
   loadData();
+  loadMonitorStatus();
 });
 
 onUnmounted(() => {
@@ -275,6 +323,55 @@ onUnmounted(() => {
           <span class="text-13px text-gray-500">
             {{ $t('page.collector.activeTasks') }}：{{ collectorStatus?.active_task_count || 0 }}
           </span>
+        </NSpace>
+      </NCard>
+
+      <!-- 监控控制 -->
+      <NCard :bordered="false" class="card-wrapper">
+        <template #header>
+          <NSpace>
+            <SvgIcon icon="mdi:radar" class="text-22px" />
+            <span class="text-16px font-bold">直播监控</span>
+          </NSpace>
+        </template>
+        <NSpace vertical :size="12">
+          <NSpace align="center" :size="16">
+            <NTag :type="monitorStatus?.running ? 'success' : 'default'" round>
+              {{ monitorStatus?.running ? '运行中' : '已停止' }}
+            </NTag>
+            <span class="text-13px text-gray-500">
+              活跃场次：{{ monitorStatus?.active_session_count || 0 }}
+            </span>
+            <span v-if="monitorStatus?.mock_mode" class="text-13px text-warning">
+              🧪 Mock 模式
+            </span>
+          </NSpace>
+          <NSpace :size="12">
+            <NButton
+              size="small"
+              :type="monitorStatus?.running ? 'warning' : 'primary'"
+              :loading="monitorLoading"
+              @click="monitorStatus?.running ? handleStopMonitor() : handleStartMonitor()"
+            >
+              {{ monitorStatus?.running ? '停止监控' : '启动监控' }}
+            </NButton>
+            <NButton
+              v-if="monitorStatus?.mock_mode"
+              size="small"
+              type="success"
+              @click="handleTriggerLive"
+            >
+              模拟开播
+            </NButton>
+            <NButton
+              v-if="monitorStatus?.mock_mode"
+              size="small"
+              type="error"
+              @click="handleTriggerEnd"
+            >
+              模拟下播
+            </NButton>
+          </NSpace>
         </NSpace>
       </NCard>
 

@@ -92,6 +92,27 @@ declare namespace Api {
       message: string;
     }
 
+    /* ---------- 监控 ---------- */
+    interface MonitorStatus {
+      enabled: boolean;
+      running: boolean;
+      mock_mode: boolean;
+      active_session_count: number;
+      active_sessions: number[];
+    }
+
+    interface MonitorAction {
+      success: boolean;
+      message: string;
+    }
+
+    interface MonitorRoom {
+      room_id: number;
+      account_name: string | null;
+      anchor_name: string | null;
+      monitored: boolean;
+    }
+
     /* ---------- 话术 ---------- */
     interface TranscriptSegment {
       id: number;

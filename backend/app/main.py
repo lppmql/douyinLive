@@ -10,25 +10,33 @@ from app.core.logger import logger
 from app.core.database import engine, Base
 from app.api.v1 import v1_router
 from app.api.v1.auth import router as auth_router
+from app.services.collector.scheduler import scheduler_manager
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时检查数据库连接"""
+    """应用生命周期"""
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
     logger.info(f"📦 数据库: {settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}")
     logger.info(f"🔴 Redis: {settings.REDIS_URL}")
 
-    # 尝试连接数据库（建表在 Phase 1 进行）
     try:
         with engine.connect() as conn:
             logger.info("✅ 数据库连接成功")
     except Exception as e:
         logger.warning(f"⚠️  数据库连接失败: {e}")
-        logger.warning("请确保 MySQL 已启动，可按 docker-compose.yml 配置")
+
+    # 自动启动监控调度器
+    if settings.MONITOR_ENABLED:
+        await scheduler_manager.start()
+        logger.info("✅ 采集调度器已自动启动")
+    else:
+        logger.info("⏸️  采集调度器未启用 (MONITOR_ENABLED=false)")
 
     yield
 
+    if scheduler_manager.running:
+        await scheduler_manager.stop()
     logger.info("🛑 应用关闭")
 
 

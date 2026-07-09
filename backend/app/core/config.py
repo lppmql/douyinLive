@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # Playwright / 采集
     PLAYWRIGHT_HEADLESS: bool = True
 
+    # Phase 4: 直播采集监控
+    MONITOR_ENABLED: bool = False
+    MONITOR_MOCK_MODE: bool = False
+    MONITOR_CHECK_INTERVAL: int = 120
+    METRICS_COLLECT_INTERVAL: int = 30
+    COMMENT_COLLECT_INTERVAL: int = 60
+    PROFILE_COLLECT_INTERVAL: int = 120
+
     @property
     def db_url(self) -> str:
         if self.DATABASE_URL:
