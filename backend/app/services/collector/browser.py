@@ -110,24 +110,44 @@ class BrowserManager:
             )
             page = await context.new_page()
 
-            # 导航到抖音企业号登录页面
+            # 1. 导航到登录页面
             await page.goto(LOGIN_URL, wait_until="domcontentloaded")
-            self.login_sessions[task_id]["message"] = "页面已加载..."
+            await asyncio.sleep(3)
+            logger.info(f"登录页已加载: {page.url}")
 
-            # 等待页面跳转到抖音 OAuth 授权页（显示二维码）
-            await asyncio.sleep(5)
+            # 2. 点击抖音图标，弹出二维码
+            try:
+                douyin_icon = await page.wait_for_selector(
+                    "//span[@class='icon douyin']//img",
+                    timeout=10000,
+                )
+                await douyin_icon.click()
+                self.login_sessions[task_id]["message"] = "已选择抖音登录..."
+                await asyncio.sleep(3)
+                logger.info("已点击抖音图标")
+            except Exception as e:
+                logger.warning(f"未找到抖音图标: {e}")
 
-            # 截图整个页面作为二维码展示
+            # 3. 等待二维码出现并截图
+            await asyncio.sleep(2)
+            try:
+                await page.wait_for_selector(
+                    "canvas, img[src*='qr'], img[src*='qrcode'], [class*='qrcode']",
+                    timeout=15000,
+                )
+            except Exception:
+                pass
+
             try:
                 screenshot = await page.screenshot(full_page=False)
                 self.login_sessions[task_id]["qr_base64"] = base64.b64encode(screenshot).decode()
                 self.login_sessions[task_id]["page_url"] = page.url
                 self.login_sessions[task_id]["message"] = "请使用抖音扫码登录"
-                logger.info(f"登录页面截图完成: {len(screenshot)} 字节, URL: {page.url}")
+                logger.info(f"二维码截图完成: {len(screenshot)} 字节")
             except Exception as e:
-                self.login_sessions[task_id]["message"] = f"页面截图失败: {str(e)[:50]}"
+                self.login_sessions[task_id]["message"] = f"截图失败: {str(e)[:50]}"
 
-            # 等待登录成功（最长 120 秒）
+            # 4. 等待登录成功（最长 120 秒）
             try:
                 await page.wait_for_url(
                     lambda url: LEADS_BASE in url and "/auth/" not in url,
@@ -136,10 +156,9 @@ class BrowserManager:
                 self.login_sessions[task_id]["status"] = "success"
                 self.login_sessions[task_id]["message"] = "登录成功"
 
-                # 保存 StorageState
+                # 保存 StorageState（Cookie 等）
                 storage_path = await self._save_context_state(context, task_id)
 
-                # 提取浏览器信息
                 ua = await page.evaluate("navigator.userAgent")
                 vp = page.viewport_size
 
@@ -149,6 +168,7 @@ class BrowserManager:
                     "viewport_width": vp.get("width") if vp else None,
                     "viewport_height": vp.get("height") if vp else None,
                 })
+                logger.info(f"扫码登录成功! storage_path={storage_path}")
             except Exception as e:
                 self.login_sessions[task_id]["status"] = "timeout"
                 self.login_sessions[task_id]["message"] = "登录超时，请重新扫码"
