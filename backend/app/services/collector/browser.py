@@ -128,24 +128,38 @@ class BrowserManager:
             except Exception as e:
                 logger.warning(f"未找到抖音图标: {e}")
 
-            # 3. 等待二维码出现并截图
-            await asyncio.sleep(2)
+            # 3. 从 OAuth 页面提取二维码图片
+            await asyncio.sleep(3)
+            qr_base64 = ""
             try:
-                await page.wait_for_selector(
-                    "canvas, img[src*='qr'], img[src*='qrcode'], [class*='qrcode']",
-                    timeout=15000,
-                )
-            except Exception:
-                pass
+                # 找所有 img 元素，取 base64 最长的那个（就是二维码）
+                imgs = await page.query_selector_all("img[src*='data:image/png;base64']")
+                candidates = []
+                for img in imgs:
+                    src = (await img.get_attribute("src")) or ""
+                    if src.startswith("data:image/png;base64"):
+                        candidates.append(src)
+                # 最长的 base64 就是二维码
+                if candidates:
+                    qr_base64 = max(candidates, key=len)
+                    # 去掉 data:image/png;base64, 前缀
+                    if "," in qr_base64:
+                        qr_base64 = qr_base64.split(",", 1)[1]
+            except Exception as e:
+                logger.warning(f"提取二维码失败: {e}")
 
-            try:
-                screenshot = await page.screenshot(full_page=False)
-                self.login_sessions[task_id]["qr_base64"] = base64.b64encode(screenshot).decode()
+            if qr_base64:
+                self.login_sessions[task_id]["qr_base64"] = qr_base64
                 self.login_sessions[task_id]["page_url"] = page.url
                 self.login_sessions[task_id]["message"] = "请使用抖音扫码登录"
-                logger.info(f"二维码截图完成: {len(screenshot)} 字节")
-            except Exception as e:
-                self.login_sessions[task_id]["message"] = f"截图失败: {str(e)[:50]}"
+                logger.info(f"二维码已提取: {len(qr_base64)} 字节")
+            else:
+                self.login_sessions[task_id]["message"] = "未找到二维码，尝试页面截图..."
+                try:
+                    screenshot = await page.screenshot(full_page=False)
+                    self.login_sessions[task_id]["qr_base64"] = base64.b64encode(screenshot).decode()
+                except Exception:
+                    pass
 
             # 4. 等待登录成功（最长 120 秒）
             try:
