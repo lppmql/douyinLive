@@ -21,7 +21,7 @@ def list_transcript_segments(
     segments = (
         db.query(TranscriptSegment)
         .filter(TranscriptSegment.session_id == session_id)
-        .order_by(TranscriptSegment.segment_start.asc().nullslast())
+        .order_by(TranscriptSegment.segment_start.asc())
         .limit(limit)
         .all()
     )

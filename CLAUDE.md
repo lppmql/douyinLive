@@ -12,6 +12,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 6. 不要删除已有功能，除非我明确要求
 7. 前端页面开发要遵守 soybean-admin 官方要求（Elegant Router、pnpm、ESLint、Pinia）
 8. 数据采集保存数据库要遵守 dataease 的官方要求
+9.每次任务完成后用用 Playwright跑一遍测试发现问题并修复
 
 ## 项目简介
 
