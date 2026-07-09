@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.database import engine, Base
+from app.api.v1 import v1_router
 
 
 @asynccontextmanager
@@ -58,3 +59,7 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# 注册 API 路由
+app.include_router(v1_router)
