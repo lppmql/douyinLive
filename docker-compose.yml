@@ -33,15 +33,27 @@ services:
     command: redis-server --appendonly yes
 
   funasr:
-    image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-ws-server-2.0
+    image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.13
     container_name: douyin_live_funasr
     restart: unless-stopped
     ports:
-      - "9090:9090"
+      - "10096:10095"
     volumes:
       - funasr_models:/workspace/models
     environment:
       - GPU_ID=-1
+    entrypoint: ["/usr/bin/bash", "-c"]
+    command: >
+      cd /workspace/FunASR/runtime &&
+      nohup bash run_server_2pass.sh
+        --certfile 0
+        --download-model-dir /workspace/models
+        --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx
+        --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx
+        --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx
+        --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx
+        --itn-dir thuduj12/fst_itn_zh
+        --port 10095 > /workspace/models/funasr.log 2>&1 &
     profiles:
       - funasr
 
