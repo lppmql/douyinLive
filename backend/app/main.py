@@ -9,7 +9,6 @@ from app.core.config import settings
 from app.core.logger import logger
 from app.core.database import engine, Base
 from app.api.v1 import v1_router
-from app.api.v1.auth import router as auth_router
 from app.services.collector.scheduler import scheduler_manager
 from app.api.v1.ws import transcript_ws
 
@@ -73,5 +72,4 @@ def health():
 
 # 注册 API 路由
 app.include_router(v1_router)
-app.include_router(auth_router)  # 开发环境简易认证
 app.add_websocket_route("/ws/transcript/{session_id}", transcript_ws)
