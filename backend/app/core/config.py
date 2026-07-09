@@ -1,0 +1,42 @@
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    # 应用
+    APP_NAME: str = "抖音留资直播分析系统"
+    APP_VERSION: str = "0.1.0"
+    DEBUG: bool = True
+
+    # 数据库
+    DB_HOST: str = "localhost"
+    DB_PORT: int = 3306
+    DB_USER: str = "root"
+    DB_PASSWORD: str = "root123"
+    DB_NAME: str = "douyin_live"
+    DATABASE_URL: str = ""
+
+    # Redis
+    REDIS_URL: str = "redis://localhost:6379"
+
+    # DeepSeek
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_API_URL: str = "https://api.deepseek.com"
+
+    # ASR 并发
+    MAX_REALTIME_ASR_TASKS: int = 1
+    ASR_WORKER_MODE: bool = False
+    SAVE_AUDIO: bool = False
+    SAVE_VIDEO: bool = False
+
+    @property
+    def db_url(self) -> str:
+        if self.DATABASE_URL:
+            return self.DATABASE_URL
+        return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+
+settings = Settings()
