@@ -20,6 +20,10 @@ This file provides guidance to Claude Code when working with code in this reposi
 ## 启动方式
 
 ```bash
+# 一键启动全部（数据库 + 后端 + 前端）
+cd /Users/lpp/douyinLive && ./start.sh
+
+# 或者分开启动：
 # 启动数据库
 cd /Users/lpp/douyinLive && docker compose up -d mysql redis
 
@@ -32,7 +36,7 @@ uvicorn app.main:app --reload --port 8000
 # 启动前端
 cd /Users/lpp/douyinLive/frontend
 pnpm dev
-# → http://localhost:9527
+# → http://localhost:5173
 ```
 
 ## 项目结构
