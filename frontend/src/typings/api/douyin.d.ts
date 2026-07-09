@@ -42,25 +42,53 @@ declare namespace Api {
       count: number;
     }
 
-    /* ---------- 采集 ---------- */
+    /* ---------- 采集（后端返回 snake_case） ---------- */
     interface CollectorStatus {
       connected: boolean;
-      connectTime: string;
-      accountName: string;
+      active_task_count: number;
+      default_account: CollectorAccount | null;
     }
 
     interface CollectorAccount {
       id: number;
-      name: string;
-      douyinId: string;
-      status: 'valid' | 'expired';
-      lastLogin: string;
+      account_name: string | null;
+      douyin_id: string | null;
+      login_status: 'logged_in' | 'expired' | 'never';
+      storage_state_path: string | null;
+      last_login_at: string | null;
+      expires_at: string | null;
+      created_at: string;
     }
 
     interface CollectorLog {
       id: number;
-      time: string;
+      task_id: number | null;
       level: 'info' | 'warn' | 'error';
+      message: string | null;
+      raw_json: unknown;
+      created_at: string;
+    }
+
+    interface CollectorTask {
+      id: number;
+      account_id: number | null;
+      session_id: number | null;
+      task_type: 'login' | 'metrics' | 'comments' | 'leads' | 'profile';
+      status: 'pending' | 'running' | 'completed' | 'failed';
+      started_at: string | null;
+      completed_at: string | null;
+      error_message: string | null;
+      created_at: string;
+    }
+
+    interface LoginStartResponse {
+      task_id: number;
+      message: string;
+    }
+
+    interface LoginStatusResponse {
+      status: 'pending' | 'scanning' | 'success' | 'failed' | 'timeout' | 'not_found';
+      account: CollectorAccount | null;
       message: string;
     }
 

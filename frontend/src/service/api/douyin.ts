@@ -2,9 +2,6 @@ import { request } from '../request';
 
 /**
  * 抖音留资直播数据分析系统 — API 接口
- *
- * @note Phase 2 使用 Mock 数据，API 函数已定义但暂不调用
- *       后续 Phase 对接后端时取消注释实际调用
  */
 
 /* ---------- 直播场次 ---------- */
@@ -32,8 +29,38 @@ export function fetchCollectorAccounts() {
 }
 
 /** 获取采集日志 */
-export function fetchCollectorLogs() {
-  return request<Api.Douyin.CollectorLog[]>({ url: '/collector/logs' });
+export function fetchCollectorLogs(params?: { taskId?: number; level?: string; limit?: number }) {
+  return request<Api.Douyin.CollectorLog[]>({ url: '/collector/logs', params });
+}
+
+/** 获取采集任务列表 */
+export function fetchCollectorTasks(params?: { status?: string; taskType?: string }) {
+  return request<Api.Douyin.CollectorTask[]>({ url: '/collector/tasks', params });
+}
+
+/** 启动扫码登录 */
+export function startCollectorLogin() {
+  return request<Api.Douyin.LoginStartResponse>({ url: '/collector/accounts/login', method: 'POST' });
+}
+
+/** 获取登录二维码 */
+export function fetchLoginQR(taskId: number) {
+  return request<{ qr_code_base64: string }>({ url: `/collector/login-tasks/${taskId}/qr` });
+}
+
+/** 获取登录状态 */
+export function fetchLoginStatus(taskId: number) {
+  return request<Api.Douyin.LoginStatusResponse>({ url: `/collector/login-tasks/${taskId}/status` });
+}
+
+/** 重新扫码登录 */
+export function reCollectorLogin(accountId: number) {
+  return request<Api.Douyin.LoginStartResponse>({ url: `/collector/accounts/${accountId}/re-login`, method: 'POST' });
+}
+
+/** 删除采集账号 */
+export function deleteCollectorAccount(accountId: number) {
+  return request<void>({ url: `/collector/accounts/${accountId}`, method: 'DELETE' });
 }
 
 /* ---------- 话术 ---------- */

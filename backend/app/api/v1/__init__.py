@@ -1,4 +1,4 @@
-"""Phase 1: 所有 CRUD API 路由注册"""
+"""Phase 1: 所有 CRUD API 路由注册 + Phase 3: 采集路由"""
 from fastapi import APIRouter
 
 from app.api.v1.live_rooms import router as live_rooms_router
@@ -9,6 +9,7 @@ from app.api.v1.leads import router as leads_router
 from app.api.v1.transcript_segments import router as transcript_segments_router
 from app.api.v1.analysis_reports import router as analysis_reports_router
 from app.api.v1.knowledge_base import router as knowledge_base_router
+from app.api.v1.collector import router as collector_router
 
 v1_router = APIRouter(prefix="/api/v1")
 v1_router.include_router(live_rooms_router)
@@ -19,5 +20,6 @@ v1_router.include_router(leads_router)
 v1_router.include_router(transcript_segments_router)
 v1_router.include_router(analysis_reports_router)
 v1_router.include_router(knowledge_base_router)
+v1_router.include_router(collector_router)
 
 __all__ = ["v1_router"]

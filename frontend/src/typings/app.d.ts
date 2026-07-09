@@ -585,6 +585,22 @@ declare namespace App {
           levelInfo: string;
           levelWarn: string;
           levelError: string;
+          scanLogin: string;
+          scanQrCode: string;
+          loginSuccess: string;
+          loginFailed: string;
+          loginTimeout: string;
+          reLogin: string;
+          deleteAccount: string;
+          confirmDelete: string;
+          noAccount: string;
+          taskList: string;
+          taskType: string;
+          taskStatus: string;
+          loading: string;
+          activeTasks: string;
+          neverLogin: string;
+          loggedIn: string;
         };
         'live-sessions': {
           title: string;

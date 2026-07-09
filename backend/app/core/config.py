@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     SAVE_AUDIO: bool = False
     SAVE_VIDEO: bool = False
 
+    # Playwright / 采集
+    PLAYWRIGHT_HEADLESS: bool = True
+
     @property
     def db_url(self) -> str:
         if self.DATABASE_URL:

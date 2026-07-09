@@ -1,4 +1,4 @@
-"""Phase 1: 10 张核心业务表"""
+"""Phase 1: 10 张核心业务表 + Phase 3: 3 张采集任务表"""
 from app.models.base import Base, TimestampMixin
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
@@ -10,6 +10,9 @@ from app.models.transcript_segments import TranscriptSegment
 from app.models.transcript_full_texts import TranscriptFullText
 from app.models.analysis_reports import AnalysisReport
 from app.models.knowledge_base import KnowledgeBase
+from app.models.scraper_accounts import ScraperAccount
+from app.models.scraper_tasks import ScraperTask
+from app.models.scraper_logs import ScraperLog
 
 __all__ = [
     "Base",
@@ -24,4 +27,7 @@ __all__ = [
     "TranscriptFullText",
     "AnalysisReport",
     "KnowledgeBase",
+    "ScraperAccount",
+    "ScraperTask",
+    "ScraperLog",
 ]
