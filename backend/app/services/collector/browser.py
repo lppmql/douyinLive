@@ -97,8 +97,12 @@ class BrowserManager:
 
             playwright = await async_playwright().start()
             browser = await playwright.chromium.launch(
-                headless=False,  # 有头模式，显示窗口供扫码
-                args=["--no-sandbox"],
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-blink-features=AutomationControlled",
+                ],
             )
 
             context = await browser.new_context(
