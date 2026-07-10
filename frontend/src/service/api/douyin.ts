@@ -82,6 +82,13 @@ export function fetchTranscriptFullText(sessionId: number) {
   return backendRequest<Api.Douyin.TranscriptFullText>({ url: `${API_PREFIX}/transcripts/${sessionId}/full-text` });
 }
 
+export function queueTranscript(sessionId: number) {
+  return backendRequest<{ task_id: number; status: string; created: boolean }>({
+    url: `${API_PREFIX}/transcripts/${sessionId}/queue`,
+    method: 'POST'
+  });
+}
+
 /* ---------- AI 分析 ---------- */
 
 /** 获取 AI 评分 */

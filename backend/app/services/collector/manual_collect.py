@@ -374,6 +374,9 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
         if "手机登录" in body_text or "邮箱登录" in body_text:
             is_logged_in = False
             logger.warning(f"room_id={room_id} 页面为登录页，Cookie 已过期")
+        await asyncio.sleep(0.5)
+        if response_tasks:
+            await asyncio.gather(*response_tasks, return_exceptions=True)
     except Exception as e:
         logger.warning(f"大屏页加载异常: {e}")
         body_text = ""
@@ -609,6 +612,7 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
     url = f"{COMMENT_URL}?roomId={room_id}&fullscreen=0"
     page = await context.new_page()
     captured_api = []
+    response_tasks = []
 
     async def on_response(resp):
         try:
@@ -619,7 +623,7 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
         except Exception:
             pass
 
-    page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
+    page.on("response", lambda r: response_tasks.append(asyncio.create_task(on_response(r))))
 
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -1512,6 +1516,8 @@ def _merge_room_profile(primary: dict, fallback: dict) -> dict:
 def _needs_history_enrichment(session: LiveSession) -> bool:
     """判断历史场次是否还需要继续补齐详情。"""
     return not (
+        bool(session.anchor_name)
+        and
         (session.peak_online_count or 0) > 0
         and (session.comments_count or 0) > 0
         and bool(session.stream_url)

@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { NTag, NButton, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
 import { useWebSocket } from '@vueuse/core';
-import { fetchTranscriptSegments, fetchTranscriptFullText, fetchLiveSessions } from '@/service/api/douyin';
+import { fetchTranscriptSegments, fetchTranscriptFullText, fetchLiveSessions, queueTranscript } from '@/service/api/douyin';
 
 defineOptions({
   name: 'Transcripts'
@@ -99,6 +99,18 @@ async function copyFullText() {
   }
 }
 
+async function startTranscription() {
+  if (!selectedSessionId.value) return;
+  try {
+    const res = await queueTranscript(selectedSessionId.value);
+    const data = res.data;
+    if (!data) throw new Error('转写任务响应为空');
+    message.success(`转写任务已${data.created ? '创建' : '在队列中'}（${data.task_id}）`);
+  } catch {
+    message.error('该场次暂无可用直播流，请先重新采集');
+  }
+}
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -168,6 +180,9 @@ watch(selectedSessionId, (newId) => {
               <SvgIcon icon="mdi:content-copy" />
             </template>
             {{ $t('page.transcripts.copyFullText') }}
+          </NButton>
+          <NButton size="small" type="primary" @click="startTranscription" :disabled="!selectedSessionId">
+            开始转写
           </NButton>
         </NSpace>
       </NSpace>
