@@ -28,6 +28,7 @@ from app.services.collector.browser import browser_manager
 LEADS_BASE = "https://leads.cluerich.com"
 LIVE_SCREEN_URL = f"{LEADS_BASE}/pc/analysis/live-screen"
 COMMENT_URL = f"{LEADS_BASE}/pc/analysis/live-comment"
+HOME_URL = f"{LEADS_BASE}/pc/growth/home"
 
 
 async def collect_all(db: Session) -> dict:
@@ -106,14 +107,26 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
     db.commit()
 
     try:
+        home_info = await _scrape_home_live_card(context)
+
         # 1. 先访问大屏页，捕获所有 API 数据和页面信息
         page_data = await _scrape_live_screen(context, room_id)
 
         # 2. 从页面数据中提取场次信息（主播名、场次标题、状态等）
         session_info = page_data.get("session_info", {})
-        anchor_name = session_info.get("anchor_name") or room.account_name or room_id
-        session_title = session_info.get("session_title") or f"room_{room_id}"
-        is_live = session_info.get("is_live", False)
+        anchor_name = (
+            session_info.get("anchor_name")
+            or home_info.get("anchor_name")
+            or room.anchor_name
+            or room.account_name
+            or room_id
+        )
+        session_title = (
+            home_info.get("session_title")
+            or session_info.get("session_title")
+            or f"room_{room_id}"
+        )
+        is_live = bool(home_info.get("is_live") or session_info.get("is_live"))
 
         # 3. 创建或更新场次记录
         now = datetime.utcnow()
@@ -131,6 +144,12 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
 
         # 5. 用汇总指标更新场次记录
         sm = page_data.get("summary_metrics", {})
+        if home_info.get("total_viewers") is not None:
+            sm["total_viewers"] = home_info["total_viewers"]
+        if home_info.get("realtime_online_count") is not None:
+            sm["realtime_online_count"] = home_info["realtime_online_count"]
+        if home_info.get("leads_count") is not None:
+            sm["leads_count"] = home_info["leads_count"]
         if sm.get("total_viewers") is not None:
             session.total_viewers = sm["total_viewers"]
         if sm.get("peak_online_count") is not None:
@@ -157,6 +176,8 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
         # 6. 采集评论
         comments_data = await _scrape_comments(context, room_id)
         comments_count = _save_comments(db, session.id, comments_data)
+        if comments_count:
+            session.comments_count = max(session.comments_count or 0, comments_count)
 
         # 7. 采集流地址
         stream_url = await _scrape_stream_url(context, room_id)
@@ -233,6 +254,18 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
 
         # 从页面 DOM 提取可见文本
         body_text = await page.evaluate("document.body?.innerText || ''")
+        top_info = await page.evaluate(
+            """
+            () => {
+              const anchorNode = document.querySelector('.leads-rimless-input-inner');
+              const timeWrap = document.getElementById('dp_live_time');
+              return {
+                anchor_name: anchorNode ? anchorNode.innerText.trim() : '',
+                time_text: timeWrap ? timeWrap.innerText.trim() : ''
+              };
+            }
+            """
+        )
 
         # ===== 检查是否在登录页 =====
         is_logged_in = True
@@ -279,12 +312,18 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
             session_info["is_live"] = (live_status == 1 or live_status is True)
 
     # DOM 降级：从页面文本提取主播名
+    if top_info.get("anchor_name"):
+        session_info["anchor_name"] = top_info["anchor_name"]
+
     if not session_info["anchor_name"] and body_text:
         for line in body_text.split("\n"):
             line = line.strip()
             if line and len(line) <= 20 and "主播" in line:
                 session_info["anchor_name"] = line.replace("主播", "").strip()
                 break
+
+    if top_info.get("time_text"):
+        session_info["session_title"] = top_info["time_text"]
 
     # ===== 解析指标 =====
     metrics = []
@@ -441,10 +480,55 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
                 comments.append({
                     "user_nickname": c.get("user_nickname") or c.get("nickname") or "",
                     "comment_content": c.get("comment_content") or c.get("content") or "",
-                    "comment_time": c.get("comment_time") or datetime.utcnow(),
+                    "comment_time": c.get("comment_time"),
                 })
 
     return comments
+
+
+async def _scrape_home_live_card(context: BrowserContext) -> dict:
+    """从主页直播卡片提取主播、标题、实时人数等稳定信息。"""
+    page = await context.new_page()
+    try:
+        await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(5)
+        body_text = await page.evaluate("document.body?.innerText || ''")
+    except Exception:
+        return {}
+    finally:
+        await page.close()
+
+    lines = [line.strip() for line in body_text.split("\n") if line.strip()]
+    info = {
+        "anchor_name": None,
+        "session_title": None,
+        "is_live": False,
+        "realtime_online_count": None,
+        "total_viewers": None,
+        "leads_count": None,
+    }
+
+    if "您当前正在直播，更多详情" in lines:
+        info["is_live"] = True
+    if "直播中" in lines:
+        info["is_live"] = True
+        idx = lines.index("直播中")
+        if idx + 1 < len(lines):
+            info["session_title"] = lines[idx + 1]
+        if idx + 2 < len(lines):
+            info["anchor_name"] = lines[idx + 2]
+
+    label_map = {
+        "当前观看人数": "realtime_online_count",
+        "累计观看人数": "total_viewers",
+        "留资线索数": "leads_count",
+    }
+    for label, field in label_map.items():
+        value = _extract_next_number(lines, label)
+        if value is not None:
+            info[field] = value
+
+    return info
 
 
 async def _scrape_stream_url(context: BrowserContext, room_id: str) -> Optional[str]:
@@ -523,14 +607,29 @@ def _save_metrics(db: Session, session_id: int, metrics: list) -> int:
 
 def _save_comments(db: Session, session_id: int, comments: list) -> int:
     """保存评论数据"""
+    existing_pairs = {
+        _comment_identity(row.comment_content or "", row.comment_time)
+        for row in db.query(Comment).filter(Comment.session_id == session_id).all()
+    }
+    seen_pairs = set()
     count = 0
     for c in comments:
-        if c.get("comment_content", "").strip():
+        content = c.get("comment_content", "").strip()
+        comment_time = c.get("comment_time")
+        if not content:
+            continue
+
+        pair = _comment_identity(content, comment_time)
+        if pair in existing_pairs or pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+
+        if content:
             comment = Comment(
                 session_id=session_id,
                 user_nickname=c.get("user_nickname", "未知"),
-                comment_content=c["comment_content"],
-                comment_time=c.get("comment_time", datetime.utcnow()),
+                comment_content=content,
+                comment_time=comment_time or datetime.utcnow(),
             )
             db.add(comment)
             count += 1
@@ -564,3 +663,23 @@ def _safe_int(val) -> Optional[int]:
         return int(float(str(val).replace(",", "")))
     except (ValueError, TypeError):
         return None
+
+
+def _extract_next_number(lines: list[str], label: str) -> Optional[int]:
+    """从标签后的下一项中提取整数。"""
+    try:
+        idx = lines.index(label)
+    except ValueError:
+        return None
+
+    for item in lines[idx + 1: idx + 6]:
+        cleaned = item.replace(",", "").replace("%", "").strip()
+        if cleaned.isdigit():
+            return int(cleaned)
+    return None
+
+
+def _comment_identity(content: str, comment_time: Optional[datetime]) -> tuple[str, Optional[datetime]]:
+    """没有真实评论时间时，退化为仅按内容去重，避免重复采集整批旧评论。"""
+    normalized_time = comment_time.replace(microsecond=0) if isinstance(comment_time, datetime) else None
+    return (content, normalized_time)
