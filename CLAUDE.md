@@ -37,7 +37,7 @@ uvicorn app.main:app --reload --port 8000
 # 启动前端
 cd /Users/lpp/douyinLive/frontend
 pnpm dev
-# → http://localhost:5173
+# → http://localhost:9527（Vite 配置端口 9527，--mode test 加载 .env.test）
 ```
 
 ## 项目结构
@@ -60,19 +60,6 @@ frontend/                # Soybean Admin (Vue3+NaiveUI)
 docs/                    # 文档
 ```
 
-## 8 个开发阶段
+## 开发记录
 
-| Phase | 内容 | 状态 |
-|-------|------|------|
-| 0 | 项目初始化（骨架 + Docker + 前端模板） | ✅ 完成 |
-| 1 | 核心业务数据库 + CRUD API | ✅ 完成 |
-| 2 | 前端 6 个页面（Mock 版） | ✅ 完成 |
-| 3 | Playwright 授权登录 + 采集任务框架 | ✅ 完成 |
-| 4 | 直播数据采集 | ✅ 完成 |
-| 5 | m3u8 + FunASR 话术转写 | ✅ 完成 |
-| 6 | DataEase 大屏表 + 同步 + 嵌入 | ⏳ |
-| 7 | DeepSeek AI 分析 + 知识库问答 | ⏳ |
-
-## 完整开发计划
-
-详见 `/Users/lpp/.claude/plans/cheeky-zooming-flute.md`
+详见 `docs/development-record.md`
