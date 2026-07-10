@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, h, onMounted } from 'vue';
-import { NTag, NButton, useMessage } from 'naive-ui';
+import { NTag, NButton, NAvatar, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
 import { fetchLiveSessionData, fetchLiveSessions } from '@/service/api/douyin';
+import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
 
 defineOptions({
   name: 'LiveSessions'
@@ -112,8 +113,21 @@ const columns = [
   {
     title: () => $t('page.live-sessions.anchorName'),
     key: 'anchor_name',
-    width: 100,
-    ellipsis: { tooltip: true }
+    width: 220,
+    render(row: Api.Douyin.LiveSession) {
+      return h('div', { class: 'flex items-center gap-8px min-w-0' }, [
+        h(NAvatar, {
+          round: true,
+          size: 34,
+          src: row.anchor_avatar_url || undefined,
+          fallbackSrc: row.anchor_avatar_url || undefined
+        }),
+        h('div', { class: 'min-w-0' }, [
+          h('div', { class: 'truncate font-600' }, row.anchor_name || '-'),
+          h('div', { class: 'truncate text-12px text-gray-400' }, row.douyin_id || row.anchor_nickname || '-')
+        ])
+      ]);
+    }
   },
   {
     title: () => $t('page.live-sessions.sessionTitle'),
@@ -219,16 +233,22 @@ onMounted(() => {
         <span class="ml-12px text-gray-400">{{ $t('page.live-sessions.loading') }}</span>
       </div>
 
-      <NDataTable
-        v-else
-        :columns="columns"
-        :data="sessions"
-        :bordered="false"
-        :single-line="false"
-        size="small"
-        striped
-        :empty-text="$t('page.live-sessions.noData')"
-      />
+      <div v-else>
+        <TableHeaderOperation
+          :loading="loading"
+          @refresh="loadSessions"
+        />
+        <NDataTable
+          :columns="columns"
+          :data="sessions"
+          :bordered="false"
+          :single-line="false"
+          size="small"
+          striped
+          :empty-text="$t('page.live-sessions.noData')"
+          class="mt-12px"
+        />
+      </div>
     </NCard>
 
     <!-- 详情抽屉 -->
@@ -243,7 +263,19 @@ onMounted(() => {
             <NCard :bordered="true" size="small" :title="$t('page.live-sessions.basicInfo')">
               <NDescriptions :column="2" size="small" bordered>
                 <NDescriptionsItem :label="$t('page.live-sessions.anchorName')">
-                  {{ currentSession.anchor_name }}
+                  <div class="flex items-center gap-12px">
+                    <NAvatar
+                      round
+                      :size="48"
+                      :src="currentSession.anchor_avatar_url || undefined"
+                    />
+                    <div class="min-w-0">
+                      <div class="font-600">{{ currentSession.anchor_name || '-' }}</div>
+                      <div class="text-12px text-gray-500">昵称：{{ currentSession.anchor_nickname || '-' }}</div>
+                      <div class="text-12px text-gray-500">抖音号：{{ currentSession.douyin_id || '-' }}</div>
+                      <div class="text-12px text-gray-500">抖音 UID：{{ currentSession.douyin_uid || '-' }}</div>
+                    </div>
+                  </div>
                 </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.sessionTitle')">
                   {{ currentSession.session_title || '-' }}

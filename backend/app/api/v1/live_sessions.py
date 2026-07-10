@@ -19,10 +19,15 @@ from app.schemas import (
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
 
 
-def _attach_anchor_name(session: LiveSession) -> dict:
-    """将 LiveRoom.anchor_name 注入到场次返回数据中"""
+def _attach_room_profile(session: LiveSession) -> dict:
+    """将 LiveRoom 上的主播资料注入到场次返回数据中。"""
     data = {c.name: getattr(session, c.name) for c in session.__table__.columns}
-    data["anchor_name"] = session.room.anchor_name if session.room else None
+    room = session.room
+    data["anchor_name"] = room.anchor_name if room else None
+    data["anchor_nickname"] = room.anchor_nickname if room else None
+    data["anchor_avatar_url"] = room.anchor_avatar_url if room else None
+    data["douyin_id"] = room.douyin_id if room else None
+    data["douyin_uid"] = room.douyin_uid if room else None
     return data
 
 
@@ -38,7 +43,7 @@ def list_sessions(
     if room_id:
         q = q.filter(LiveSession.room_id == room_id)
     sessions = q.order_by(LiveSession.live_start_time.desc()).offset(skip).limit(limit).all()
-    return [LiveSessionResponse(**_attach_anchor_name(s)) for s in sessions]
+    return [LiveSessionResponse(**_attach_room_profile(s)) for s in sessions]
 
 
 @router.get("/{session_id}/details", response_model=LiveSessionDetailResponse)
@@ -74,7 +79,7 @@ def get_session_details(
     latest_stream = next((item.m3u8_url for item in stream_sources if item.status == "active"), None)
 
     return LiveSessionDetailResponse(
-        session=LiveSessionResponse(**_attach_anchor_name(session)),
+        session=LiveSessionResponse(**_attach_room_profile(session)),
         metrics=[LiveMetricDetailResponse.model_validate(item, from_attributes=True) for item in metrics],
         comments=comments,
         stream_url=latest_stream or session.stream_url,
@@ -88,7 +93,7 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
     s = db.query(LiveSession).get(session_id)
     if not s:
         raise HTTPException(404, "直播场次不存在")
-    return LiveSessionResponse(**_attach_anchor_name(s))
+    return LiveSessionResponse(**_attach_room_profile(s))
 
 
 @router.post("/", response_model=LiveSessionResponse)

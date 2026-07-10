@@ -8,7 +8,10 @@ from pydantic import BaseModel
 class LiveRoomBase(BaseModel):
     account_name: str
     anchor_name: str
+    anchor_nickname: Optional[str] = None
+    anchor_avatar_url: Optional[str] = None
     douyin_id: Optional[str] = None
+    douyin_uid: Optional[str] = None
     room_id_str: Optional[str] = None
     team_name: Optional[str] = None
     platform: str = "douyin"
@@ -22,7 +25,10 @@ class LiveRoomCreate(LiveRoomBase):
 class LiveRoomUpdate(BaseModel):
     account_name: Optional[str] = None
     anchor_name: Optional[str] = None
+    anchor_nickname: Optional[str] = None
+    anchor_avatar_url: Optional[str] = None
     douyin_id: Optional[str] = None
+    douyin_uid: Optional[str] = None
     team_name: Optional[str] = None
     status: Optional[bool] = None
 
@@ -64,6 +70,10 @@ class LiveSessionUpdate(BaseModel):
 class LiveSessionResponse(LiveSessionBase):
     id: int
     anchor_name: Optional[str] = None  # 从 LiveRoom 关联获取
+    anchor_nickname: Optional[str] = None
+    anchor_avatar_url: Optional[str] = None
+    douyin_id: Optional[str] = None
+    douyin_uid: Optional[str] = None
     live_duration_seconds: int = 0
     total_viewers: int = 0
     avg_watch_seconds: float = 0

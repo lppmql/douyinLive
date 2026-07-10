@@ -105,6 +105,8 @@ class LoginStatusResponse(BaseModel):
 class CollectRoomResult(BaseModel):
     room_id: str = ""
     anchor_name: str = ""
+    anchor_nickname: str = ""
+    douyin_id: str = ""
     is_live: bool = False
     metrics_count: int = 0
     comments_count: int = 0

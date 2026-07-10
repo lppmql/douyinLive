@@ -10,7 +10,10 @@ declare namespace Api {
       id: number;
       accountName: string;
       anchorName: string;
+      anchorNickname: string | null;
+      anchorAvatarUrl: string | null;
       douyinId: string;
+      douyinUid: string | null;
       teamName: string;
       status: 'active' | 'inactive';
     }
@@ -20,6 +23,10 @@ declare namespace Api {
       id: number;
       room_id: number;
       anchor_name: string;
+      anchor_nickname: string | null;
+      anchor_avatar_url: string | null;
+      douyin_id: string | null;
+      douyin_uid: string | null;
       session_title: string | null;
       dashboard_url: string | null;
       stream_url: string | null;
@@ -193,6 +200,8 @@ declare namespace Api {
     interface CollectRoomResult {
       room_id: string;
       anchor_name: string;
+      anchor_nickname: string;
+      douyin_id: string;
       is_live: boolean;
       metrics_count: number;
       comments_count: number;

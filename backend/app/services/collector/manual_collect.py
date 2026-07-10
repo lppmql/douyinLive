@@ -88,6 +88,11 @@ async def collect_all(db: Session) -> dict:
         }
 
     try:
+        results = []
+        for room in rooms:
+            result = await _collect_room_data(db, context, room)
+            results.append(result)
+
         history_sync = _sync_history_sessions(db, account, rooms[0])
         history_detail_progress = await _enrich_history_sessions(
             db,
@@ -96,10 +101,6 @@ async def collect_all(db: Session) -> dict:
             rooms[0],
             limit=HISTORY_DETAIL_BATCH_SIZE,
         )
-        results = []
-        for room in rooms:
-            result = await _collect_room_data(db, context, room)
-            results.append(result)
 
         # 采集完成后刷新持久化 Cookie（延长有效期）
         await browser_manager.refresh_logged_in_state()
@@ -135,11 +136,14 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
 
         # 1. 先访问大屏页，捕获所有 API 数据和页面信息
         page_data = await _scrape_live_screen(context, room_id)
+        room_profile = _merge_room_profile(page_data.get("room_profile", {}), home_info)
 
         # 2. 从页面数据中提取场次信息（主播名、场次标题、状态等）
         session_info = page_data.get("session_info", {})
         anchor_name = (
             session_info.get("anchor_name")
+            or room_profile.get("anchor_name")
+            or room_profile.get("anchor_nickname")
             or home_info.get("anchor_name")
             or room.anchor_name
             or room.account_name
@@ -155,6 +159,7 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
         # 3. 创建或更新场次记录
         now = datetime.utcnow()
         session = _get_or_create_session(db, room, session_title, is_live, now)
+        _apply_room_profile(room, room_profile, anchor_name)
         if is_live and session.live_status != "live":
             session.live_status = "live"
             if not session.live_start_time:
@@ -225,6 +230,8 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
         return {
             "room_id": room_id,
             "anchor_name": anchor_name,
+            "anchor_nickname": room.anchor_nickname or "",
+            "douyin_id": room.douyin_id or "",
             "is_live": is_live,
             "metrics_count": metrics_count,
             "comments_count": comments_count,
@@ -251,6 +258,7 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
 
     返回: {
         "session_info": {"anchor_name": str, "session_title": str, "is_live": bool},
+        "room_profile": {"anchor_name": str, "anchor_nickname": str, "anchor_avatar_url": str, "douyin_id": str, "douyin_uid": str},
         "metrics": [LiveMetric 数据...],
         "summary_metrics": {"total_viewers": int, "peak_online_count": int, ...},
         "profiles": [LiveAudienceProfile 数据...],
@@ -306,7 +314,14 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
     if not is_logged_in:
         return {"session_info": {}, "metrics": [], "profiles": [], "is_logged_in": False}
 
-    # ===== 解析场次信息 =====
+    # ===== 解析主播资料 / 场次信息 =====
+    room_profile = {
+        "anchor_name": None,
+        "anchor_nickname": None,
+        "anchor_avatar_url": None,
+        "douyin_id": None,
+        "douyin_uid": None,
+    }
     session_info = {"anchor_name": None, "session_title": None, "is_live": False}
 
     # 尝试从 API 响应中提取场次信息
@@ -325,6 +340,25 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
         anchor = inner.get("anchor_name") or inner.get("nickname") or inner.get("author_name")
         if anchor:
             session_info["anchor_name"] = anchor
+
+        room_info = inner.get("roomInfo") or {}
+        commerce_info = inner.get("commerceInfo") or {}
+        if isinstance(room_info, dict):
+            if room_info.get("ownerIesUid"):
+                room_profile["douyin_uid"] = str(room_info.get("ownerIesUid"))
+            if room_info.get("title"):
+                session_info["session_title"] = room_info.get("title")
+        if isinstance(commerce_info, dict):
+            if commerce_info.get("iesName"):
+                room_profile["anchor_nickname"] = commerce_info.get("iesName")
+                room_profile["anchor_name"] = commerce_info.get("iesName")
+                session_info["anchor_name"] = session_info["anchor_name"] or commerce_info.get("iesName")
+            if commerce_info.get("avatarUrl"):
+                room_profile["anchor_avatar_url"] = commerce_info.get("avatarUrl")
+            if commerce_info.get("iesUniqId"):
+                room_profile["douyin_id"] = commerce_info.get("iesUniqId")
+            if commerce_info.get("iesUid"):
+                room_profile["douyin_uid"] = str(commerce_info.get("iesUid"))
 
         title = inner.get("title") or inner.get("room_title") or inner.get("session_title")
         if title:
@@ -454,6 +488,7 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
 
     return {
         "session_info": session_info,
+        "room_profile": room_profile,
         "metrics": metrics,
         "summary_metrics": mapped_summary,
         "profiles": profiles,
@@ -513,6 +548,16 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
 async def _scrape_home_live_card(context: BrowserContext) -> dict:
     """从主页直播卡片提取主播、标题、实时人数等稳定信息。"""
     page = await context.new_page()
+    captured_api = []
+
+    async def on_response(resp):
+        try:
+            if "json" in resp.headers.get("content-type", ""):
+                captured_api.append(await resp.json())
+        except Exception:
+            pass
+
+    page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
     try:
         await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(5)
@@ -525,6 +570,10 @@ async def _scrape_home_live_card(context: BrowserContext) -> dict:
     lines = [line.strip() for line in body_text.split("\n") if line.strip()]
     info = {
         "anchor_name": None,
+        "anchor_nickname": None,
+        "anchor_avatar_url": None,
+        "douyin_id": None,
+        "douyin_uid": None,
         "session_title": None,
         "is_live": False,
         "realtime_online_count": None,
@@ -551,6 +600,21 @@ async def _scrape_home_live_card(context: BrowserContext) -> dict:
         value = _extract_next_number(lines, label)
         if value is not None:
             info[field] = value
+
+    for payload in captured_api:
+        if not isinstance(payload, dict):
+            continue
+        inner = payload.get("data", {}) or {}
+        if not isinstance(inner, dict):
+            continue
+        if inner.get("nick_name"):
+            info["anchor_nickname"] = inner.get("nick_name")
+        if inner.get("avatar_url"):
+            info["anchor_avatar_url"] = inner.get("avatar_url")
+        if inner.get("douyin_unique_id"):
+            info["douyin_id"] = inner.get("douyin_unique_id")
+        if inner.get("douyin_uid"):
+            info["douyin_uid"] = str(inner.get("douyin_uid"))
 
     return info
 
@@ -1138,6 +1202,29 @@ def _apply_overview_to_session(session: LiveSession, overview_row: dict) -> bool
 
     session.live_status = "ended" if session.live_end_time else session.live_status
     return changed
+
+
+def _apply_room_profile(room: LiveRoom, room_profile: dict, anchor_name: str) -> None:
+    """把本次真实采集到的主播资料写回直播间主表。"""
+    room.anchor_name = anchor_name or room.anchor_name
+    if room_profile.get("anchor_nickname"):
+        room.anchor_nickname = room_profile["anchor_nickname"]
+    if room_profile.get("anchor_avatar_url"):
+        room.anchor_avatar_url = room_profile["anchor_avatar_url"][:500]
+    if room_profile.get("douyin_id"):
+        room.douyin_id = room_profile["douyin_id"]
+    if room_profile.get("douyin_uid"):
+        room.douyin_uid = room_profile["douyin_uid"]
+
+
+def _merge_room_profile(primary: dict, fallback: dict) -> dict:
+    """优先用房间级主播资料，缺失时回退到账号首页资料。"""
+    merged = dict(primary or {})
+    fallback = fallback or {}
+    for key in ("anchor_name", "anchor_nickname", "anchor_avatar_url", "douyin_id", "douyin_uid"):
+        if not merged.get(key) and fallback.get(key):
+            merged[key] = fallback.get(key)
+    return merged
 
 
 def _needs_history_enrichment(session: LiveSession) -> bool:
