@@ -1,7 +1,7 @@
 """Phase 3: 采集状态 & 扫码登录 API"""
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -17,8 +17,10 @@ from app.schemas.scraper import (
     CollectorStatusResponse,
     LoginStartResponse,
     LoginStatusResponse,
+    CollectAllResponse,
 )
 from app.services.collector.browser import browser_manager
+from app.services.collector.manual_collect import collect_all
 
 router = APIRouter(prefix="/collector", tags=["数据采集"])
 
@@ -122,33 +124,19 @@ async def get_login_status(task_id: int, db: Session = Depends(get_db)):
             raise HTTPException(404, "登录任务不存在")
         return LoginStatusResponse(status=task.status, message="任务已结束")
 
-    # 登录成功 → 创建账号记录
-    if state["status"] == "success" and state.get("storage_path"):
-        account = ScraperAccount(
-            account_name=f"采集账号_{task_id}",
-            login_status="logged_in",
-            storage_state_path=state["storage_path"],
-            user_agent=state.get("user_agent"),
-            viewport_width=state.get("viewport_width"),
-            viewport_height=state.get("viewport_height"),
-            last_login_at=datetime.utcnow(),
-        )
-        db.add(account)
-        db.commit()
-        db.refresh(account)
+    # 登录成功 → 查找已保存的账号记录（_qr_login_worker 已直接写入）
+    if state["status"] == "success":
+        account_name = f"采集账号_{task_id}"
+        account = db.query(ScraperAccount).filter(
+            ScraperAccount.account_name == account_name
+        ).order_by(ScraperAccount.id.desc()).first()
 
-        # 更新任务
-        db_task = db.query(ScraperTask).get(task_id)
-        if db_task:
-            db_task.status = "completed"
-            db_task.completed_at = datetime.utcnow()
-            db.commit()
-
-        return LoginStatusResponse(
-            status="success",
-            account=ScraperAccountResponse.model_validate(account),
-            message="登录成功",
-        )
+        if account:
+            return LoginStatusResponse(
+                status="success",
+                account=ScraperAccountResponse.model_validate(account),
+                message="登录成功",
+            )
 
     return LoginStatusResponse(
         status=state["status"],
@@ -204,3 +192,11 @@ def list_tasks(
     if task_type:
         q = q.filter(ScraperTask.task_type == task_type)
     return q.order_by(ScraperTask.id.desc()).limit(50).all()
+
+
+# ===== 一键采集 =====
+@router.post("/collect-all", response_model=CollectAllResponse)
+async def manual_collect_all(db: Session = Depends(get_db)):
+    """一键采集所有主播房间的大屏数据"""
+    result = await collect_all(db)
+    return result
