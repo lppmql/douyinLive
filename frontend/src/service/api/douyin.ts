@@ -10,7 +10,7 @@ const API_PREFIX = '/api/v1';
 
 /** 获取直播场次列表 */
 export function fetchLiveSessions() {
-  return backendRequest<Api.Douyin.LiveSession[]>({ url: `${API_PREFIX}/live-sessions/` });
+  return backendRequest<Api.Douyin.LiveSession[]>({ url: `${API_PREFIX}/live-sessions/`, params: { limit: 1000 } });
 }
 
 /** 获取直播场次详情 */

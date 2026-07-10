@@ -7,9 +7,12 @@
 - 不硬编码/假设任何主播信息
 """
 import asyncio
+import json
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
-
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 from sqlalchemy.orm import Session
 from playwright.async_api import BrowserContext
 
@@ -29,6 +32,7 @@ LEADS_BASE = "https://leads.cluerich.com"
 LIVE_SCREEN_URL = f"{LEADS_BASE}/pc/analysis/live-screen"
 COMMENT_URL = f"{LEADS_BASE}/pc/analysis/live-comment"
 HOME_URL = f"{LEADS_BASE}/pc/growth/home"
+HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
 
 
 async def collect_all(db: Session) -> dict:
@@ -81,6 +85,7 @@ async def collect_all(db: Session) -> dict:
         }
 
     try:
+        history_sync = _sync_history_sessions(db, account, rooms[0])
         results = []
         for room in rooms:
             result = await _collect_room_data(db, context, room)
@@ -90,7 +95,12 @@ async def collect_all(db: Session) -> dict:
         await browser_manager.refresh_logged_in_state()
 
         collected = sum(1 for r in results if r.get("error") is None)
-        return {"total_rooms": len(rooms), "collected_rooms": collected, "results": results}
+        return {
+            "total_rooms": len(rooms),
+            "collected_rooms": collected,
+            "history_synced_count": history_sync,
+            "results": results,
+        }
     finally:
         # 注意：不关闭 context！它被 browser_manager 持久化了
         pass
@@ -531,6 +541,99 @@ async def _scrape_home_live_card(context: BrowserContext) -> dict:
     return info
 
 
+def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom) -> int:
+    """同步当前账号下的历史直播场次到 live_sessions。"""
+    storage_path = account.storage_state_path or ""
+    cookie_jar = _load_storage_cookies(storage_path)
+    if not cookie_jar:
+        logger.warning("历史场次同步跳过：未找到可用 Cookie")
+        return 0
+
+    existing_sessions = {
+        row.dashboard_url: row
+        for row in db.query(LiveSession).filter(LiveSession.room_id == room.id).all()
+        if row.dashboard_url
+    }
+    page_no = 1
+    limit = 100
+    total = None
+    synced = 0
+
+    while total is None or (page_no - 1) * limit < total:
+        query = urlencode({"total": 0, "limit": limit, "page": page_no})
+        req = Request(
+            f"{HISTORY_API_URL}?{query}",
+            headers={
+                "Cookie": "; ".join(f"{k}={v}" for k, v in cookie_jar.items()),
+                "User-Agent": account.user_agent or "Mozilla/5.0",
+                "Accept": "application/json,text/plain,*/*",
+            },
+        )
+        with urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        data = (payload or {}).get("data", {}) or {}
+        history_rows = data.get("live_history") or []
+        total = data.get("total_count") or 0
+
+        if not history_rows:
+            break
+
+        for item in history_rows:
+            history_room_id = str(item.get("room_id") or "").strip()
+            if not history_room_id:
+                continue
+
+            dashboard_url = f"{LIVE_SCREEN_URL}?room_id={history_room_id}&fullscreen=0"
+            session = existing_sessions.get(dashboard_url)
+            if session is None:
+                session = LiveSession(room_id=room.id, dashboard_url=dashboard_url)
+                db.add(session)
+                existing_sessions[dashboard_url] = session
+                synced += 1
+
+            start_time = _parse_dt(item.get("start_time"))
+            end_time = _parse_dt(item.get("end_time"))
+            session.session_title = (
+                session.session_title
+                or (f"历史直播 {item.get('start_time')}" if item.get("start_time") else f"room_{history_room_id}")
+            )
+            session.stream_url = item.get("room_videorecord") or session.stream_url or None
+            session.live_start_time = start_time or session.live_start_time
+            session.live_end_time = end_time or session.live_end_time
+            session.live_duration_seconds = _safe_int(item.get("live_time")) or session.live_duration_seconds or 0
+            session.live_status = "ended" if end_time else (session.live_status or "finished")
+            session.total_viewers = _safe_int(item.get("total_audience")) or session.total_viewers or 0
+            avg_live_duration = _safe_int(item.get("avg_live_duration"))
+            if avg_live_duration is not None:
+                session.avg_watch_seconds = float(avg_live_duration)
+            session.leads_count = _safe_int(item.get("live_leads_info_cnt")) or session.leads_count or 0
+            session.private_message_count = _safe_int(item.get("consultation_count")) or session.private_message_count or 0
+
+        page_no += 1
+
+    db.commit()
+    return synced
+
+
+async def _fetch_json(page, url: str) -> dict:
+    """在已登录浏览器上下文里执行 fetch，避免单独维护 Cookie。"""
+    try:
+        result = await page.evaluate(
+            """
+            async (targetUrl) => {
+              const resp = await fetch(targetUrl, { credentials: 'include' });
+              return await resp.json();
+            }
+            """,
+            url,
+        )
+        if isinstance(result, dict):
+            return result
+    except Exception as exc:
+        logger.warning(f"fetch json 失败: {url}, error={exc}")
+    return {}
+
+
 async def _scrape_stream_url(context: BrowserContext, room_id: str) -> Optional[str]:
     """采集 m3u8 流地址"""
     url = f"{LIVE_SCREEN_URL}?room_id={room_id}&fullscreen=0"
@@ -591,6 +694,53 @@ def _get_or_create_session(
         db.refresh(session)
 
     return session
+
+
+def _upsert_history_session(
+    db: Session,
+    room: LiveRoom,
+    item: dict,
+) -> bool:
+    """把历史直播列表中的一条记录同步到 LiveSession。"""
+    history_room_id = str(item.get("room_id") or "").strip()
+    if not history_room_id:
+        return False
+
+    dashboard_url = f"{LIVE_SCREEN_URL}?room_id={history_room_id}&fullscreen=0"
+    session = (
+        db.query(LiveSession)
+        .filter(
+            LiveSession.room_id == room.id,
+            LiveSession.dashboard_url == dashboard_url,
+        )
+        .first()
+    )
+
+    created = session is None
+    if session is None:
+        session = LiveSession(room_id=room.id, dashboard_url=dashboard_url)
+        db.add(session)
+
+    start_time = _parse_dt(item.get("start_time"))
+    end_time = _parse_dt(item.get("end_time"))
+    session.session_title = (
+        session.session_title
+        or (f"历史直播 {item.get('start_time')}" if item.get("start_time") else f"room_{history_room_id}")
+    )
+    session.stream_url = item.get("room_videorecord") or session.stream_url or None
+    session.live_start_time = start_time or session.live_start_time
+    session.live_end_time = end_time or session.live_end_time
+    session.live_duration_seconds = _safe_int(item.get("live_time")) or session.live_duration_seconds or 0
+    session.live_status = "ended" if end_time else (session.live_status or "finished")
+    session.total_viewers = _safe_int(item.get("total_audience")) or session.total_viewers or 0
+    avg_live_duration = _safe_int(item.get("avg_live_duration"))
+    if avg_live_duration is not None:
+        session.avg_watch_seconds = float(avg_live_duration)
+    session.leads_count = _safe_int(item.get("live_leads_info_cnt")) or session.leads_count or 0
+    session.private_message_count = _safe_int(item.get("consultation_count")) or session.private_message_count or 0
+
+    db.commit()
+    return created
 
 
 def _save_metrics(db: Session, session_id: int, metrics: list) -> int:
@@ -677,6 +827,38 @@ def _extract_next_number(lines: list[str], label: str) -> Optional[int]:
         if cleaned.isdigit():
             return int(cleaned)
     return None
+
+
+def _parse_dt(val: Optional[str]) -> Optional[datetime]:
+    if not val:
+        return None
+    try:
+        return datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def _load_storage_cookies(storage_state_path: str) -> dict[str, str]:
+    """从 Playwright storage_state 文件中提取 Cookie。"""
+    if not storage_state_path:
+        return {}
+    path = Path(storage_state_path)
+    if not path.exists():
+        return {}
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.warning(f"读取 storage_state 失败: {storage_state_path}, error={exc}")
+        return {}
+
+    cookies = {}
+    for item in payload.get("cookies", []) or []:
+        name = item.get("name")
+        value = item.get("value")
+        if name and value:
+            cookies[name] = value
+    return cookies
 
 
 def _comment_identity(content: str, comment_time: Optional[datetime]) -> tuple[str, Optional[datetime]]:
