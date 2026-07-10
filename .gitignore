@@ -31,3 +31,6 @@ frontend/dist/
 
 # Playwright browsers
 ms-playwright/
+
+# DataEase 外部配置
+dataease/

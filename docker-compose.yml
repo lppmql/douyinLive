@@ -16,11 +16,12 @@ services:
       MYSQL_CHARACTER_SET_SERVER: utf8mb4
       MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
     volumes:
-      - mysql_data:/var/lib/mysql
+      - ./data/mysql:/var/lib/mysql
     command: >
       --default-authentication-plugin=mysql_native_password
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
+      --group_concat_max_len=1024000
 
   redis:
     image: redis:7
@@ -29,35 +30,38 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - ./data/redis:/data
     command: redis-server --appendonly yes
 
   funasr:
     image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.13
     container_name: douyin_live_funasr
     restart: unless-stopped
+    privileged: true
     ports:
       - "10096:10095"
     volumes:
-      - funasr_models:/workspace/models
-    environment:
-      - GPU_ID=-1
-    entrypoint: ["/usr/bin/bash", "-c"]
-    command: >
-      cd /workspace/FunASR/runtime &&
-      nohup bash run_server_2pass.sh
-        --certfile 0
-        --download-model-dir /workspace/models
-        --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx
-        --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx
-        --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx
-        --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx
-        --itn-dir thuduj12/fst_itn_zh
-        --port 10095 > /workspace/models/funasr.log 2>&1 &
+      - ./data/funasr/models:/workspace/models
+    working_dir: /workspace/FunASR/runtime
+    entrypoint: ["/bin/bash", "-lc"]
+    command:
+      - "bash run_server_2pass.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --hotword /workspace/models/hotwords.txt; sleep infinity"
     profiles:
       - funasr
 
-volumes:
-  mysql_data:
-  redis_data:
-  funasr_models:
+  dataease:
+    image: registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.25
+    container_name: douyin_live_dataease
+    restart: unless-stopped
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./dataease/conf/application.yml:/opt/apps/config/application.yml
+      - ./data/dataease/data:/opt/dataease2.0/data
+      - ./data/dataease/logs:/opt/dataease2.0/logs
+    depends_on:
+      mysql:
+        condition: service_started
+    profiles:
+      - dataease
+
