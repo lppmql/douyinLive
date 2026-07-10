@@ -57,6 +57,28 @@ function fmtDateTime(val: string | null): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
 }
 
+const detailStatusMap: Record<string, { type: 'success' | 'warning' | 'info' | 'error'; label: string }> = {
+  complete: { type: 'success', label: '详情完整' },
+  retryable: { type: 'warning', label: '待重试' },
+  unavailable: { type: 'error', label: '平台不可回放' },
+  pending: { type: 'info', label: '待采集' }
+};
+
+function renderDetailStatus(row: Api.Douyin.LiveSession) {
+  const info = detailStatusMap[row.detail_collection_status] || detailStatusMap.pending;
+  return h(
+    NTag,
+    {
+      type: info.type,
+      size: 'small',
+      round: true,
+      bordered: false,
+      title: row.detail_collection_error || undefined
+    },
+    { default: () => info.label }
+  );
+}
+
 /* ---------- 详情抽屉 ---------- */
 const showDrawer = ref(false);
 const currentSession = ref<Api.Douyin.LiveSession | null>(null);
@@ -153,6 +175,12 @@ const columns = [
       const info = statusMap[row.live_status] || { type: 'default' as const, labelKey: 'page.live-sessions.statusEnded' as const };
       return h(NTag, { type: info.type as any, size: 'small', round: true }, { default: () => $t(info.labelKey as any) });
     }
+  },
+  {
+    title: '详情采集',
+    key: 'detail_collection_status',
+    width: 105,
+    render(row: Api.Douyin.LiveSession) { return renderDetailStatus(row); }
   },
   {
     title: () => $t('page.live-sessions.startTime'),
@@ -295,6 +323,14 @@ onMounted(() => {
                   >
                     {{ $t(((statusMap[currentSession.live_status] || { type: 'default', labelKey: 'page.live-sessions.statusEnded' }).labelKey) as any) }}
                   </NTag>
+                </NDescriptionsItem>
+                <NDescriptionsItem label="详情采集状态">
+                  <div class="flex items-center gap-8px">
+                    <component :is="renderDetailStatus(currentSession)" />
+                    <span v-if="currentSession.detail_collection_error" class="text-12px text-gray-500">
+                      {{ currentSession.detail_collection_error }}
+                    </span>
+                  </div>
                 </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('common.detail')">
                   <a

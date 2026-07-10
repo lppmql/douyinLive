@@ -27,6 +27,8 @@ declare namespace Api {
       anchor_avatar_url: string | null;
       douyin_id: string | null;
       douyin_uid: string | null;
+      detail_collection_status: 'pending' | 'complete' | 'retryable' | 'unavailable' | string;
+      detail_collection_error: string | null;
       session_title: string | null;
       dashboard_url: string | null;
       stream_url: string | null;
