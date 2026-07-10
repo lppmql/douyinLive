@@ -4,9 +4,26 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.live_sessions import LiveSession
-from app.schemas import LiveSessionCreate, LiveSessionUpdate, LiveSessionResponse
+from app.models.live_rooms import LiveRoom
+from app.models.live_metrics import LiveMetric
+from app.models.comments import Comment
+from app.models.stream_sources import StreamSource
+from app.schemas import (
+    LiveMetricDetailResponse,
+    LiveSessionCreate,
+    LiveSessionDetailResponse,
+    LiveSessionResponse,
+    LiveSessionUpdate,
+)
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
+
+
+def _attach_anchor_name(session: LiveSession) -> dict:
+    """将 LiveRoom.anchor_name 注入到场次返回数据中"""
+    data = {c.name: getattr(session, c.name) for c in session.__table__.columns}
+    data["anchor_name"] = session.room.anchor_name if session.room else None
+    return data
 
 
 @router.get("/", response_model=list[LiveSessionResponse])
@@ -20,7 +37,49 @@ def list_sessions(
     q = db.query(LiveSession)
     if room_id:
         q = q.filter(LiveSession.room_id == room_id)
-    return q.order_by(LiveSession.live_start_time.desc()).offset(skip).limit(limit).all()
+    sessions = q.order_by(LiveSession.live_start_time.desc()).offset(skip).limit(limit).all()
+    return [LiveSessionResponse(**_attach_anchor_name(s)) for s in sessions]
+
+
+@router.get("/{session_id}/details", response_model=LiveSessionDetailResponse)
+def get_session_details(
+    session_id: int,
+    comment_limit: int = Query(300, ge=1, le=1000),
+    db: Session = Depends(get_db),
+):
+    """获取单场直播的大屏趋势、已采集评论和可用流地址。"""
+    session = db.query(LiveSession).get(session_id)
+    if not session:
+        raise HTTPException(404, "直播场次不存在")
+
+    metrics = (
+        db.query(LiveMetric)
+        .filter(LiveMetric.session_id == session_id)
+        .order_by(LiveMetric.metric_time.asc())
+        .all()
+    )
+    comments = (
+        db.query(Comment)
+        .filter(Comment.session_id == session_id)
+        .order_by(Comment.comment_time.desc(), Comment.id.desc())
+        .limit(comment_limit)
+        .all()
+    )
+    stream_sources = (
+        db.query(StreamSource)
+        .filter(StreamSource.session_id == session_id)
+        .order_by(StreamSource.fetched_at.desc(), StreamSource.id.desc())
+        .all()
+    )
+    latest_stream = next((item.m3u8_url for item in stream_sources if item.status == "active"), None)
+
+    return LiveSessionDetailResponse(
+        session=LiveSessionResponse(**_attach_anchor_name(session)),
+        metrics=[LiveMetricDetailResponse.model_validate(item, from_attributes=True) for item in metrics],
+        comments=comments,
+        stream_url=latest_stream or session.stream_url,
+        stream_source_count=len(stream_sources),
+    )
 
 
 @router.get("/{session_id}", response_model=LiveSessionResponse)
@@ -29,7 +88,7 @@ def get_session(session_id: int, db: Session = Depends(get_db)):
     s = db.query(LiveSession).get(session_id)
     if not s:
         raise HTTPException(404, "直播场次不存在")
-    return s
+    return LiveSessionResponse(**_attach_anchor_name(s))
 
 
 @router.post("/", response_model=LiveSessionResponse)

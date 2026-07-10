@@ -18,6 +18,11 @@ export function fetchLiveSessionDetail(id: number) {
   return backendRequest<Api.Douyin.LiveSession>({ url: `${API_PREFIX}/live-sessions/${id}` });
 }
 
+/** 获取单场直播的趋势、评论和流地址 */
+export function fetchLiveSessionData(id: number) {
+  return backendRequest<Api.Douyin.LiveSessionDetail>({ url: `${API_PREFIX}/live-sessions/${id}/details` });
+}
+
 /* ---------- 采集 ---------- */
 
 /** 获取采集器状态 */

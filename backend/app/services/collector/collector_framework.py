@@ -100,9 +100,11 @@ class ApiCollector(BaseCollector):
     async def collect(self, url: str) -> dict:
         """执行 API 采集"""
         self._captured.clear()
-        await self.ensure_page(url)
-
+        # 必须在导航前订阅响应，否则会错过页面首次加载时的大屏接口。
+        if self.page is None:
+            self.page = await self.context.new_page()
         self.page.on("response", self._on_response)
+        await self.ensure_page(url)
 
         try:
             await self.page.wait_for_load_state("networkidle", timeout=30000)
@@ -115,13 +117,25 @@ class ApiCollector(BaseCollector):
         for pattern, handler in self._patterns:
             matched = [c for c in self._captured if pattern in c["url"]]
             if matched:
-                try:
-                    extracted = handler(matched[-1]["data"])
-                    result.update(extracted)
-                except Exception as e:
-                    self.log("warn", f"数据提取失败 ({pattern}): {e}")
+                # 同一接口会返回配置、权限校验和实际业务数据，倒序取第一条有值的业务响应。
+                for captured in reversed(matched):
+                    try:
+                        extracted = handler(captured["data"])
+                        if not _has_collected_value(extracted):
+                            continue
+                        result.update(extracted)
+                        break
+                    except Exception as e:
+                        self.log("warn", f"数据提取失败 ({pattern}): {e}")
 
         return result
+
+
+def _has_collected_value(value: Any) -> bool:
+    """判断解析结果是否包含真实业务值，0 也是有效指标值。"""
+    if isinstance(value, dict):
+        return any(item is not None and item != [] and item != {} for item in value.values())
+    return value is not None and value != [] and value != {}
 
 
 class DomFallbackCollector(BaseCollector):

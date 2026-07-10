@@ -1,232 +1,374 @@
 <script setup lang="ts">
-import { ref, h } from 'vue';
-import { NTag, NButton } from 'naive-ui';
+import { ref, h, onMounted } from 'vue';
+import { NTag, NButton, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
+import { fetchLiveSessionData, fetchLiveSessions } from '@/service/api/douyin';
 
 defineOptions({
   name: 'LiveSessions'
 });
 
-/* ---------- Mock 数据 ---------- */
-interface LiveSession {
-  id: number;
-  date: string;
-  anchorName: string;
-  startTime: string;
-  endTime: string;
-  duration: number;
-  onlineUsers: number;
-  viewCount: number;
-  totalLeads: number;
-  validLeads: number;
-  newFollowers: number;
-  trafficSource: { label: string; value: number }[];
-  conversion: { step: string; count: number }[];
+const message = useMessage();
+
+const loading = ref(true);
+const sessions = ref<Api.Douyin.LiveSession[]>([]);
+
+async function loadSessions() {
+  loading.value = true;
+  try {
+    const res = await fetchLiveSessions();
+    if (res.data) {
+      sessions.value = res.data;
+    }
+  } catch {
+    message.error('加载直播场次失败');
+  } finally {
+    loading.value = false;
+  }
 }
 
-const sessions = ref<LiveSession[]>([
-  {
-    id: 1,
-    date: '2026-07-09',
-    anchorName: '主播小明',
-    startTime: '14:00',
-    endTime: '17:30',
-    duration: 210,
-    onlineUsers: 1256,
-    viewCount: 8320,
-    totalLeads: 328,
-    validLeads: 225,
-    newFollowers: 156,
-    trafficSource: [
-      { label: $t('page.live-sessions.sourceFollow'), value: 35 },
-      { label: $t('page.live-sessions.sourceRecommend'), value: 40 },
-      { label: $t('page.live-sessions.sourceSearch'), value: 15 },
-      { label: $t('page.live-sessions.sourceOther'), value: 10 }
-    ],
-    conversion: [
-      { step: $t('page.live-sessions.stepView'), count: 8320 },
-      { step: $t('page.live-sessions.stepInteraction'), count: 2140 },
-      { step: $t('page.live-sessions.stepLead'), count: 328 },
-      { step: $t('page.live-sessions.stepValid'), count: 225 }
-    ]
-  },
-  {
-    id: 2,
-    date: '2026-07-08',
-    anchorName: '主播小红',
-    startTime: '19:00',
-    endTime: '22:00',
-    duration: 180,
-    onlineUsers: 2100,
-    viewCount: 15320,
-    totalLeads: 512,
-    validLeads: 380,
-    newFollowers: 320,
-    trafficSource: [
-      { label: $t('page.live-sessions.sourceFollow'), value: 28 },
-      { label: $t('page.live-sessions.sourceRecommend'), value: 48 },
-      { label: $t('page.live-sessions.sourceSearch'), value: 14 },
-      { label: $t('page.live-sessions.sourceOther'), value: 10 }
-    ],
-    conversion: [
-      { step: $t('page.live-sessions.stepView'), count: 15320 },
-      { step: $t('page.live-sessions.stepInteraction'), count: 3890 },
-      { step: $t('page.live-sessions.stepLead'), count: 512 },
-      { step: $t('page.live-sessions.stepValid'), count: 380 }
-    ]
-  },
-  {
-    id: 3,
-    date: '2026-07-07',
-    anchorName: '主播小明',
-    startTime: '10:00',
-    endTime: '12:45',
-    duration: 165,
-    onlineUsers: 980,
-    viewCount: 6200,
-    totalLeads: 210,
-    validLeads: 142,
-    newFollowers: 98,
-    trafficSource: [
-      { label: $t('page.live-sessions.sourceFollow'), value: 30 },
-      { label: $t('page.live-sessions.sourceRecommend'), value: 42 },
-      { label: $t('page.live-sessions.sourceSearch'), value: 18 },
-      { label: $t('page.live-sessions.sourceOther'), value: 10 }
-    ],
-    conversion: [
-      { step: $t('page.live-sessions.stepView'), count: 6200 },
-      { step: $t('page.live-sessions.stepInteraction'), count: 1580 },
-      { step: $t('page.live-sessions.stepLead'), count: 210 },
-      { step: $t('page.live-sessions.stepValid'), count: 142 }
-    ]
+/* ---------- 状态标签映射 ---------- */
+const statusMap: Record<string, { type: 'success' | 'warning' | 'info' | 'default'; labelKey: string }> = {
+  live: { type: 'success', labelKey: 'page.live-sessions.statusLive' },
+  scheduled: { type: 'info', labelKey: 'page.live-sessions.statusScheduled' },
+  ended: { type: 'default', labelKey: 'page.live-sessions.statusEnded' },
+  finished: { type: 'default', labelKey: 'page.live-sessions.statusEnded' },
+};
+
+function fmtPercent(val: number): string {
+  if (val === 0) return '-';
+  return `${(val * 100).toFixed(1)}%`;
+}
+
+function fmtSeconds(val: number): string {
+  if (!val) return '-';
+  const hh = Math.floor(val / 3600);
+  const mm = Math.floor((val % 3600) / 60);
+  if (hh > 0) {
+    return `${hh}${$t('page.live-sessions.hours')}${mm}${$t('page.live-sessions.minutes')}`;
   }
-]);
+  return `${mm}${$t('page.live-sessions.minutes')}`;
+}
 
+function fmtDateTime(val: string | null): string {
+  if (!val) return '-';
+  const d = new Date(val);
+  return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
+/* ---------- 详情抽屉 ---------- */
 const showDrawer = ref(false);
-const currentSession = ref<LiveSession | null>(null);
+const currentSession = ref<Api.Douyin.LiveSession | null>(null);
+const detailLoading = ref(false);
+const detailData = ref<Api.Douyin.LiveSessionDetail | null>(null);
 
-function openDetail(session: LiveSession) {
+async function openDetail(session: Api.Douyin.LiveSession) {
   currentSession.value = session;
   showDrawer.value = true;
+  detailLoading.value = true;
+  detailData.value = null;
+  try {
+    const res = await fetchLiveSessionData(session.id);
+    detailData.value = res.data || null;
+  } catch {
+    message.error('加载场次详细采集数据失败');
+  } finally {
+    detailLoading.value = false;
+  }
 }
+
+function fmtNumber(val: number | null | undefined): string {
+  return Number(val || 0).toLocaleString();
+}
+
+const metricColumns = [
+  {
+    title: '采集时间',
+    key: 'metric_time',
+    width: 120,
+    render(row: Api.Douyin.LiveMetric) { return fmtDateTime(row.metric_time); }
+  },
+  { title: '在线', key: 'online_count', width: 70, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.online_count) },
+  { title: '曝光', key: 'exposure_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.exposure_count) },
+  { title: '进入', key: 'enter_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.enter_count) },
+  { title: '点赞', key: 'like_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.like_count) },
+  { title: '评论', key: 'comment_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.comment_count) },
+  { title: '关注', key: 'follow_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.follow_count) }
+];
+
+const commentColumns = [
+  {
+    title: '时间',
+    key: 'comment_time',
+    width: 115,
+    render(row: Api.Douyin.LiveComment) { return fmtDateTime(row.comment_time); }
+  },
+  { title: '用户', key: 'user_nickname', width: 105, ellipsis: { tooltip: true } },
+  { title: '评论内容', key: 'comment_content', ellipsis: { tooltip: true } }
+];
 
 /* ---------- 表格列 ---------- */
 const columns = [
-  { title: () => $t('page.live-sessions.date'), key: 'date', width: 110 },
-  { title: () => $t('page.live-sessions.anchorName'), key: 'anchorName', width: 100 },
-  { title: () => $t('page.live-sessions.startTime'), key: 'startTime', width: 90 },
-  { title: () => $t('page.live-sessions.endTime'), key: 'endTime', width: 90 },
   {
-    title: () => $t('page.live-sessions.duration'),
-    key: 'duration',
-    width: 80,
-    render(row: LiveSession) {
-      return `${row.duration}${$t('page.live-sessions.minutes')}`;
+    title: () => $t('page.live-sessions.anchorName'),
+    key: 'anchor_name',
+    width: 100,
+    ellipsis: { tooltip: true }
+  },
+  {
+    title: () => $t('page.live-sessions.sessionTitle'),
+    key: 'session_title',
+    width: 140,
+    ellipsis: { tooltip: true },
+    render(row: Api.Douyin.LiveSession) {
+      return row.session_title || '-';
     }
   },
-  { title: () => $t('page.live-sessions.onlineUsers'), key: 'onlineUsers', width: 100, sortable: true },
-  { title: () => $t('page.live-sessions.totalLeads'), key: 'totalLeads', width: 90, sortable: true },
   {
-    title: () => $t('page.live-sessions.validLeads'),
-    key: 'validLeads',
-    width: 100,
-    sortable: true,
-    render(row: LiveSession) {
-      const rate = row.totalLeads > 0 ? ((row.validLeads / row.totalLeads) * 100).toFixed(1) : '0.0';
-      return `${row.validLeads} (${rate}%)`;
+    title: () => $t('page.live-sessions.sessionStatus'),
+    key: 'live_status',
+    width: 80,
+    render(row: Api.Douyin.LiveSession) {
+      const info = statusMap[row.live_status] || { type: 'default' as const, labelKey: 'page.live-sessions.statusEnded' as const };
+      return h(NTag, { type: info.type as any, size: 'small', round: true }, { default: () => $t(info.labelKey as any) });
     }
+  },
+  {
+    title: () => $t('page.live-sessions.startTime'),
+    key: 'live_start_time',
+    width: 110,
+    render(row: Api.Douyin.LiveSession) { return fmtDateTime(row.live_start_time); }
+  },
+  {
+    title: () => $t('page.live-sessions.endTime'),
+    key: 'live_end_time',
+    width: 110,
+    render(row: Api.Douyin.LiveSession) { return fmtDateTime(row.live_end_time); }
+  },
+  {
+    title: () => $t('page.live-sessions.duration'),
+    key: 'live_duration_seconds',
+    width: 80,
+    render(row: Api.Douyin.LiveSession) { return fmtSeconds(row.live_duration_seconds); }
+  },
+  {
+    title: () => $t('page.live-sessions.onlineUsers'),
+    key: 'peak_online_count',
+    width: 90,
+    sortable: true,
+    render(row: Api.Douyin.LiveSession) { return row.peak_online_count || 0; }
+  },
+  {
+    title: () => $t('page.live-sessions.newFollowers'),
+    key: 'new_followers',
+    width: 90,
+    render(row: Api.Douyin.LiveSession) { return row.new_followers || 0; }
+  },
+  {
+    title: () => $t('page.live-sessions.commentsCount'),
+    key: 'comments_count',
+    width: 80,
+    render(row: Api.Douyin.LiveSession) { return row.comments_count || 0; }
+  },
+  {
+    title: () => $t('page.live-sessions.leads'),
+    key: 'leads_count',
+    width: 80,
+    sortable: true,
+    render(row: Api.Douyin.LiveSession) { return row.leads_count || 0; }
   },
   {
     title: () => $t('common.action'),
     key: 'actions',
     width: 80,
-    render(row: LiveSession) {
+    render(row: Api.Douyin.LiveSession) {
       return h(
         NButton,
-        { text: true, type: 'primary', onClick: () => openDetail(row) },
-        { default: () => $t('common.detail') }
+        { text: true, type: 'primary', size: 'tiny', onClick: () => openDetail(row) },
+        { default: () => $t('page.live-sessions.detail') }
       );
     }
   }
 ];
+
+onMounted(() => {
+  loadSessions();
+});
 </script>
 
 <template>
   <NSpace vertical :size="16">
     <NCard :bordered="false" class="card-wrapper">
       <template #header>
-        <NSpace>
-          <SvgIcon icon="mdi:video-vintage" class="text-22px" />
-          <span class="text-16px font-bold">{{ $t('page.live-sessions.title') }}</span>
+        <NSpace justify="space-between" align="center">
+          <NSpace>
+            <SvgIcon icon="mdi:video-vintage" class="text-22px" />
+            <span class="text-16px font-bold">{{ $t('page.live-sessions.title') }}</span>
+          </NSpace>
+          <NButton size="small" secondary @click="loadSessions">
+            <template #icon>
+              <SvgIcon icon="mdi:refresh" />
+            </template>
+            {{ $t('page.live-sessions.refresh') }}
+          </NButton>
         </NSpace>
       </template>
+
+      <div v-if="loading" class="flex justify-center py-40px">
+        <NSpin :stroke-width="12" :size="24" />
+        <span class="ml-12px text-gray-400">{{ $t('page.live-sessions.loading') }}</span>
+      </div>
+
       <NDataTable
+        v-else
         :columns="columns"
         :data="sessions"
         :bordered="false"
         :single-line="false"
         size="small"
         striped
+        :empty-text="$t('page.live-sessions.noData')"
       />
     </NCard>
 
     <!-- 详情抽屉 -->
-    <NDrawer v-model:show="showDrawer" :width="480" placement="right">
+    <NDrawer v-model:show="showDrawer" :width="720" placement="right">
       <NDrawerContent
-        :title="`${$t('page.live-sessions.detailTitle')} - ${currentSession?.anchorName || ''}`"
+        :title="`${$t('page.live-sessions.detailTitle')} - ${currentSession?.anchor_name || ''}`"
         closable
       >
         <template v-if="currentSession">
-          <NSpace vertical :size="20">
-            <!-- 基础信息 -->
-            <NCard :bordered="true" size="small" title="基础信息">
+          <NSpace vertical :size="16">
+            <!-- 基本信息 -->
+            <NCard :bordered="true" size="small" :title="$t('page.live-sessions.basicInfo')">
               <NDescriptions :column="2" size="small" bordered>
-                <NDescriptionsItem :label="$t('page.live-sessions.date')">
-                  {{ currentSession.date }}
-                </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.anchorName')">
-                  {{ currentSession.anchorName }}
+                  {{ currentSession.anchor_name }}
                 </NDescriptionsItem>
-                <NDescriptionsItem :label="$t('page.live-sessions.startTime')">
-                  {{ currentSession.startTime }}
+                <NDescriptionsItem :label="$t('page.live-sessions.sessionTitle')">
+                  {{ currentSession.session_title || '-' }}
                 </NDescriptionsItem>
-                <NDescriptionsItem :label="$t('page.live-sessions.endTime')">
-                  {{ currentSession.endTime }}
+                <NDescriptionsItem :label="$t('page.live-sessions.sessionStatus')">
+                  <NTag
+                    :type="(statusMap[currentSession.live_status] || { type: 'default' }).type as any"
+                    size="small"
+                    round
+                  >
+                    {{ $t(((statusMap[currentSession.live_status] || { type: 'default', labelKey: 'page.live-sessions.statusEnded' }).labelKey) as any) }}
+                  </NTag>
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('common.detail')">
+                  <a
+                    v-if="currentSession.dashboard_url"
+                    :href="currentSession.dashboard_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-primary"
+                  >{{ $t('page.live-sessions.dashboardLink') }}</a>
+                  <span v-else>-</span>
                 </NDescriptionsItem>
               </NDescriptions>
             </NCard>
 
-            <!-- 流量来源 -->
-            <NCard :bordered="true" size="small" :title="$t('page.live-sessions.trafficSource')">
-              <NSpace vertical :size="12">
-                <div
-                  v-for="item in currentSession.trafficSource"
-                  :key="item.label"
-                  class="flex items-center gap-12px"
-                >
-                  <span class="w-60px text-13px text-gray-500">{{ item.label }}</span>
-                  <NProgress
-                    type="line"
-                    :percentage="item.value"
-                    :height="18"
-                    :border-radius="4"
-                    :fill-border-radius="4"
-                    indicator-placement="inside"
-                  />
-                </div>
-              </NSpace>
+            <!-- 时间信息 -->
+            <NCard :bordered="true" size="small" :title="$t('page.live-sessions.timeInfo')">
+              <NDescriptions :column="2" size="small" bordered>
+                <NDescriptionsItem :label="$t('page.live-sessions.startTime')">
+                  {{ fmtDateTime(currentSession.live_start_time) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.endTime')">
+                  {{ fmtDateTime(currentSession.live_end_time) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.duration')">
+                  {{ fmtSeconds(currentSession.live_duration_seconds) }}
+                </NDescriptionsItem>
+              </NDescriptions>
             </NCard>
 
-            <!-- 转化漏斗 -->
-            <NCard :bordered="true" size="small" :title="$t('page.live-sessions.conversion')">
-              <div
-                v-for="item in currentSession.conversion"
-                :key="item.step"
-                class="mb-8px flex items-center justify-between py-8px px-12px bg-gray-50 dark:bg-dark-300 rounded-8px"
-              >
-                <span class="text-13px">{{ item.step }}</span>
-                <span class="text-14px font-bold text-primary">{{ item.count }}</span>
-              </div>
+            <!-- 核心指标 -->
+            <NCard :bordered="true" size="small" :title="$t('page.live-sessions.coreMetrics')">
+              <NDescriptions :column="2" size="small" bordered>
+                <NDescriptionsItem :label="$t('page.live-sessions.viewCount')">
+                  {{ currentSession.total_viewers || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.onlineUsers')">
+                  {{ currentSession.peak_online_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.newFollowers')">
+                  {{ currentSession.new_followers || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.commentsCount')">
+                  {{ currentSession.comments_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.leads')">
+                  {{ currentSession.leads_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.adCost')">
+                  {{ currentSession.ad_cost || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.exposureEnterRate')">
+                  {{ fmtPercent(currentSession.exposure_enter_rate) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.commentRate')">
+                  {{ fmtPercent(currentSession.comment_rate) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem :label="$t('page.live-sessions.interactionRate')">
+                  {{ fmtPercent(currentSession.interaction_rate) }}
+                </NDescriptionsItem>
+              </NDescriptions>
+            </NCard>
+
+            <NCard :bordered="true" size="small" title="直播流信息（用于后续话术采集）">
+              <NDescriptions :column="1" size="small" bordered>
+                <NDescriptionsItem label="可用流地址">
+                  <a
+                    v-if="detailData?.stream_url"
+                    :href="detailData.stream_url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="block max-w-580px truncate text-primary"
+                    :title="detailData.stream_url"
+                  >{{ detailData.stream_url }}</a>
+                  <span v-else>本场暂未采集到可用直播流</span>
+                </NDescriptionsItem>
+                <NDescriptionsItem label="已保存流源版本">
+                  {{ detailData?.stream_source_count || 0 }}
+                </NDescriptionsItem>
+              </NDescriptions>
+            </NCard>
+
+            <NCard :bordered="true" size="small" title="大屏分钟趋势数据">
+              <template #header-extra>
+                <span class="text-12px text-gray-400">{{ detailData?.metrics.length || 0 }} 条</span>
+              </template>
+              <NSpin v-if="detailLoading" size="small" />
+              <NEmpty v-else-if="!detailData?.metrics.length" size="small" description="本场暂无分钟趋势数据" />
+              <NDataTable
+                v-else
+                :columns="metricColumns"
+                :data="detailData.metrics"
+                :max-height="320"
+                :pagination="{ pageSize: 20 }"
+                :bordered="false"
+                size="small"
+              />
+            </NCard>
+
+            <NCard :bordered="true" size="small" title="本场直播评论">
+              <template #header-extra>
+                <span class="text-12px text-gray-400">已展示 {{ detailData?.comments.length || 0 }} 条</span>
+              </template>
+              <NSpin v-if="detailLoading" size="small" />
+              <NEmpty v-else-if="!detailData?.comments.length" size="small" description="本场暂无已采集评论" />
+              <NDataTable
+                v-else
+                :columns="commentColumns"
+                :data="detailData.comments"
+                :max-height="360"
+                :pagination="{ pageSize: 20 }"
+                :bordered="false"
+                size="small"
+              />
             </NCard>
           </NSpace>
         </template>

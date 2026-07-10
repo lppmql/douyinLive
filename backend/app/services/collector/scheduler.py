@@ -142,7 +142,8 @@ class SchedulerManager:
 
             rooms = db.query(LiveRoom).filter(LiveRoom.status == True).all()
             for room in rooms:
-                dashboard_url = f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room.id}" if not settings.MONITOR_MOCK_MODE else ""
+                room_id_for_url = room.room_id_str or str(room.id)
+                dashboard_url = f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room_id_for_url}" if not settings.MONITOR_MOCK_MODE else ""
                 result = await detector.detect(dashboard_url)
 
                 if result.is_live and room.id not in self.get_active_sessions():
@@ -164,7 +165,7 @@ class SchedulerManager:
             session_title=result.session_title or f"{room.anchor_name} 直播",
             live_start_time=result.start_time or datetime.utcnow(),
             live_status="live",
-            dashboard_url=f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room.id}",
+            dashboard_url=f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room.room_id_str or room.id}",
         )
         db.add(session)
         db.commit()
@@ -211,8 +212,21 @@ class SchedulerManager:
                 "profiles": ProfileCollector,
             }
 
-            collector_cls = collector_map.get(job_type)
-            if collector_cls:
+            if job_type == "stream_refresh":
+                from app.services.collector.stream_collector import StreamCollector
+
+                stream_url = await StreamCollector(db, context).fetch_stream_url(dashboard_url, session_id)
+                if stream_url:
+                    from app.models.live_sessions import LiveSession
+
+                    session = db.query(LiveSession).get(session_id)
+                    if session:
+                        session.stream_url = stream_url[:2000]
+                        db.commit()
+            else:
+                collector_cls = collector_map.get(job_type)
+                if not collector_cls:
+                    raise ValueError(f"未知采集任务类型: {job_type}")
                 collector = collector_cls(db, context, task, dashboard_url)
                 result = await collector.collect()
                 await _save_collected_data(db, session_id, job_type, result)
@@ -270,14 +284,23 @@ async def _save_collected_data(db: Session, session_id: int, job_type: str, resu
         db.commit()
 
     elif job_type == "comments" and result.get("comments"):
+        existing_pairs = {
+            ((row.user_nickname or "").strip(), (row.comment_content or "").strip())
+            for row in db.query(Comment).filter(Comment.session_id == session_id).all()
+        }
         for c in result["comments"]:
+            nickname = (c.get("user_nickname", c.get("nickname")) or "").strip()
+            content = (c.get("comment_content", c.get("content")) or "").strip()
+            if not content or (nickname, content) in existing_pairs:
+                continue
             comment = Comment(
                 session_id=session_id,
-                user_nickname=c.get("user_nickname", c.get("nickname")),
-                comment_content=c.get("comment_content", c.get("content")),
+                user_nickname=nickname or None,
+                comment_content=content,
                 comment_time=c.get("comment_time") or datetime.utcnow(),
             )
             db.add(comment)
+            existing_pairs.add((nickname, content))
         db.commit()
 
     elif job_type == "profiles" and result.get("profiles"):

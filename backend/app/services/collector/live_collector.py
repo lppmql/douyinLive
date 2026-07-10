@@ -19,23 +19,35 @@ class MetricsCollector(AdaptiveCollector):
         self.dashboard_url = dashboard_url
 
         self.api.register_api(
-            pattern="/webcast/stream/",
+            pattern="/bff/statistic/live-screen/",
             handler=lambda data: self._parse_metrics(data),
         )
         self.dom.register(
             name="online_count",
-            js="document.querySelector('[class*=online]')?.textContent?.trim() || '0'",
+            # 没有匹配到页面可见数值时返回 None，避免把无权限页面写成全零趋势。
+            js="document.querySelector('[class*=online]')?.textContent?.trim() || null",
         )
 
     def _parse_metrics(self, data: dict) -> dict:
+        # Cluerich BFF API 返回结构: {"data": {...}, "error_code": 0}
         info = data.get("data", data.get("result", {}))
+        if isinstance(info, dict) and "data" in info:
+            info = info["data"]  # 兼容 {data: {data: {...}}}
+
+        def _first(keys):
+            for k in keys:
+                v = info.get(k)
+                if v is not None:
+                    return v
+            return None
+
         return {
-            "online_count": info.get("online_count"),
-            "exposure_count": info.get("exposure_count"),
-            "enter_count": info.get("enter_count"),
-            "like_count": info.get("like_count"),
-            "comment_count": info.get("comment_count"),
-            "follow_count": info.get("follow_count"),
+            "online_count": _first(["lp_screen_live_user_realtime", "online_count"]),
+            "exposure_count": _first(["lp_screen_live_enter_users", "exposure_count"]),
+            "enter_count": _first(["lp_screen_live_enter_users", "enter_count"]),
+            "like_count": _first(["lp_screen_live_like_count", "like_count"]),
+            "comment_count": _first(["lp_screen_live_comment_count", "comment_count"]),
+            "follow_count": _first(["lp_screen_live_new_follow_count", "follow_count"]),
         }
 
     async def collect(self, url: str = "") -> dict:
@@ -51,14 +63,17 @@ class CommentCollector(AdaptiveCollector):
         self._last_time: datetime | None = None
 
         self.api.register_api(
-            pattern="/webcast/comment/",
+            pattern="/bff/statistic/live-comment/",
             handler=lambda data: self._parse_comments(data),
         )
 
     def _parse_comments(self, data: dict) -> dict:
-        comments_raw = data.get("data", data.get("result", []))
-        if isinstance(comments_raw, dict):
-            comments_raw = comments_raw.get("list", [])
+        # Cluerich 评论 API: {"data": {"list": [...]}}
+        info = data.get("data", data.get("result", {}))
+        if isinstance(info, dict):
+            comments_raw = info.get("list") or info.get("comments") or info.get("data", [])
+        else:
+            comments_raw = info if isinstance(info, list) else []
         parsed = []
         for c in comments_raw:
             parsed.append({
@@ -80,12 +95,15 @@ class ProfileCollector(AdaptiveCollector):
         self.dashboard_url = dashboard_url
 
         self.api.register_api(
-            pattern="/webcast/audience/",
+            pattern="/bff/statistic/live-screen/audience",
             handler=lambda data: self._parse_profiles(data),
         )
 
     def _parse_profiles(self, data: dict) -> dict:
+        # Cluerich 画像 API: {"data": {"age": [...], "gender": [...]}}
         info = data.get("data", {})
+        if isinstance(info, dict) and "data" in info:
+            info = info["data"]  # 兼容嵌套
         profiles = []
         for dim in ("age", "gender", "region", "province", "city"):
             items = info.get(dim, [])

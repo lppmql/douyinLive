@@ -42,6 +42,40 @@ declare namespace Api {
       updated_at: string;
     }
 
+    interface LiveMetric {
+      metric_time: string;
+      exposure_count: number;
+      online_count: number;
+      enter_count: number;
+      enter_fans_count: number;
+      leave_count: number;
+      like_count: number;
+      comment_count: number;
+      follow_count: number;
+      natural_traffic_count: number;
+      marketing_traffic_count: number;
+    }
+
+    interface LiveComment {
+      id: number;
+      session_id: number;
+      user_nickname: string | null;
+      comment_content: string | null;
+      comment_time: string | null;
+      is_high_intent: number;
+      sentiment: string | null;
+      keywords: string | null;
+      created_at: string;
+    }
+
+    interface LiveSessionDetail {
+      session: LiveSession;
+      metrics: LiveMetric[];
+      comments: LiveComment[];
+      stream_url: string | null;
+      stream_source_count: number;
+    }
+
     /* ---------- 采集（后端返回 snake_case） ---------- */
     interface CollectorStatus {
       connected: boolean;

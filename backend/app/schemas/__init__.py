@@ -63,10 +63,12 @@ class LiveSessionUpdate(BaseModel):
 
 class LiveSessionResponse(LiveSessionBase):
     id: int
+    anchor_name: Optional[str] = None  # 从 LiveRoom 关联获取
     live_duration_seconds: int = 0
     total_viewers: int = 0
     avg_watch_seconds: float = 0
     peak_online_count: int = 0
+    realtime_online_count: int = 0
     ad_cost: float = 0
     new_followers: int = 0
     exposure_enter_rate: float = 0
@@ -79,6 +81,32 @@ class LiveSessionResponse(LiveSessionBase):
 
     class Config:
         from_attributes = True
+
+
+class LiveMetricDetailResponse(BaseModel):
+    """直播大屏的单个时间点指标。"""
+
+    metric_time: datetime
+    exposure_count: int = 0
+    online_count: int = 0
+    enter_count: int = 0
+    enter_fans_count: int = 0
+    leave_count: int = 0
+    like_count: int = 0
+    comment_count: int = 0
+    follow_count: int = 0
+    natural_traffic_count: int = 0
+    marketing_traffic_count: int = 0
+
+
+class LiveSessionDetailResponse(BaseModel):
+    """直播场次详情页需要的完整采集结果。"""
+
+    session: LiveSessionResponse
+    metrics: list[LiveMetricDetailResponse]
+    comments: list["CommentResponse"]
+    stream_url: Optional[str] = None
+    stream_source_count: int = 0
 
 
 # ===== 评论 =====
@@ -102,6 +130,9 @@ class CommentResponse(CommentBase):
 
     class Config:
         from_attributes = True
+
+
+LiveSessionDetailResponse.model_rebuild()
 
 
 # ===== 话术分段 =====
