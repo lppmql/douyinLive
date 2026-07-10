@@ -1,5 +1,6 @@
 """Phase 3: 采集状态 & 扫码登录 API"""
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -20,6 +21,7 @@ from app.schemas.scraper import (
     CollectAllResponse,
 )
 from app.services.collector.browser import browser_manager
+from app.services.collector.browser import STORAGE_DIR
 from app.services.collector.manual_collect import collect_all
 
 router = APIRouter(prefix="/collector", tags=["数据采集"])
@@ -78,14 +80,44 @@ def update_account(account_id: int, data: ScraperAccountUpdate, db: Session = De
 
 
 @router.delete("/accounts/{account_id}")
-def delete_account(account_id: int, db: Session = Depends(get_db)):
-    """删除采集账号"""
+async def delete_account(account_id: int, db: Session = Depends(get_db)):
+    """删除采集账号，并保留历史采集任务与业务数据。"""
     account = db.query(ScraperAccount).get(account_id)
     if not account:
         raise HTTPException(404, "账号不存在")
+
+    running_task_count = db.query(ScraperTask).filter(
+        ScraperTask.account_id == account_id,
+        ScraperTask.status == "running",
+    ).count()
+    if running_task_count:
+        raise HTTPException(409, "该账号仍有采集任务在运行，请等待任务结束后再删除")
+
+    # 任务记录用于审计，删除账号时仅解除关联，避免外键约束导致 500。
+    task_count = db.query(ScraperTask).filter(
+        ScraperTask.account_id == account_id,
+    ).update({ScraperTask.account_id: None}, synchronize_session=False)
+    storage_state_path = account.storage_state_path
     db.delete(account)
-    db.commit()
-    return {"message": "删除成功"}
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(500, "删除账号失败，请稍后重试")
+
+    # 只删除系统存储目录内的状态文件，避免误删用户填写的其他本地文件。
+    if browser_manager._logged_in_account_id == account_id:
+        await browser_manager.close()
+    if storage_state_path:
+        try:
+            state_path = Path(storage_state_path).resolve()
+            if state_path.parent == STORAGE_DIR.resolve() and state_path.is_file():
+                state_path.unlink()
+        except OSError:
+            # 数据库账号已删除；遗留状态文件不会影响后续账号登录。
+            pass
+
+    return {"message": "删除成功", "detached_task_count": task_count}
 
 
 # ===== 扫码登录 =====
