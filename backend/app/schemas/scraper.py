@@ -28,6 +28,8 @@ class ScraperAccountResponse(ScraperAccountBase):
     user_agent: Optional[str] = None
     viewport_width: Optional[int] = None
     viewport_height: Optional[int] = None
+    cookies_json: Optional[str] = None
+    browser_fingerprint_json: Optional[str] = None
     expires_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
     created_at: datetime
@@ -97,3 +99,22 @@ class LoginStatusResponse(BaseModel):
     status: str  # pending / scanning / success / failed / timeout
     account: Optional[ScraperAccountResponse] = None
     message: str = ""
+
+
+# ===== 一键采集结果 =====
+class CollectRoomResult(BaseModel):
+    room_id: str = ""
+    anchor_name: str = ""
+    is_live: bool = False
+    metrics_count: int = 0
+    comments_count: int = 0
+    profiles_count: int = 0
+    session_id: Optional[int] = None
+    error: Optional[str] = None
+
+
+class CollectAllResponse(BaseModel):
+    total_rooms: int = 0
+    collected_rooms: int = 0
+    results: list[CollectRoomResult] = []
+    message: Optional[str] = None

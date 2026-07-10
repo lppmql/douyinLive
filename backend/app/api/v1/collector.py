@@ -1,7 +1,7 @@
 """Phase 3: 采集状态 & 扫码登录 API"""
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -99,7 +99,7 @@ async def start_login(db: Session = Depends(get_db)):
     db.refresh(task)
 
     # 在后台启动浏览器扫码
-    await browser_manager.start_qr_login(task.id)
+    await browser_manager.start_qr_login(task.id, f"采集账号_{task.id}")
 
     return LoginStartResponse(task_id=task.id, message="请使用抖音扫描二维码")
 
@@ -126,10 +126,15 @@ async def get_login_status(task_id: int, db: Session = Depends(get_db)):
 
     # 登录成功 → 查找已保存的账号记录（_qr_login_worker 已直接写入）
     if state["status"] == "success":
-        account_name = f"采集账号_{task_id}"
-        account = db.query(ScraperAccount).filter(
-            ScraperAccount.account_name == account_name
-        ).order_by(ScraperAccount.id.desc()).first()
+        account = None
+        account_id = state.get("account_id")
+        if account_id:
+            account = db.query(ScraperAccount).get(account_id)
+        if account is None:
+            account_name = state.get("account_name") or f"采集账号_{task_id}"
+            account = db.query(ScraperAccount).filter(
+                ScraperAccount.account_name == account_name
+            ).order_by(ScraperAccount.id.desc()).first()
 
         if account:
             return LoginStatusResponse(
@@ -156,7 +161,11 @@ async def re_login(account_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(task)
 
-    await browser_manager.start_qr_login(task.id, account.account_name or "unknown")
+    await browser_manager.start_qr_login(
+        task.id,
+        account.account_name or f"采集账号_{account_id}",
+        account.id,
+    )
 
     return LoginStartResponse(task_id=task.id, message="请使用抖音扫描二维码")
 

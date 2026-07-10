@@ -19,3 +19,4 @@ class ScraperAccount(Base, TimestampMixin):
     expires_at = Column(DateTime, nullable=True, comment="登录态过期时间")
     last_login_at = Column(DateTime, nullable=True, comment="最后登录时间")
     cookies_json = Column(Text, nullable=True, comment="Cookie 备份(JSON)")
+    browser_fingerprint_json = Column(Text, nullable=True, comment="浏览器指纹快照(JSON)")

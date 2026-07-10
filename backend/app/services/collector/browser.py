@@ -9,11 +9,12 @@
 """
 import asyncio
 import base64
+import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
-from playwright.async_api import async_playwright, Browser, BrowserContext
+from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from app.core.logger import logger
 from app.core.database import SessionLocal
@@ -34,6 +35,8 @@ DEFAULT_FINGERPRINT = {
     "viewport": {"width": 1920, "height": 1080},
     "locale": "zh-CN",
     "timezone_id": "Asia/Shanghai",
+    "device_scale_factor": 1,
+    "color_scheme": "light",
 }
 
 # 浏览器启动参数
@@ -99,22 +102,89 @@ class BrowserManager:
             logger.info("浏览器实例已创建")
         return self._browser
 
-    def _make_context_opts(self, storage_state_path: Optional[str] = None) -> dict:
-        """生成统一的浏览器上下文参数（保证指纹一致性）"""
+    def _make_context_opts(
+        self,
+        storage_state_path: Optional[str] = None,
+        fingerprint: Optional[dict[str, Any]] = None
+    ) -> dict:
+        """生成浏览器上下文参数，优先复用账号自身指纹。"""
+        fingerprint = fingerprint or {}
+        viewport = fingerprint.get("viewport") or DEFAULT_FINGERPRINT["viewport"]
         opts = {
-            "user_agent": DEFAULT_FINGERPRINT["user_agent"],
-            "viewport": DEFAULT_FINGERPRINT["viewport"],
-            "locale": DEFAULT_FINGERPRINT["locale"],
-            "timezone_id": DEFAULT_FINGERPRINT["timezone_id"],
+            "user_agent": fingerprint.get("user_agent") or DEFAULT_FINGERPRINT["user_agent"],
+            "viewport": {
+                "width": int(viewport.get("width", DEFAULT_FINGERPRINT["viewport"]["width"])),
+                "height": int(viewport.get("height", DEFAULT_FINGERPRINT["viewport"]["height"])),
+            },
+            "locale": fingerprint.get("locale") or DEFAULT_FINGERPRINT["locale"],
+            "timezone_id": fingerprint.get("timezone_id") or DEFAULT_FINGERPRINT["timezone_id"],
+            "device_scale_factor": fingerprint.get("device_scale_factor") or DEFAULT_FINGERPRINT["device_scale_factor"],
+            "color_scheme": fingerprint.get("color_scheme") or DEFAULT_FINGERPRINT["color_scheme"],
         }
         if storage_state_path and Path(storage_state_path).exists():
             opts["storage_state"] = storage_state_path
         return opts
 
-    async def create_context(self, storage_state_path: Optional[str] = None) -> BrowserContext:
-        """创建浏览器上下文，可恢复之前的登录状态"""
+    def _load_account_fingerprint(self, account: Optional[ScraperAccount]) -> dict[str, Any]:
+        """从账号记录中解析浏览器指纹。"""
+        if not account:
+            return {}
+
+        raw = account.browser_fingerprint_json
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                logger.warning("browser_fingerprint_json 解析失败，回退到基础指纹字段")
+
+        if account.user_agent or account.viewport_width or account.viewport_height:
+            return {
+                "user_agent": account.user_agent,
+                "viewport": {
+                    "width": account.viewport_width or DEFAULT_FINGERPRINT["viewport"]["width"],
+                    "height": account.viewport_height or DEFAULT_FINGERPRINT["viewport"]["height"],
+                },
+                "locale": DEFAULT_FINGERPRINT["locale"],
+                "timezone_id": DEFAULT_FINGERPRINT["timezone_id"],
+                "device_scale_factor": DEFAULT_FINGERPRINT["device_scale_factor"],
+                "color_scheme": DEFAULT_FINGERPRINT["color_scheme"],
+            }
+        return {}
+
+    def _find_account_by_storage_path(self, storage_state_path: Optional[str]) -> Optional[ScraperAccount]:
+        """通过 storage_state_path 查找账号。"""
+        if not storage_state_path:
+            return None
+
+        db = SessionLocal()
+        try:
+            return db.query(ScraperAccount).filter(
+                ScraperAccount.storage_state_path == storage_state_path
+            ).order_by(ScraperAccount.id.desc()).first()
+        finally:
+            db.close()
+
+    def _find_account_by_id(self, account_id: Optional[int]) -> Optional[ScraperAccount]:
+        """通过账号 ID 查找账号。"""
+        if not account_id:
+            return None
+
+        db = SessionLocal()
+        try:
+            return db.query(ScraperAccount).get(account_id)
+        finally:
+            db.close()
+
+    async def create_context(
+        self,
+        storage_state_path: Optional[str] = None,
+        fingerprint: Optional[dict[str, Any]] = None
+    ) -> BrowserContext:
+        """创建浏览器上下文，可恢复之前的登录状态。"""
         browser = await self.ensure_browser()
-        opts = self._make_context_opts(storage_state_path)
+        opts = self._make_context_opts(storage_state_path, fingerprint)
         context = await browser.new_context(**opts)
         # 注入反检测脚本
         await context.add_init_script(FINGERPRINT_SCRIPT)
@@ -147,7 +217,12 @@ class BrowserManager:
         if not self._logged_in_storage_path:
             return None, False, "没有登录账号"
 
-        context = await self.create_context(self._logged_in_storage_path)
+        account = self._find_account_by_id(self._logged_in_account_id)
+        if account is None:
+            account = self._find_account_by_storage_path(self._logged_in_storage_path)
+        fingerprint = self._load_account_fingerprint(account)
+
+        context = await self.create_context(self._logged_in_storage_path, fingerprint)
         if not context:
             return None, False, "浏览器启动失败"
 
@@ -186,11 +261,23 @@ class BrowserManager:
         if self._logged_in_context and self._logged_in_storage_path:
             try:
                 await self._logged_in_context.storage_state(path=self._logged_in_storage_path)
+                state = await self._logged_in_context.storage_state()
+                cookies_json = json.dumps(state.get("cookies", []), ensure_ascii=False)
+                self._update_account_state(
+                    account_id=self._logged_in_account_id,
+                    storage_path=self._logged_in_storage_path,
+                    cookies_json=cookies_json,
+                )
                 logger.info(f"持久化上下文 Cookie 已刷新: {self._logged_in_storage_path}")
             except Exception as e:
                 logger.warning(f"刷新 Cookie 失败: {e}")
 
-    async def start_qr_login(self, task_id: int, account_name: str = "默认账号") -> dict:
+    async def start_qr_login(
+        self,
+        task_id: int,
+        account_name: str = "默认账号",
+        account_id: Optional[int] = None
+    ) -> dict:
         """
         启动扫码登录（后台无头浏览器）
 
@@ -200,14 +287,16 @@ class BrowserManager:
             "status": "pending",
             "qr_base64": "",
             "account_id": None,
+            "target_account_id": account_id,
+            "account_name": account_name,
             "message": "正在启动浏览器...",
         }
 
-        asyncio.create_task(self._qr_login_worker(task_id, account_name))
+        asyncio.create_task(self._qr_login_worker(task_id, account_name, account_id))
 
         return {"qr_base64": "", "message": "登录任务已创建"}
 
-    async def _qr_login_worker(self, task_id: int, account_name: str):
+    async def _qr_login_worker(self, task_id: int, account_name: str, account_id: Optional[int] = None):
         """后台扫码登录工作线程"""
         playwright = None
         browser = None
@@ -221,7 +310,10 @@ class BrowserManager:
                 args=BROWSER_ARGS,
             )
 
-            context = await browser.new_context(**self._make_context_opts())
+            existing_account = self._find_account_by_id(account_id)
+            fingerprint = self._load_account_fingerprint(existing_account)
+
+            context = await browser.new_context(**self._make_context_opts(fingerprint=fingerprint))
             await context.add_init_script(FINGERPRINT_SCRIPT)
 
             page = await context.new_page()
@@ -316,33 +408,39 @@ class BrowserManager:
                 self.login_sessions[task_id]["final_url"] = page.url
 
                 # 保存 StorageState
-                storage_path = await self._save_context_state(context, task_id)
-
-                ua = await page.evaluate("navigator.userAgent")
-                vp = page.viewport_size
+                storage_path, cookies_json = await self._save_context_state(context, task_id)
+                fingerprint_snapshot = await self._capture_fingerprint(page)
+                ua = fingerprint_snapshot.get("user_agent")
+                vp = fingerprint_snapshot.get("viewport") or {}
 
                 self.login_sessions[task_id].update({
                     "storage_path": storage_path,
+                    "cookies_json": cookies_json,
+                    "browser_fingerprint_json": json.dumps(fingerprint_snapshot, ensure_ascii=False),
                     "user_agent": ua,
                     "viewport_width": vp.get("width") if vp else None,
                     "viewport_height": vp.get("height") if vp else None,
                 })
 
-                # 将登录上下文设置为持久化上下文（不关闭浏览器！）
-                await self.set_logged_in_context(context, storage_path, task_id)
-                logger.info(
-                    f"扫码登录完成! storage_path={storage_path}, "
-                    f"final_url={page.url}, 上下文已持久化"
-                )
-
                 # 直接写入数据库（不依赖前端轮询）
-                self._save_account_to_db(
+                saved_account_id = self._save_account_to_db(
                     task_id=task_id,
-                    account_name=f"采集账号_{task_id}",
+                    account_id=account_id,
+                    account_name=account_name,
                     storage_path=storage_path,
+                    cookies_json=cookies_json,
+                    browser_fingerprint_json=json.dumps(fingerprint_snapshot, ensure_ascii=False),
                     ua=ua,
                     vp_width=vp.get("width") if vp else None,
                     vp_height=vp.get("height") if vp else None,
+                )
+                self.login_sessions[task_id]["account_id"] = saved_account_id
+
+                # 将登录上下文设置为持久化上下文（不关闭浏览器！）
+                await self.set_logged_in_context(context, storage_path, saved_account_id or task_id)
+                logger.info(
+                    f"扫码登录完成! storage_path={storage_path}, "
+                    f"final_url={page.url}, account_id={saved_account_id}, 上下文已持久化"
                 )
 
                 # 验证登录是否真正成功
@@ -389,34 +487,105 @@ class BrowserManager:
             # 上下文被保持为持久化上下文，浏览器需要继续运行
             pass
 
-    async def _save_context_state(self, context: BrowserContext, task_id: int) -> str:
-        """保存上下文状态到文件"""
+    async def _save_context_state(self, context: BrowserContext, task_id: int) -> tuple[str, str]:
+        """保存上下文状态到文件，并返回 cookies 备份。"""
         path = str(STORAGE_DIR / f"login_task_{task_id}.json")
-        await context.storage_state(path=path)
+        state = await context.storage_state(path=path)
+        cookies_json = json.dumps(state.get("cookies", []), ensure_ascii=False)
         logger.info(f"StorageState 已保存: {path}")
-        return path
+        return path, cookies_json
 
-    def _save_account_to_db(self, task_id: int, account_name: str,
-                            storage_path: str, ua: str | None,
-                            vp_width: int | None, vp_height: int | None):
-        """登录成功后直接写入 ScraperAccount 表和更新 ScraperTask"""
+    async def _capture_fingerprint(self, page: Page) -> dict[str, Any]:
+        """抓取当前页面的浏览器指纹快照。"""
+        browser_fp = await page.evaluate(
+            """
+            () => ({
+              user_agent: navigator.userAgent,
+              language: navigator.language,
+              languages: navigator.languages,
+              platform: navigator.platform,
+              hardware_concurrency: navigator.hardwareConcurrency,
+              device_memory: navigator.deviceMemory || null,
+              device_scale_factor: window.devicePixelRatio || 1,
+              color_scheme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+              timezone_id: Intl.DateTimeFormat().resolvedOptions().timeZone || null,
+              viewport: {
+                width: window.innerWidth,
+                height: window.innerHeight
+              },
+              screen: {
+                width: window.screen.width,
+                height: window.screen.height
+              }
+            })
+            """
+        )
+        browser_fp["locale"] = browser_fp.get("language") or DEFAULT_FINGERPRINT["locale"]
+        return browser_fp
+
+    def _update_account_state(
+        self,
+        account_id: Optional[int],
+        storage_path: Optional[str] = None,
+        cookies_json: Optional[str] = None
+    ) -> None:
+        """刷新账号表里的 storage_state / cookies。"""
+        if not account_id:
+            return
+
         db = SessionLocal()
         try:
-            # 避免重复创建（同一个 task_id 只创建一次）
-            existing = db.query(ScraperAccount).filter(
-                ScraperAccount.account_name == account_name
-            ).first()
+            account = db.query(ScraperAccount).get(account_id)
+            if not account:
+                return
+            if storage_path:
+                account.storage_state_path = storage_path
+            if cookies_json:
+                account.cookies_json = cookies_json
+            account.updated_at = datetime.utcnow()
+            db.commit()
+        except Exception as e:
+            logger.warning(f"刷新账号登录态失败: {e}")
+            db.rollback()
+        finally:
+            db.close()
+
+    def _save_account_to_db(
+        self,
+        task_id: int,
+        account_name: str,
+        storage_path: str,
+        cookies_json: str,
+        browser_fingerprint_json: str,
+        ua: str | None,
+        vp_width: int | None,
+        vp_height: int | None,
+        account_id: Optional[int] = None
+    ) -> Optional[int]:
+        """登录成功后写入 ScraperAccount 表，并返回最终账号 ID。"""
+        db = SessionLocal()
+        try:
+            existing = None
+            if account_id:
+                existing = db.query(ScraperAccount).get(account_id)
+            if existing is None:
+                existing = db.query(ScraperAccount).filter(
+                    ScraperAccount.account_name == account_name
+                ).order_by(ScraperAccount.id.desc()).first()
+
             if existing:
-                # 更新已有记录
                 existing.storage_state_path = storage_path
                 existing.user_agent = ua
                 existing.viewport_width = vp_width
                 existing.viewport_height = vp_height
                 existing.login_status = "logged_in"
                 existing.last_login_at = datetime.utcnow()
+                existing.cookies_json = cookies_json
+                existing.browser_fingerprint_json = browser_fingerprint_json
                 logger.info(f"更新已有账号记录: id={existing.id}, name={account_name}")
+                saved_account = existing
             else:
-                account = ScraperAccount(
+                saved_account = ScraperAccount(
                     account_name=account_name,
                     login_status="logged_in",
                     storage_state_path=storage_path,
@@ -424,8 +593,10 @@ class BrowserManager:
                     viewport_width=vp_width,
                     viewport_height=vp_height,
                     last_login_at=datetime.utcnow(),
+                    cookies_json=cookies_json,
+                    browser_fingerprint_json=browser_fingerprint_json,
                 )
-                db.add(account)
+                db.add(saved_account)
                 logger.info(f"创建新账号记录: name={account_name}")
 
             # 更新任务状态
@@ -433,11 +604,20 @@ class BrowserManager:
             if db_task:
                 db_task.status = "completed"
                 db_task.completed_at = datetime.utcnow()
+                if existing:
+                    db_task.account_id = existing.id
 
             db.commit()
+            db.refresh(saved_account)
+            if db_task and saved_account:
+                db_task.account_id = saved_account.id
+                db.commit()
+
+            return saved_account.id
         except Exception as e:
             logger.error(f"保存账号记录失败: {e}")
             db.rollback()
+            return None
         finally:
             db.close()
 
@@ -457,6 +637,7 @@ class BrowserManager:
             "status": session.get("status", "pending"),
             "qr_base64": session.get("qr_base64", ""),
             "account_id": session.get("account_id"),
+            "account_name": session.get("account_name"),
             "storage_path": session.get("storage_path"),
             "user_agent": session.get("user_agent"),
             "viewport_width": session.get("viewport_width"),
