@@ -12,6 +12,8 @@ class LiveRoomBase(BaseModel):
     anchor_avatar_url: Optional[str] = None
     douyin_id: Optional[str] = None
     douyin_uid: Optional[str] = None
+    detail_collection_status: str = "pending"
+    detail_collection_error: Optional[str] = None
     room_id_str: Optional[str] = None
     team_name: Optional[str] = None
     platform: str = "douyin"

@@ -1049,6 +1049,9 @@ async def _enrich_history_sessions(
             )
         except asyncio.TimeoutError:
             logger.warning("历史场次详情采集超时，跳过: session_id=%s room_id=%s", session.id, room_id)
+            session.detail_collection_status = "retryable"
+            session.detail_collection_error = "详情页采集超时，可在下次采集重试"
+            db.commit()
             continue
         except Exception as exc:
             if _is_context_closed_error(exc):
@@ -1084,12 +1087,17 @@ async def _enrich_history_sessions(
 
         if detail.get("validation_failed"):
             consecutive_mismatch += 1
+            session.detail_collection_status = "unavailable"
+            session.detail_collection_error = "平台详情页未回显该场次时间，无法安全确认主播归属"
+            db.commit()
             if consecutive_mismatch >= 5:
                 logger.info("历史详情连续 %s 场校验失败，停止继续补齐更早场次", consecutive_mismatch)
                 break
             continue
 
         consecutive_mismatch = 0
+        session.detail_collection_status = "complete"
+        session.detail_collection_error = None
         overview = detail.get("overview", {})
         trend_rows = detail.get("trend", [])
         replay_url = detail.get("replay_url")
@@ -1708,6 +1716,8 @@ def _merge_room_profile(primary: dict, fallback: dict) -> dict:
 
 def _needs_history_enrichment(session: LiveSession) -> bool:
     """判断历史场次是否还需要继续补齐详情。"""
+    if session.detail_collection_status == "unavailable":
+        return False
     return not (
         bool(session.anchor_name)
         and
