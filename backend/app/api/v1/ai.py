@@ -72,6 +72,22 @@ def score_session(session_id: int, db: Session = Depends(get_db)):
     return {"status": "ok", "result": result}
 
 
+@router.post("/pipeline/{session_id}")
+def run_transcript_ai_pipeline(session_id: int, db: Session = Depends(get_db)):
+    """转写完成后执行评分，并把话术和分析结果同步到知识库。"""
+    result = score_session_transcript(session_id, db)
+    if result is None:
+        raise HTTPException(400, "没有足够的已完成话术，无法执行 AI 分析")
+    transcript_saved = save_transcript_to_kb(db, session_id)
+    analysis_saved = save_analysis_to_kb(db, session_id)
+    return {
+        "status": "ok",
+        "result": result,
+        "transcript_saved": transcript_saved,
+        "analysis_saved": analysis_saved,
+    }
+
+
 @router.post("/score/batch")
 def batch_score(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
     """批量评分最近有话术但未评分的场次"""

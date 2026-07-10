@@ -1,4 +1,9 @@
+import os
+from pathlib import Path
 from pydantic_settings import BaseSettings
+
+# 项目根目录（config.py → app/core/ → backend/ → 项目根目录）
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class Settings(BaseSettings):
@@ -34,6 +39,7 @@ class Settings(BaseSettings):
     FUNASR_WS_URL: str = "ws://localhost:10096"
     ASR_SAMPLE_RATE: int = 16000
     ASR_MAX_QUEUED: int = 5
+    ASR_TASK_TIMEOUT_SECONDS: int = 600
 
     # Playwright / 采集
     PLAYWRIGHT_HEADLESS: bool = True
@@ -46,6 +52,12 @@ class Settings(BaseSettings):
     COMMENT_COLLECT_INTERVAL: int = 60
     PROFILE_COLLECT_INTERVAL: int = 120
 
+    # Phase 8: JWT 认证
+    JWT_SECRET_KEY: str = "douyin-live-jwt-secret-change-in-prod"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 小时
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
     @property
     def db_url(self) -> str:
         if self.DATABASE_URL:
@@ -53,7 +65,7 @@ class Settings(BaseSettings):
         return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
 
     class Config:
-        env_file = ".env"
+        env_file = str(PROJECT_ROOT / ".env")
         env_file_encoding = "utf-8"
 
 

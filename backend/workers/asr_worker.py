@@ -74,6 +74,8 @@ class AsrWorker:
         """处理单个 ASR 任务"""
         async with self._semaphore:
             db = SessionLocal()
+            pipe = None
+            client = None
             try:
                 task = db.query(AsrTask).get(task_id)
                 if not task or task.status != "queued":
@@ -98,30 +100,19 @@ class AsrWorker:
                 if not await client.connect():
                     logger.info(f"任务 {task_id}: 使用 Mock ASR 模式")
 
-                segment_count = 0
-                async for result in client.transcribe(task.session_id, pipe.read_frames()):
-                    # 写入 transcript_segments
-                    segment = TranscriptSegment(
-                        session_id=task.session_id,
-                        segment_start=result.get("segment_start"),
-                        segment_end=result.get("segment_end"),
-                        text_content=result.get("text", ""),
-                        asr_status="completed",
-                        segment_type="asr_realtime",
-                    )
-                    db.add(segment)
-                    db.commit()
-                    segment_count += 1
-
-                    # Redis Pub → WebSocket 推送
-                    await ws_manager.publish_asr_result(task.session_id, result)
+                segment_count = await asyncio.wait_for(
+                    self._consume_transcription(db, task, client, pipe),
+                    timeout=settings.ASR_TASK_TIMEOUT_SECONDS,
+                )
+                if segment_count == 0:
+                    raise RuntimeError("未识别到有效语音片段，直播流可能已过期或没有音频")
 
                 # 拼接完整文本
                 if segment_count > 0:
                     segments = (
                         db.query(TranscriptSegment)
                         .filter(TranscriptSegment.session_id == task.session_id)
-                        .order_by(TranscriptSegment.segment_start.asc().nullslast())
+                        .order_by(TranscriptSegment.segment_start.asc())
                         .all()
                     )
                     full_text = "\n".join(
@@ -137,13 +128,20 @@ class AsrWorker:
                     db.commit()
 
                 task.status = "completed"
+                task.error_message = None
                 task.completed_at = datetime.utcnow()
                 db.commit()
                 logger.info(f"任务 {task_id} 完成: {segment_count} 个片段")
 
-                await pipe.close()
-                await client.close()
-
+            except asyncio.TimeoutError:
+                message = f"转写超过 {settings.ASR_TASK_TIMEOUT_SECONDS} 秒，可能是直播流已过期"
+                logger.warning("任务 %s 超时: %s", task_id, message)
+                if db:
+                    task = db.query(AsrTask).get(task_id)
+                    if task:
+                        task.status = "failed"
+                        task.error_message = message
+                        db.commit()
             except Exception as e:
                 logger.error(f"任务 {task_id} 失败: {e}")
                 if db:
@@ -153,7 +151,30 @@ class AsrWorker:
                         task.error_message = str(e)[:200]
                         db.commit()
             finally:
+                if pipe:
+                    await pipe.close()
+                if client:
+                    await client.close()
                 db.close()
+
+    async def _consume_transcription(self, db, task, client, pipe) -> int:
+        """消费 ASR 结果并持久化，交由外层统一控制任务超时。"""
+        segment_count = 0
+        async for result in client.transcribe(task.session_id, pipe.read_frames()):
+            segment = TranscriptSegment(
+                session_id=task.session_id,
+                segment_start=result.get("segment_start"),
+                segment_end=result.get("segment_end"),
+                text_content=result.get("text", ""),
+                asr_status="completed",
+                segment_type="asr_realtime",
+            )
+            db.add(segment)
+            db.commit()
+            segment_count += 1
+            await ws_manager.publish_asr_result(task.session_id, result)
+
+        return segment_count
 
 
 async def main():

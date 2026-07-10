@@ -20,7 +20,7 @@ def _format_session_for_ai(session: LiveSession) -> dict:
     return {
         "id": session.id,
         "title": session.session_title or "",
-        "anchor": session.room.anchor_name if session.room else "",
+        "anchor": session.anchor_name or (session.room.anchor_name if session.room else ""),
         "start_time": str(session.live_start_time or ""),
         "end_time": str(session.live_end_time or ""),
         "duration_minutes": session.live_duration_seconds // 60 if session.live_duration_seconds else 0,

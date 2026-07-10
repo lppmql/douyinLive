@@ -3,7 +3,13 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { NTag, NButton, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
 import { useWebSocket } from '@vueuse/core';
-import { fetchTranscriptSegments, fetchTranscriptFullText, fetchLiveSessions, queueTranscript } from '@/service/api/douyin';
+import {
+  fetchTranscriptSegments,
+  fetchTranscriptFullText,
+  fetchLiveSessions,
+  queueTranscript,
+  runTranscriptAiPipeline
+} from '@/service/api/douyin';
 
 defineOptions({
   name: 'Transcripts'
@@ -111,6 +117,17 @@ async function startTranscription() {
   }
 }
 
+async function runAiPipeline() {
+    if (!selectedSessionId.value) return;
+  try {
+    const res = await runTranscriptAiPipeline(selectedSessionId.value);
+    const saved = (res.data?.transcript_saved ?? 0) + (res.data?.analysis_saved ?? 0);
+    message.success(`AI 分析完成，知识库新增 ${saved} 条`);
+  } catch {
+    message.error('请先完成该场次的话术转写');
+  }
+}
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
@@ -183,6 +200,9 @@ watch(selectedSessionId, (newId) => {
           </NButton>
           <NButton size="small" type="primary" @click="startTranscription" :disabled="!selectedSessionId">
             开始转写
+          </NButton>
+          <NButton size="small" @click="runAiPipeline" :disabled="!selectedSessionId">
+            AI 分析并入库
           </NButton>
         </NSpace>
       </NSpace>

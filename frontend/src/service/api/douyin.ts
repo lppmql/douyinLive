@@ -101,6 +101,13 @@ export function fetchAnalysisAlerts(sessionId: number) {
   return backendRequest<Api.Douyin.AlertItem[]>({ url: `${API_PREFIX}/analysis/${sessionId}/alerts` });
 }
 
+export function runTranscriptAiPipeline(sessionId: number) {
+  return backendRequest<{ status: string; transcript_saved: number; analysis_saved: number }>({
+    url: `${API_PREFIX}/ai/pipeline/${sessionId}`,
+    method: 'POST'
+  });
+}
+
 /* ---------- 监控管理 ---------- */
 
 /** 获取监控器状态 */
