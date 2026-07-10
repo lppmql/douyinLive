@@ -93,6 +93,8 @@ async def collect_all(db: Session) -> dict:
             result = await _collect_room_data(db, context, room)
             results.append(result)
 
+        # 历史接口按采集账号返回，当前平台返回的数据没有携带主播标识，
+        # 因此只能归属到该账号的主直播间；已配置的其它直播间仍会单独采集当前场次。
         history_sync = _sync_history_sessions(db, account, rooms[0])
         history_detail_progress = await _enrich_history_sessions(
             db,
@@ -334,6 +336,7 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
     url = f"{LIVE_SCREEN_URL}?room_id={room_id}&fullscreen=0"
     page = await context.new_page()
     captured_api = []
+    response_tasks = []
 
     async def on_response(resp):
         try:
@@ -344,7 +347,7 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
         except Exception:
             pass
 
-    page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
+    page.on("response", lambda r: response_tasks.append(asyncio.create_task(on_response(r))))
 
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -362,6 +365,7 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
                 time_text: timeWrap ? timeWrap.innerText.trim() : ''
               };
             }
+
             """
         )
 
@@ -620,6 +624,10 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(6)
+        # response 回调是异步任务，关闭页面前留出时间让评论 JSON 完整落入缓存。
+        await asyncio.sleep(1)
+        if response_tasks:
+            await asyncio.gather(*response_tasks, return_exceptions=True)
     except Exception:
         pass
     finally:
@@ -630,6 +638,8 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
         if not isinstance(data, dict):
             continue
         inner = data.get("data", {}) or {}
+        if isinstance(inner, dict) and isinstance(inner.get("data"), dict):
+            inner = inner["data"]
 
         comment_list = None
         if isinstance(inner, list):
@@ -641,10 +651,14 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
             for c in comment_list:
                 if not isinstance(c, dict):
                     continue
+                nickname = c.get("user_nickname") or c.get("nickname") or c.get("nickName") or ""
+                content = c.get("comment_content") or c.get("content") or ""
+                if not content:
+                    continue
                 comments.append({
-                    "user_nickname": c.get("user_nickname") or c.get("nickname") or "",
-                    "comment_content": c.get("comment_content") or c.get("content") or "",
-                    "comment_time": c.get("comment_time"),
+                    "user_nickname": nickname,
+                    "comment_content": content,
+                    "comment_time": _parse_comment_time(c.get("comment_time") or c.get("createTime")),
                 })
 
     return comments
@@ -738,7 +752,8 @@ def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom)
         if row.dashboard_url
     }
     page_no = 1
-    limit = 100
+    # 平台接口限制每页最多 20 条，超过会返回 code=3 且没有 live_history。
+    limit = 20
     total = None
     synced = 0
 
@@ -754,12 +769,24 @@ def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom)
         )
         with urlopen(req, timeout=30) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
+        if (payload or {}).get("code") not in (0, None):
+            message = (payload or {}).get("msg") or "历史场次接口返回错误"
+            raise RuntimeError(f"历史场次同步失败: {message}")
+
         data = (payload or {}).get("data", {}) or {}
         history_rows = data.get("live_history") or []
-        total = data.get("total_count") or 0
+        total = _safe_int(data.get("total_count")) or 0
 
         if not history_rows:
             break
+
+        logger.info(
+            "历史场次分页采集: page=%s, page_size=%s, total=%s, synced_before=%s",
+            page_no,
+            len(history_rows),
+            total,
+            synced,
+        )
 
         for item in history_rows:
             history_room_id = str(item.get("room_id") or "").strip()
@@ -882,8 +909,11 @@ async def _enrich_history_sessions(
         trend_rows = detail.get("trend", [])
         replay_url = detail.get("replay_url")
         comments_data = detail.get("comments", [])
+        anchor_profile = detail.get("anchor_profile", {}) or {}
 
-        changed = _apply_overview_to_session(session, overview)
+        changed = _apply_session_anchor_profile(session, anchor_profile)
+
+        changed = _apply_overview_to_session(session, overview) or changed
         if replay_url and session.stream_url != replay_url:
             session.stream_url = replay_url[:2000]
             changed = True
@@ -897,6 +927,14 @@ async def _enrich_history_sessions(
         if changed or metrics_count or comments_count:
             db.commit()
             enriched += 1
+            logger.info(
+                "历史场次详情补齐: session_id=%s, anchor=%s, metrics=%s, comments=%s, stream=%s",
+                session.id,
+                session.anchor_name or "未知主播",
+                metrics_count,
+                comments_count,
+                bool(session.stream_url),
+            )
 
     return {
         "enriched_count": enriched,
@@ -974,6 +1012,9 @@ async def _scrape_history_session_detail(
                 "validation_failed": True,
             }
 
+        # 企业主账号页面默认会脱敏显示主播名，点击小眼睛后才能读取本场真实主播。
+        anchor_profile = await _reveal_session_anchor(page)
+
         overview_rows = (((hits.get("overview") or {}).get("data", {}) or {}).get("statRows")) or []
         trend_rows = (((hits.get("data") or {}).get("data", {}) or {}).get("trend")) or []
         replay_url = (((hits.get("replay") or {}).get("data", {}) or {}).get("replayUrl")) or None
@@ -983,9 +1024,10 @@ async def _scrape_history_session_detail(
             "trend": trend_rows,
             "replay_url": replay_url,
             "comments": comments,
+            "anchor_profile": anchor_profile,
         }
     except Exception:
-        return {"overview": {}, "trend": [], "replay_url": None, "comments": [], "validation_failed": False}
+        return {"overview": {}, "trend": [], "replay_url": None, "comments": [], "anchor_profile": {}, "validation_failed": False}
     finally:
         if page:
             await page.close()
@@ -995,6 +1037,28 @@ def _is_context_closed_error(exc: Exception) -> bool:
     """识别 Playwright 上下文/页面已关闭错误。"""
     text = str(exc).lower()
     return "target page, context or browser has been closed" in text or "browsercontext.new_page" in text
+
+
+async def _reveal_session_anchor(page) -> dict:
+    """点击直播大屏顶部小眼睛，读取企业主账号下本场主播。"""
+    try:
+        eye = page.locator('[data-log-name="显示账号"]').first
+        try:
+            await eye.click(timeout=3000, force=True)
+        except Exception:
+            # 企业后台的顶部层有时会拦截 Playwright 鼠标事件，直接触发 DOM click 更稳定。
+            await page.evaluate("document.querySelector('[data-log-name=\\\"显示账号\\\"]')?.click()")
+        await asyncio.sleep(0.5)
+        return await page.evaluate(
+            """() => {
+              const inner = document.querySelector('#screen-account-select .leads-rimless-input-inner');
+              const name = inner?.querySelector('span')?.textContent?.trim() || inner?.textContent?.trim() || '';
+              return name && name !== '*******' ? {anchor_name: name, anchor_nickname: name} : {};
+            }"""
+        ) or {}
+    except Exception as exc:
+        logger.debug("读取本场主播资料失败: %s", exc)
+        return {}
 
 
 async def _scrape_stream_url(context: BrowserContext, room_id: str) -> Optional[str]:
@@ -1200,6 +1264,20 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
     return count
 
 
+def _parse_comment_time(value) -> Optional[datetime]:
+    """兼容评论接口的 Unix 秒、毫秒和 datetime 字符串。"""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)) or (isinstance(value, str) and value.isdigit()):
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000
+        return datetime.fromtimestamp(timestamp)
+    if isinstance(value, str) and value:
+        return _parse_dt(value) or None
+    return None
+
+
 def _save_profiles(db: Session, session_id: int, profiles: list) -> int:
     """保存画像数据"""
     count = 0
@@ -1394,6 +1472,17 @@ def _apply_overview_to_session(session: LiveSession, overview_row: dict) -> bool
             changed = True
 
     session.live_status = "ended" if session.live_end_time else session.live_status
+    return changed
+
+
+def _apply_session_anchor_profile(session: LiveSession, profile: dict) -> bool:
+    """保存小眼睛展开后的本场主播资料，避免不同主播历史场次串号。"""
+    changed = False
+    for field in ("anchor_name", "anchor_nickname", "anchor_avatar_url", "douyin_id", "douyin_uid"):
+        value = profile.get(field)
+        if value and getattr(session, field) != value:
+            setattr(session, field, str(value)[:500])
+            changed = True
     return changed
 
 

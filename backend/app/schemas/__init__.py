@@ -69,7 +69,7 @@ class LiveSessionUpdate(BaseModel):
 
 class LiveSessionResponse(LiveSessionBase):
     id: int
-    anchor_name: Optional[str] = None  # 从 LiveRoom 关联获取
+    anchor_name: Optional[str] = None
     anchor_nickname: Optional[str] = None
     anchor_avatar_url: Optional[str] = None
     douyin_id: Optional[str] = None

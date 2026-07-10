@@ -15,6 +15,13 @@ class LiveSession(Base, TimestampMixin):
     dashboard_url = Column(String(1000), nullable=True, comment="直播大屏页面URL")
     stream_url = Column(String(2000), nullable=True, comment="直播流m3u8地址")
 
+    # 企业主账号下不同场次可能属于不同主播，必须按场次保存而不是只从直播间主表读取。
+    anchor_name = Column(String(100), nullable=True, comment="本场主播名称")
+    anchor_nickname = Column(String(100), nullable=True, comment="本场主播昵称")
+    anchor_avatar_url = Column(String(500), nullable=True, comment="本场主播头像")
+    douyin_id = Column(String(100), nullable=True, comment="本场主播抖音号")
+    douyin_uid = Column(String(100), nullable=True, comment="本场主播抖音UID")
+
     # 时间
     live_start_time = Column(DateTime, nullable=True, comment="开播时间")
     live_end_time = Column(DateTime, nullable=True, comment="下播时间")

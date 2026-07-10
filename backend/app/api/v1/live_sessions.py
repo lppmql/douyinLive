@@ -23,11 +23,12 @@ def _attach_room_profile(session: LiveSession) -> dict:
     """将 LiveRoom 上的主播资料注入到场次返回数据中。"""
     data = {c.name: getattr(session, c.name) for c in session.__table__.columns}
     room = session.room
-    data["anchor_name"] = room.anchor_name if room else None
-    data["anchor_nickname"] = room.anchor_nickname if room else None
-    data["anchor_avatar_url"] = room.anchor_avatar_url if room else None
-    data["douyin_id"] = room.douyin_id if room else None
-    data["douyin_uid"] = room.douyin_uid if room else None
+    # 历史场次优先使用小眼睛读取的场次级主播资料，旧数据才回退到直播间配置。
+    data["anchor_name"] = session.anchor_name or (room.anchor_name if room else None)
+    data["anchor_nickname"] = session.anchor_nickname or (room.anchor_nickname if room else None)
+    data["anchor_avatar_url"] = session.anchor_avatar_url or (room.anchor_avatar_url if room else None)
+    data["douyin_id"] = session.douyin_id or (room.douyin_id if room else None)
+    data["douyin_uid"] = session.douyin_uid or (room.douyin_uid if room else None)
     return data
 
 
