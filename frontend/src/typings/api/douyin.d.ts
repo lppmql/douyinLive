@@ -204,6 +204,11 @@ declare namespace Api {
     interface CollectAllResponse {
       total_rooms: number;
       collected_rooms: number;
+      history_synced_count: number;
+      history_detail_synced_count: number;
+      history_detail_checked_count: number;
+      history_detail_remaining_count: number;
+      history_detail_batch_size: number;
       results: CollectRoomResult[];
       message: string | null;
     }

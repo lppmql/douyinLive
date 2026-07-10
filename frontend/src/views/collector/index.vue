@@ -15,7 +15,8 @@ import {
   startMonitor,
   stopMonitor,
   triggerMockLive,
-  triggerMockEnd
+  triggerMockEnd,
+  collectAllData
 } from '@/service/api/douyin';
 
 defineOptions({
@@ -44,6 +45,10 @@ let loginPollTimer: ReturnType<typeof setInterval> | null = null;
 /* ---------- 监控 ---------- */
 const monitorStatus = ref<Api.Douyin.MonitorStatus | null>(null);
 const monitorLoading = ref(false);
+
+/* ---------- 一键采集 ---------- */
+const collectAllLoading = ref(false);
+const collectAllResult = ref<Api.Douyin.CollectAllResponse | null>(null);
 
 async function loadMonitorStatus() {
   const res = await fetchMonitorStatus();
@@ -81,6 +86,30 @@ async function handleTriggerEnd() {
   const res = await triggerMockEnd();
   if (res.data?.success) message.success(res.data.message);
   await loadMonitorStatus();
+}
+
+/* ---------- 一键采集 ---------- */
+async function handleCollectAll() {
+  collectAllLoading.value = true;
+  collectAllResult.value = null;
+  try {
+    const res = await collectAllData();
+    collectAllResult.value = res.data;
+    if (res.data?.collected_rooms && res.data.collected_rooms > 0) {
+      message.success(`采集完成：${res.data.collected_rooms}/${res.data.total_rooms} 个房间`);
+      if ((res.data.history_detail_remaining_count || 0) > 0) {
+        message.info(
+          `历史场次本次补齐 ${res.data.history_detail_synced_count} 场，剩余 ${res.data.history_detail_remaining_count} 场，继续点一次会接着补`
+        );
+      }
+    } else if (res.data?.message) {
+      message.warning(res.data.message);
+    }
+  } catch {
+    message.error('一键采集失败');
+  } finally {
+    collectAllLoading.value = false;
+  }
 }
 
 /* ---------- 加载数据 ---------- */
@@ -268,6 +297,24 @@ const accountColumns = [
   }
 ];
 
+const collectResultColumns = [
+  { title: '主播', key: 'anchor_name', width: 100 },
+  { title: '直播', key: 'is_live', width: 60, render(row: { is_live: boolean }) { return row.is_live ? h(NTag, { type: 'success', size: 'small' }, { default: () => '直播中' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '未开播' }); } },
+  { title: '指标数', key: 'metrics_count', width: 80 },
+  { title: '评论数', key: 'comments_count', width: 80 },
+  { title: '画像数', key: 'profiles_count', width: 80 },
+  {
+    title: '状态',
+    key: 'error',
+    width: 200,
+    render(row: { error: string | null }) {
+      return row.error
+        ? h(NTag, { type: 'error', size: 'small' }, { default: () => row.error })
+        : h(NTag, { type: 'success', size: 'small' }, { default: () => '成功' });
+    }
+  },
+];
+
 const logColumns = [
   { title: () => $t('page.collector.logTime'), key: 'created_at', width: 180 },
   {
@@ -372,6 +419,63 @@ onUnmounted(() => {
               模拟下播
             </NButton>
           </NSpace>
+        </NSpace>
+      </NCard>
+
+      <!-- 一键采集 -->
+      <NCard :bordered="false" class="card-wrapper">
+        <template #header>
+          <NSpace>
+            <SvgIcon icon="mdi:cloud-download" class="text-22px" />
+            <span class="text-16px font-bold">一键采集</span>
+          </NSpace>
+        </template>
+        <NSpace vertical :size="12">
+          <p class="text-13px text-gray-500">
+            使用已登录的账号 Cookie，自动采集所有主播房间的直播大屏数据。
+          </p>
+          <NSpace :size="12">
+            <NButton
+              type="primary"
+              :loading="collectAllLoading"
+              :disabled="collectAllLoading"
+              @click="handleCollectAll"
+            >
+              <template #icon>
+                <SvgIcon icon="mdi:sync" />
+              </template>
+              {{ collectAllLoading ? '采集中...' : '一键采集全部' }}
+            </NButton>
+          </NSpace>
+
+          <!-- 采集结果 -->
+          <NCard v-if="collectAllResult" size="small" :bordered="true" class="mt-8px">
+            <NSpace vertical :size="8">
+              <NSpace align="center">
+                <span class="text-14px font-bold">采集结果</span>
+                <NTag :type="collectAllResult.collected_rooms > 0 ? 'success' : 'warning'" size="small">
+                  {{ collectAllResult.collected_rooms }}/{{ collectAllResult.total_rooms }} 个房间成功
+                </NTag>
+                <span v-if="collectAllResult.message" class="text-13px text-gray-500">
+                  {{ collectAllResult.message }}
+                </span>
+              </NSpace>
+              <div class="text-13px text-gray-500">
+                历史场次同步 {{ collectAllResult.history_synced_count || 0 }} 场；
+                本次补详情 {{ collectAllResult.history_detail_synced_count || 0 }}/{{ collectAllResult.history_detail_checked_count || 0 }} 场；
+                剩余待补 {{ collectAllResult.history_detail_remaining_count || 0 }} 场；
+                单次最多补 {{ collectAllResult.history_detail_batch_size || 0 }} 场
+              </div>
+              <NDataTable
+                v-if="collectAllResult.results && collectAllResult.results.length > 0"
+                :columns="collectResultColumns"
+                :data="collectAllResult.results"
+                :bordered="false"
+                :single-line="false"
+                size="small"
+              />
+            </NSpace>
+          </NCard>
         </NSpace>
       </NCard>
 

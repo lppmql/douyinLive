@@ -34,6 +34,8 @@ LIVE_SCREEN_URL = f"{LEADS_BASE}/pc/analysis/live-screen"
 COMMENT_URL = f"{LEADS_BASE}/pc/analysis/live-comment"
 HOME_URL = f"{LEADS_BASE}/pc/growth/home"
 HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
+HISTORY_DETAIL_BATCH_SIZE = 20
+HISTORY_DETAIL_TIMEOUT_SECONDS = 20
 
 
 async def collect_all(db: Session) -> dict:
@@ -87,7 +89,13 @@ async def collect_all(db: Session) -> dict:
 
     try:
         history_sync = _sync_history_sessions(db, account, rooms[0])
-        history_detail_sync = await _enrich_history_sessions(db, context, account, rooms[0])
+        history_detail_progress = await _enrich_history_sessions(
+            db,
+            context,
+            account,
+            rooms[0],
+            limit=HISTORY_DETAIL_BATCH_SIZE,
+        )
         results = []
         for room in rooms:
             result = await _collect_room_data(db, context, room)
@@ -101,7 +109,10 @@ async def collect_all(db: Session) -> dict:
             "total_rooms": len(rooms),
             "collected_rooms": collected,
             "history_synced_count": history_sync,
-            "history_detail_synced_count": history_detail_sync,
+            "history_detail_synced_count": history_detail_progress["enriched_count"],
+            "history_detail_checked_count": history_detail_progress["checked_count"],
+            "history_detail_remaining_count": history_detail_progress["remaining_count"],
+            "history_detail_batch_size": history_detail_progress["batch_size"],
             "results": results,
         }
     finally:
@@ -623,10 +634,11 @@ async def _enrich_history_sessions(
     context: BrowserContext,
     account: ScraperAccount,
     room: LiveRoom,
-) -> int:
+    limit: int = HISTORY_DETAIL_BATCH_SIZE,
+) -> dict:
     """补齐历史场次的大屏详情、回放流和评论。"""
     del account
-    sessions = (
+    all_sessions = (
         db.query(LiveSession)
         .filter(
             LiveSession.room_id == room.id,
@@ -637,21 +649,26 @@ async def _enrich_history_sessions(
         .all()
     )
 
+    pending_sessions = [session for session in all_sessions if _needs_history_enrichment(session)]
+    target_sessions = pending_sessions[:limit]
     enriched = 0
+    checked = 0
     consecutive_mismatch = 0
-    for session in sessions:
-        if (
-            (session.peak_online_count or 0) > 0
-            and (session.comments_count or 0) > 0
-            and bool(session.stream_url)
-        ):
-            continue
-
+    for session in target_sessions:
         room_id = _extract_room_id_from_dashboard_url(session.dashboard_url)
         if not room_id:
             continue
 
-        detail = await _scrape_history_session_detail(context, room_id, session)
+        checked += 1
+        try:
+            detail = await asyncio.wait_for(
+                _scrape_history_session_detail(context, room_id, session),
+                timeout=HISTORY_DETAIL_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("历史场次详情采集超时，跳过: session_id=%s room_id=%s", session.id, room_id)
+            continue
+
         if detail.get("validation_failed"):
             consecutive_mismatch += 1
             if consecutive_mismatch >= 5:
@@ -680,7 +697,12 @@ async def _enrich_history_sessions(
             db.commit()
             enriched += 1
 
-    return enriched
+    return {
+        "enriched_count": enriched,
+        "checked_count": checked,
+        "remaining_count": max(len(pending_sessions) - checked, 0),
+        "batch_size": limit,
+    }
 
 
 async def _fetch_json(page, url: str) -> dict:
@@ -1116,6 +1138,15 @@ def _apply_overview_to_session(session: LiveSession, overview_row: dict) -> bool
 
     session.live_status = "ended" if session.live_end_time else session.live_status
     return changed
+
+
+def _needs_history_enrichment(session: LiveSession) -> bool:
+    """判断历史场次是否还需要继续补齐详情。"""
+    return not (
+        (session.peak_online_count or 0) > 0
+        and (session.comments_count or 0) > 0
+        and bool(session.stream_url)
+    )
 
 
 def _parse_comments_from_live_screen_text(body_text: str, live_start_time: Optional[datetime]) -> list[dict]:
