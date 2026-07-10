@@ -1,22 +1,27 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
-import { useMessage, useDialog } from 'naive-ui';
+import { useMessage } from 'naive-ui';
 import { $t } from '@/locales';
-import { useEcharts } from '@/hooks/common/echarts';
-import { fetchLiveSessions, scoreSession, optimizeSession, fetchPrompts } from '@/service/api/douyin';
+import { fetchLiveSessions, scoreSession, optimizeSession } from '@/service/api/douyin';
 
 defineOptions({ name: 'Analysis' });
 
 const message = useMessage();
-const dialog = useDialog();
 
 /* ---------- 场次选择 ---------- */
-const sessions = ref<Api.Douyin.LiveSession[]>([]);
+interface SessionOption { id: number; label: string }
+
+const sessions = ref<SessionOption[]>([]);
 const selectedSession = ref<number | null>(null);
 
 onMounted(async () => {
   try {
-    sessions.value = await fetchLiveSessions();
+    const res = await fetchLiveSessions();
+    const list = (res as unknown as { data: { id: number; session_title: string }[] }).data || [];
+    sessions.value = list.map((s: { id: number; session_title: string }) => ({
+      id: s.id,
+      label: s.session_title ? `#${s.id} ${s.session_title}` : `#${s.id}`
+    }));
     if (sessions.value.length) selectedSession.value = sessions.value[0].id;
   } catch { /* ignore */ }
 });
@@ -31,7 +36,8 @@ async function runScore() {
   scoreResult.value = null;
   try {
     const res = await scoreSession(selectedSession.value);
-    scoreResult.value = res.result as unknown as Api.Douyin.AiScoreResult;
+    const data = (res as unknown as { data: { result: Api.Douyin.AiScoreResult } }).data;
+    scoreResult.value = data.result;
     message.success('话术评分完成');
   } catch (e: unknown) {
     const msg = (e as { message?: string })?.message || '评分失败';
@@ -49,7 +55,8 @@ async function runOptimize() {
   loadingOptimize.value = true;
   try {
     const res = await optimizeSession(selectedSession.value);
-    optimizeResult.value = res.result as { suggestions?: string[]; summary?: string };
+    const data = (res as unknown as { data: { result: { suggestions?: string[]; summary?: string } } }).data;
+    optimizeResult.value = data.result;
   } catch { /* ignore */ }
   loadingOptimize.value = false;
 }
@@ -62,16 +69,16 @@ async function runOptimize() {
       <NSpace align="center" wrap>
         <NSelect
           v-model:value="selectedSession"
-          :placeholder="$t('page.analysis.selectSession')"
-          :options="sessions.map(s => ({ label: `${s.sessionTitle || '场次'}#${s.id}`, value: s.id }))"
+          placeholder="选择直播场次"
+          :options="sessions"
           style="width: 280px"
           clearable
         />
         <NButton type="primary" :loading="loadingScore" @click="runScore">
-          {{ $t('page.analysis.runScore') }}
+          话术评分
         </NButton>
         <NButton :loading="loadingOptimize" @click="runOptimize">
-          {{ $t('page.analysis.runOptimize') }}
+          优化建议
         </NButton>
       </NSpace>
     </NCard>
@@ -112,17 +119,19 @@ async function runOptimize() {
     <NGrid v-if="scoreResult" :x-gap="16" :y-gap="16" cols="1 m:2" responsive="screen">
       <NGi>
         <NCard :bordered="false" class="card-wrapper">
-          <template #header><span class="text-15px font-bold">{{ $t('page.analysis.strengths') }}</span></template>
+          <template #header><span class="text-15px font-bold">优势</span></template>
           <ul class="list-disc pl-20px">
             <li v-for="(s, i) in scoreResult.strengths" :key="i">{{ s }}</li>
+            <li v-if="!scoreResult.strengths.length" class="text-gray-400">暂无</li>
           </ul>
         </NCard>
       </NGi>
       <NGi>
         <NCard :bordered="false" class="card-wrapper">
-          <template #header><span class="text-15px font-bold">{{ $t('page.analysis.weaknesses') }}</span></template>
+          <template #header><span class="text-15px font-bold">不足</span></template>
           <ul class="list-disc pl-20px">
             <li v-for="(w, i) in scoreResult.weaknesses" :key="i">{{ w }}</li>
+            <li v-if="!scoreResult.weaknesses.length" class="text-gray-400">暂无</li>
           </ul>
         </NCard>
       </NGi>
@@ -130,13 +139,14 @@ async function runOptimize() {
 
     <!-- 优化建议 -->
     <NCard v-if="optimizeResult" :bordered="false" class="card-wrapper">
-      <template #header><span class="text-15px font-bold">{{ $t('page.analysis.suggestionTitle') }}</span></template>
+      <template #header><span class="text-15px font-bold">优化建议</span></template>
       <NSpace vertical :size="12">
         <div v-for="(item, index) in optimizeResult.suggestions" :key="index"
           class="flex items-start gap-12px rounded-8px bg-gray-50 dark:bg-dark-300 p-12px">
           <NBadge :value="index + 1" />
           <span class="text-14px leading-22px">{{ item }}</span>
         </div>
+        <div v-if="!optimizeResult.suggestions?.length" class="text-gray-400 py-20px text-center">暂无优化建议</div>
       </NSpace>
     </NCard>
   </NSpace>

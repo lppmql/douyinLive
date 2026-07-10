@@ -39,7 +39,7 @@ async function sendQuestion() {
   question.value = '';
   chatting.value = true;
   try {
-    const res = await askKnowledge(q);
+    const res = await askKnowledge(q) as unknown as { answer: string };
     messages.value.push({ role: 'ai', content: res.answer || '暂无回答' });
   } catch {
     messages.value.push({ role: 'ai', content: '请求失败，请稍后重试' });
@@ -51,7 +51,7 @@ async function sendQuestion() {
 /* ---------- 保存到知识库 ---------- */
 async function handleSave() {
   try {
-    const res = await saveToKnowledgeBase(0);
+    const res = await saveToKnowledgeBase(0) as unknown as { analysis_saved: number; transcript_saved: number };
     message.success(`已保存 ${res.analysis_saved + res.transcript_saved} 条`);
   } catch { message.error('保存失败'); }
 }
@@ -97,8 +97,7 @@ async function handleSave() {
             <NTag :type="msg.role === 'user' ? 'primary' : 'success'" size="small" class="mb-4px">
               {{ msg.role === 'user' ? '我' : 'AI' }}
             </NTag>
-            <div :class="['rounded-8px p-10px inline-block max-w-90% text-left leading-22px text-13px',
-              msg.role === 'user' ? 'bg-primary-light text-white' : 'bg-gray-100 dark:bg-dark-300'">
+            <div :class="msg.role === 'user' ? 'rounded-8px p-10px inline-block max-w-90% text-left leading-22px text-13px bg-primary-light text-white' : 'rounded-8px p-10px inline-block max-w-90% text-left leading-22px text-13px bg-gray-100 dark:bg-dark-300'">
               {{ msg.content }}
             </div>
           </div>
