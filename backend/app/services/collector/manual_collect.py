@@ -110,8 +110,7 @@ async def collect_all(db: Session) -> dict:
                 }
             results.append(result)
 
-        # 历史接口按采集账号返回，当前平台返回的数据没有携带主播标识，
-        # 因此只能归属到该账号的主直播间；已配置的其它直播间仍会单独采集当前场次。
+        # 历史接口负责补全全量场次，员工接口负责补全企业账号下的主播映射。
         history_sync = _sync_history_sessions(db, account, rooms[0])
         enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0])
         history_detail_progress = await _enrich_history_sessions(
@@ -930,6 +929,19 @@ async def _sync_enterprise_anchor_sessions(
                     profile_count += 1
 
         db.commit()
+        db.add(
+            ScraperLog(
+                level="info",
+                message=f"企业主播映射同步完成: 主播={len(unique_employees)}, 新场次={session_count}, 更新={profile_count}",
+                raw_json={
+                    "anchor_count": len(unique_employees),
+                    "session_count": session_count,
+                    "profile_count": profile_count,
+                    "room_id": root_room_id,
+                },
+            )
+        )
+        db.commit()
         logger.info(
             "企业主播映射同步完成: anchors=%s, new_sessions=%s, profiles_updated=%s",
             len(unique_employees),
@@ -943,6 +955,8 @@ async def _sync_enterprise_anchor_sessions(
         }
     except Exception as exc:
         db.rollback()
+        db.add(ScraperLog(level="error", message=f"企业主播映射同步失败: {str(exc)[:500]}"))
+        db.commit()
         logger.warning("企业主播映射同步失败: %s", exc)
         return {"anchor_count": 0, "session_count": 0, "profile_count": 0}
     finally:
@@ -1016,6 +1030,8 @@ async def _enrich_history_sessions(
     )
 
     pending_sessions = [session for session in all_sessions if _needs_history_enrichment(session)]
+    # 先处理没有主播资料的旧历史场次，保证每次点击采集都能扩大主播覆盖率。
+    pending_sessions.sort(key=lambda session: (bool(session.anchor_name), -(session.id or 0)))
     target_sessions = pending_sessions[:limit]
     enriched = 0
     checked = 0
@@ -1105,12 +1121,24 @@ async def _enrich_history_sessions(
                 bool(session.stream_url),
             )
 
-    return {
+    progress = {
         "enriched_count": enriched,
         "checked_count": checked,
         "remaining_count": max(len(pending_sessions) - checked, 0),
         "batch_size": limit,
     }
+    db.add(
+        ScraperLog(
+            level="info",
+            message=(
+                f"历史详情批次完成: 检查={checked}, 补齐={enriched}, "
+                f"剩余={progress['remaining_count']}"
+            ),
+            raw_json=progress,
+        )
+    )
+    db.commit()
+    return progress
 
 
 async def _fetch_json(page, url: str) -> dict:
