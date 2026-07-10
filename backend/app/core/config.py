@@ -43,6 +43,7 @@ class Settings(BaseSettings):
 
     # Playwright / 采集
     PLAYWRIGHT_HEADLESS: bool = True
+    ROOM_COLLECTION_TIMEOUT_SECONDS: int = 90
 
     # Phase 4: 直播采集监控
     MONITOR_ENABLED: bool = False

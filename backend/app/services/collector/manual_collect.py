@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from playwright.async_api import BrowserContext
 
 from app.core.logger import logger
+from app.core.config import settings
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
 from app.models.live_metrics import LiveMetric
@@ -90,12 +91,29 @@ async def collect_all(db: Session) -> dict:
     try:
         results = []
         for room in rooms:
-            result = await _collect_room_data(db, context, room)
+            try:
+                result = await asyncio.wait_for(
+                    _collect_room_data(db, context, room),
+                    timeout=settings.ROOM_COLLECTION_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "房间采集超时: room_id=%s timeout=%ss",
+                    room.room_id_str,
+                    settings.ROOM_COLLECTION_TIMEOUT_SECONDS,
+                )
+                result = {
+                    "room_id": room.room_id_str or str(room.id),
+                    "anchor_name": room.anchor_name or "",
+                    "is_live": False,
+                    "error": f"采集超过 {settings.ROOM_COLLECTION_TIMEOUT_SECONDS} 秒",
+                }
             results.append(result)
 
         # 历史接口按采集账号返回，当前平台返回的数据没有携带主播标识，
         # 因此只能归属到该账号的主直播间；已配置的其它直播间仍会单独采集当前场次。
         history_sync = _sync_history_sessions(db, account, rooms[0])
+        enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0])
         history_detail_progress = await _enrich_history_sessions(
             db,
             context,
@@ -112,6 +130,9 @@ async def collect_all(db: Session) -> dict:
             "total_rooms": len(rooms),
             "collected_rooms": collected,
             "history_synced_count": history_sync,
+            "enterprise_anchor_count": enterprise_sync["anchor_count"],
+            "enterprise_session_synced_count": enterprise_sync["session_count"],
+            "anchor_profile_synced_count": enterprise_sync["profile_count"],
             "history_detail_synced_count": history_detail_progress["enriched_count"],
             "history_detail_checked_count": history_detail_progress["checked_count"],
             "history_detail_remaining_count": history_detail_progress["remaining_count"],
@@ -342,7 +363,7 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
         try:
             ct = resp.headers.get("content-type", "")
             if "json" in ct:
-                data = await resp.json()
+                data = await asyncio.wait_for(resp.json(), timeout=3)
                 captured_api.append({"url": resp.url, "data": data})
         except Exception:
             pass
@@ -618,7 +639,7 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
         try:
             ct = resp.headers.get("content-type", "")
             if "json" in ct:
-                d = await resp.json()
+                d = await asyncio.wait_for(resp.json(), timeout=3)
                 captured_api.append(d)
         except Exception:
             pass
@@ -827,6 +848,150 @@ def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom)
 
     db.commit()
     return synced
+
+
+async def _sync_enterprise_anchor_sessions(
+    db: Session,
+    context: BrowserContext,
+    room: LiveRoom,
+) -> dict:
+    """从企业主账号的员工接口同步主播与场次的真实映射。"""
+    page = None
+    try:
+        page = await context.new_page()
+        csrf_token = {"value": ""}
+
+        def capture_csrf(request):
+            if "/bff/statistic/live-comment/" in request.url:
+                csrf_token["value"] = request.headers.get("x-csrftoken", "") or csrf_token["value"]
+
+        page.on("request", capture_csrf)
+        root_room_id = str(room.room_id_str or "").strip()
+        if not root_room_id:
+            return {"anchor_count": 0, "session_count": 0, "profile_count": 0}
+        await page.goto(
+            f"{COMMENT_URL}?roomId={root_room_id}&fullscreen=0",
+            wait_until="domcontentloaded",
+            timeout=30000,
+        )
+        await asyncio.sleep(4)
+
+        accounts = await _fetch_enterprise_post(
+            page, "/bff/statistic/live-comment/accounts", {"roomId": root_room_id}, csrf_token["value"]
+        )
+        data = accounts.get("data", {}) if isinstance(accounts, dict) else {}
+        employees = [data.get("self")] + (data.get("employeeList") or [])
+        employees = [item for item in employees if isinstance(item, dict) and item.get("iesUid")]
+        unique_employees = {str(item["iesUid"]): item for item in employees}
+
+        session_count = 0
+        profile_count = 0
+        for profile in unique_employees.values():
+            ies_uid = str(profile["iesUid"])
+            room_payload = await _fetch_enterprise_post(
+                page,
+                "/bff/statistic/live-comment/room-lists",
+                {"iesUid": ies_uid},
+                csrf_token["value"],
+            )
+            rows = ((room_payload.get("data") or {}).get("roomLists") or []) if isinstance(room_payload, dict) else []
+            for item in rows:
+                child_room_id = str(item.get("roomId") or "").strip()
+                if not child_room_id:
+                    continue
+                dashboard_url = f"{LIVE_SCREEN_URL}?room_id={child_room_id}&fullscreen=0"
+                session = (
+                    db.query(LiveSession)
+                    .filter(LiveSession.room_id == room.id, LiveSession.dashboard_url == dashboard_url)
+                    .first()
+                )
+                if session is None:
+                    session = LiveSession(room_id=room.id, dashboard_url=dashboard_url)
+                    db.add(session)
+                    session_count += 1
+
+                changed = _apply_enterprise_profile_to_session(session, profile)
+                start_time = _parse_epoch_dt(item.get("liveStartTime"))
+                end_time = _parse_epoch_dt(item.get("liveEndTime"))
+                if start_time and session.live_start_time != start_time:
+                    session.live_start_time = start_time
+                    changed = True
+                if end_time and session.live_end_time != end_time:
+                    session.live_end_time = end_time
+                    changed = True
+                if item.get("title") and session.session_title != item["title"]:
+                    session.session_title = str(item["title"])[:200]
+                    changed = True
+                if item.get("streamUrl") and session.stream_url != item["streamUrl"]:
+                    session.stream_url = str(item["streamUrl"])[:2000]
+                    changed = True
+                session.live_status = "ended" if end_time else ("live" if item.get("liveStatus") == "1" else session.live_status or "finished")
+                if changed:
+                    profile_count += 1
+
+        db.commit()
+        logger.info(
+            "企业主播映射同步完成: anchors=%s, new_sessions=%s, profiles_updated=%s",
+            len(unique_employees),
+            session_count,
+            profile_count,
+        )
+        return {
+            "anchor_count": len(unique_employees),
+            "session_count": session_count,
+            "profile_count": profile_count,
+        }
+    except Exception as exc:
+        db.rollback()
+        logger.warning("企业主播映射同步失败: %s", exc)
+        return {"anchor_count": 0, "session_count": 0, "profile_count": 0}
+    finally:
+        if page:
+            await page.close()
+
+
+async def _fetch_enterprise_post(page, path: str, payload: dict, csrf_token: str = "") -> dict:
+    """在企业后台页面内携带 CSRF 头发送 JSON 请求。"""
+    result = await page.evaluate(
+        """async ({path, payload, csrfToken}) => {
+          const csrf = document.cookie.split(';').map(v => v.trim())
+            .find(v => /^(csrf_token|csrftoken|csrf-token)=/i.test(v))?.split('=').slice(1).join('=') || '';
+          const resp = await fetch(path, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {'content-type': 'application/json;charset=utf-8', 'x-csrftoken': csrfToken || decodeURIComponent(csrf)},
+            body: JSON.stringify(payload),
+          });
+          return await resp.json();
+        }""",
+        {"path": path, "payload": payload, "csrfToken": csrf_token},
+    )
+    return result if isinstance(result, dict) else {}
+
+
+def _apply_enterprise_profile_to_session(session: LiveSession, profile: dict) -> bool:
+    """把员工主播接口的稳定资料写入场次。"""
+    values = {
+        "anchor_name": profile.get("iesName"),
+        "anchor_nickname": profile.get("iesName"),
+        "anchor_avatar_url": profile.get("avatarUrl"),
+        "douyin_id": profile.get("iesUniqId"),
+        "douyin_uid": str(profile.get("iesUid")) if profile.get("iesUid") else None,
+    }
+    return _apply_session_anchor_profile(session, values)
+
+
+def _parse_epoch_dt(value) -> Optional[datetime]:
+    """转换员工场次接口返回的 Unix 秒时间。"""
+    if value in (None, "", 0, "0"):
+        return None
+    try:
+        timestamp = float(value)
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000
+        return datetime.fromtimestamp(timestamp)
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 async def _enrich_history_sessions(

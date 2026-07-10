@@ -254,6 +254,9 @@ declare namespace Api {
       total_rooms: number;
       collected_rooms: number;
       history_synced_count: number;
+      enterprise_anchor_count: number;
+      enterprise_session_synced_count: number;
+      anchor_profile_synced_count: number;
       history_detail_synced_count: number;
       history_detail_checked_count: number;
       history_detail_remaining_count: number;

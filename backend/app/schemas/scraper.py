@@ -119,6 +119,9 @@ class CollectAllResponse(BaseModel):
     total_rooms: int = 0
     collected_rooms: int = 0
     history_synced_count: int = 0
+    enterprise_anchor_count: int = 0
+    enterprise_session_synced_count: int = 0
+    anchor_profile_synced_count: int = 0
     history_detail_synced_count: int = 0
     history_detail_checked_count: int = 0
     history_detail_remaining_count: int = 0
