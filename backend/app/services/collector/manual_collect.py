@@ -8,10 +8,11 @@
 """
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-from urllib.parse import urlencode
+import re
+from urllib.parse import urlencode, urlparse, parse_qs
 from urllib.request import Request, urlopen
 from sqlalchemy.orm import Session
 from playwright.async_api import BrowserContext
@@ -86,6 +87,7 @@ async def collect_all(db: Session) -> dict:
 
     try:
         history_sync = _sync_history_sessions(db, account, rooms[0])
+        history_detail_sync = await _enrich_history_sessions(db, context, account, rooms[0])
         results = []
         for room in rooms:
             result = await _collect_room_data(db, context, room)
@@ -99,6 +101,7 @@ async def collect_all(db: Session) -> dict:
             "total_rooms": len(rooms),
             "collected_rooms": collected,
             "history_synced_count": history_sync,
+            "history_detail_synced_count": history_detail_sync,
             "results": results,
         }
     finally:
@@ -615,6 +618,71 @@ def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom)
     return synced
 
 
+async def _enrich_history_sessions(
+    db: Session,
+    context: BrowserContext,
+    account: ScraperAccount,
+    room: LiveRoom,
+) -> int:
+    """补齐历史场次的大屏详情、回放流和评论。"""
+    del account
+    sessions = (
+        db.query(LiveSession)
+        .filter(
+            LiveSession.room_id == room.id,
+            LiveSession.live_start_time.isnot(None),
+            LiveSession.live_end_time.isnot(None),
+        )
+        .order_by(LiveSession.live_start_time.desc())
+        .all()
+    )
+
+    enriched = 0
+    consecutive_mismatch = 0
+    for session in sessions:
+        if (
+            (session.peak_online_count or 0) > 0
+            and (session.comments_count or 0) > 0
+            and bool(session.stream_url)
+        ):
+            continue
+
+        room_id = _extract_room_id_from_dashboard_url(session.dashboard_url)
+        if not room_id:
+            continue
+
+        detail = await _scrape_history_session_detail(context, room_id, session)
+        if detail.get("validation_failed"):
+            consecutive_mismatch += 1
+            if consecutive_mismatch >= 5:
+                logger.info("历史详情连续 %s 场校验失败，停止继续补齐更早场次", consecutive_mismatch)
+                break
+            continue
+
+        consecutive_mismatch = 0
+        overview = detail.get("overview", {})
+        trend_rows = detail.get("trend", [])
+        replay_url = detail.get("replay_url")
+        comments_data = detail.get("comments", [])
+
+        changed = _apply_overview_to_session(session, overview)
+        if replay_url and session.stream_url != replay_url:
+            session.stream_url = replay_url[:2000]
+            changed = True
+
+        metrics_count = _save_trend_metrics(db, session.id, trend_rows)
+        comments_count = _save_comments(db, session.id, comments_data)
+        if comments_count:
+            session.comments_count = max(session.comments_count or 0, comments_count)
+            changed = True
+
+        if changed or metrics_count or comments_count:
+            db.commit()
+            enriched += 1
+
+    return enriched
+
+
 async def _fetch_json(page, url: str) -> dict:
     """在已登录浏览器上下文里执行 fetch，避免单独维护 Cookie。"""
     try:
@@ -632,6 +700,70 @@ async def _fetch_json(page, url: str) -> dict:
     except Exception as exc:
         logger.warning(f"fetch json 失败: {url}, error={exc}")
     return {}
+
+
+async def _scrape_history_session_detail(
+    context: BrowserContext,
+    room_id: str,
+    session: LiveSession,
+) -> dict:
+    """从历史大屏页提取总览、趋势、回放流和评论。"""
+    url = f"{LIVE_SCREEN_URL}?room_id={room_id}&fullscreen=0"
+    page = await context.new_page()
+    hits = {}
+
+    async def on_response(resp):
+        try:
+            if "json" not in resp.headers.get("content-type", ""):
+                return
+            if "/bff/statistic/live-screen/overview" in resp.url:
+                hits["overview"] = await resp.json()
+            elif "/bff/statistic/live-screen/data" in resp.url:
+                hits["data"] = await resp.json()
+            elif "/bff/statistic/live-screen/v3/get-live-replay" in resp.url:
+                hits["replay"] = await resp.json()
+        except Exception:
+            pass
+
+    page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(6)
+        try:
+            await page.get_by_text("评论", exact=True).click(timeout=5000)
+            await asyncio.sleep(3)
+        except Exception:
+            pass
+
+        body_text = await page.evaluate("document.body?.innerText || ''")
+        if not _is_expected_history_session(body_text, session):
+            logger.warning(
+                "历史场次详情页校验失败，跳过写入: session_id=%s room_id=%s",
+                session.id,
+                room_id,
+            )
+            return {
+                "overview": {},
+                "trend": [],
+                "replay_url": None,
+                "comments": [],
+                "validation_failed": True,
+            }
+
+        overview_rows = (((hits.get("overview") or {}).get("data", {}) or {}).get("statRows")) or []
+        trend_rows = (((hits.get("data") or {}).get("data", {}) or {}).get("trend")) or []
+        replay_url = (((hits.get("replay") or {}).get("data", {}) or {}).get("replayUrl")) or None
+        comments = _parse_comments_from_live_screen_text(body_text, session.live_start_time)
+        return {
+            "overview": overview_rows[0] if overview_rows else {},
+            "trend": trend_rows,
+            "replay_url": replay_url,
+            "comments": comments,
+        }
+    except Exception:
+        return {"overview": {}, "trend": [], "replay_url": None, "comments": [], "validation_failed": False}
+    finally:
+        await page.close()
 
 
 async def _scrape_stream_url(context: BrowserContext, room_id: str) -> Optional[str]:
@@ -755,6 +887,48 @@ def _save_metrics(db: Session, session_id: int, metrics: list) -> int:
     return count
 
 
+def _save_trend_metrics(db: Session, session_id: int, trend_rows: list[dict]) -> int:
+    """保存历史场次分钟级趋势指标，避免重复写入。"""
+    if not trend_rows:
+        return 0
+
+    existing_times = {
+        row[0]
+        for row in db.query(LiveMetric.metric_time).filter(LiveMetric.session_id == session_id).all()
+    }
+    count = 0
+    for item in trend_rows:
+        dimensions = item.get("dimensions", {}) or {}
+        metrics = item.get("metrics", {}) or {}
+        stat_time_minute = dimensions.get("stat_time_minute")
+        if not stat_time_minute:
+            continue
+        metric_time = datetime.fromtimestamp(int(stat_time_minute) / 1000)
+        if metric_time in existing_times:
+            continue
+
+        row = LiveMetric(
+            session_id=session_id,
+            metric_time=metric_time,
+            exposure_count=_safe_int(metrics.get("lp_screen_live_show_count")) or 0,
+            online_count=_safe_int(metrics.get("lp_screen_live_max_watch_uv_by_minute")) or 0,
+            enter_count=_safe_int(metrics.get("lp_screen_live_watch_uv_by_minute")) or 0,
+            enter_fans_count=_safe_int(metrics.get("lp_screen_live_fans_watch_uv_by_minute")) or 0,
+            leave_count=_safe_int(metrics.get("lp_screen_live_leave_uv_by_minute")) or 0,
+            like_count=_safe_int(metrics.get("lp_screen_live_like_count")) or 0,
+            comment_count=_safe_int(metrics.get("lp_screen_live_comment_count")) or 0,
+            follow_count=_safe_int(metrics.get("lp_screen_live_follow_count")) or 0,
+            natural_traffic_count=_safe_int(metrics.get("lp_screen_live_watch_count_natural")) or 0,
+            marketing_traffic_count=_safe_int(metrics.get("lp_screen_live_watch_count_ad")) or 0,
+        )
+        db.add(row)
+        count += 1
+
+    if count:
+        db.commit()
+    return count
+
+
 def _save_comments(db: Session, session_id: int, comments: list) -> int:
     """保存评论数据"""
     existing_pairs = {
@@ -836,6 +1010,147 @@ def _parse_dt(val: Optional[str]) -> Optional[datetime]:
         return datetime.strptime(val, "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None
+
+
+def _extract_room_id_from_dashboard_url(url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+        room_ids = parse_qs(parsed.query).get("room_id") or parse_qs(parsed.query).get("roomId")
+        if room_ids:
+            return room_ids[0]
+    except Exception:
+        return None
+    return None
+
+
+def _is_expected_history_session(body_text: str, session: LiveSession) -> bool:
+    """校验当前详情页是否真的是目标场次，避免历史页面串场写错数据。"""
+    if not body_text or not session.live_start_time or not session.live_end_time:
+        return False
+
+    normalized_text = body_text.replace("：", ":").replace("〜", "~").replace("～", "~")
+    for expected in _build_expected_session_markers(session.live_start_time, session.live_end_time):
+        if expected in normalized_text:
+            return True
+
+    markers = _build_expected_session_markers(session.live_start_time, session.live_end_time)
+    logger.warning(
+        "历史场次时间段未命中: session_id=%s, sample_expected=%s",
+        session.id,
+        markers[:6],
+    )
+    return False
+
+
+def _build_expected_session_markers(start_time: datetime, end_time: datetime) -> list[str]:
+    """构造页面上可能出现的场次时间文案。"""
+    candidates = set()
+    start_variants = _format_session_time_variants(start_time)
+    end_variants = _format_session_time_variants(end_time)
+    prefixes = ["场次:", "场次：", ""]
+    separators = [" ~ ", "~", " - ", "-"]
+
+    for prefix in prefixes:
+        for start_variant in start_variants:
+            for end_variant in end_variants:
+                for separator in separators:
+                    candidates.add(f"{prefix}{start_variant}{separator}{end_variant}".strip())
+
+    return sorted(candidates)
+
+
+def _format_session_time_variants(value: datetime) -> list[str]:
+    """兼容大屏页常见时间格式。"""
+    base = value.replace(microsecond=0)
+    next_day = base + timedelta(days=1)
+    return [
+        base.strftime("%m-%d %H:%M:%S"),
+        base.strftime("%m-%d %H:%M"),
+        base.strftime("%Y-%m-%d %H:%M:%S"),
+        base.strftime("%Y-%m-%d %H:%M"),
+        next_day.strftime("%H:%M:%S"),
+        next_day.strftime("%H:%M"),
+    ]
+
+
+def _apply_overview_to_session(session: LiveSession, overview_row: dict) -> bool:
+    metrics = overview_row.get("metrics", {}) or {}
+    changed = False
+
+    mapping = {
+        "total_viewers": "lp_screen_live_watch_uv",
+        "peak_online_count": "lp_screen_live_max_watch_uv_by_minute",
+        "realtime_online_count": "lp_screen_live_user_realtime",
+        "private_message_count": "lp_screen_msg_conversation_count",
+        "scene_leads_count": "lp_screen_clue_uv",
+        "leads_count": "lp_screen_clue_uv",
+        "mini_windmill_click_count": "lp_screen_live_icon_click_count",
+        "new_followers": "lp_screen_live_follow_uv",
+        "comments_count": "lp_screen_live_comment_count",
+    }
+    for field, key in mapping.items():
+        value = _safe_int(metrics.get(key))
+        if value is not None and getattr(session, field) != value:
+            setattr(session, field, value)
+            changed = True
+
+    float_mapping = {
+        "avg_watch_seconds": "lp_screen_live_avg_watch_duration",
+        "ad_cost": "lp_screen_live_stat_cost",
+        "exposure_enter_rate": "lp_screen_live_enter_ratio",
+        "comment_rate": "lp_screen_live_comment_ratio",
+        "interaction_rate": "lp_screen_live_interaction_ratio",
+        "share_rate": "lp_screen_live_share_ratio",
+        "like_rate": "lp_screen_live_like_ratio",
+    }
+    for field, key in float_mapping.items():
+        raw = metrics.get(key)
+        if raw is None:
+            continue
+        value = float(raw)
+        if getattr(session, field) != value:
+            setattr(session, field, value)
+            changed = True
+
+    session.live_status = "ended" if session.live_end_time else session.live_status
+    return changed
+
+
+def _parse_comments_from_live_screen_text(body_text: str, live_start_time: Optional[datetime]) -> list[dict]:
+    lines = [line.strip() for line in body_text.split("\n") if line.strip()]
+    comments = []
+    i = 0
+    pattern = re.compile(r"^\((\d+)\)(\d{2}:\d{2})\s+(.+?)：$")
+    while i < len(lines):
+        match = pattern.match(lines[i])
+        if not match:
+            i += 1
+            continue
+
+        hhmm = match.group(2)
+        nickname = match.group(3).strip()
+        content = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if content and not content.startswith("想更方便") and "滑到顶了" not in content:
+            comment_time = None
+            if live_start_time:
+                try:
+                    comment_time = live_start_time.replace(
+                        hour=int(hhmm.split(":")[0]),
+                        minute=int(hhmm.split(":")[1]),
+                        second=0,
+                        microsecond=0,
+                    )
+                except Exception:
+                    comment_time = None
+            comments.append({
+                "user_nickname": nickname,
+                "comment_content": content,
+                "comment_time": comment_time,
+            })
+        i += 2
+    return comments
 
 
 def _load_storage_cookies(storage_state_path: str) -> dict[str, str]:
