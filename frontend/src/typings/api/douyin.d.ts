@@ -18,28 +18,28 @@ declare namespace Api {
     /* ---------- 直播场次 ---------- */
     interface LiveSession {
       id: number;
-      roomId: number;
-      anchorName: string;
-      startTime: string;
-      endTime: string | null;
-      duration: number;
-      onlineUsers: number;
-      viewCount: number;
-      totalLeads: number;
-      validLeads: number;
-      newFollowers: number;
-      trafficSource: TrafficSource[];
-      conversion: ConversionStep[];
-    }
-
-    interface TrafficSource {
-      label: string;
-      value: number;
-    }
-
-    interface ConversionStep {
-      step: string;
-      count: number;
+      room_id: number;
+      anchor_name: string;
+      session_title: string | null;
+      dashboard_url: string | null;
+      stream_url: string | null;
+      live_start_time: string | null;
+      live_end_time: string | null;
+      live_duration_seconds: number;
+      live_status: string;
+      total_viewers: number;
+      avg_watch_seconds: number;
+      peak_online_count: number;
+      realtime_online_count: number;
+      ad_cost: number;
+      new_followers: number;
+      exposure_enter_rate: number;
+      comment_rate: number;
+      interaction_rate: number;
+      comments_count: number;
+      leads_count: number;
+      created_at: string;
+      updated_at: string;
     }
 
     /* ---------- 采集（后端返回 snake_case） ---------- */
@@ -153,6 +153,53 @@ declare namespace Api {
       summary: string;
       source: string;
       time: string;
+    }
+
+    /* ---------- 一键采集 ---------- */
+    interface CollectRoomResult {
+      room_id: string;
+      anchor_name: string;
+      is_live: boolean;
+      metrics_count: number;
+      comments_count: number;
+      profiles_count: number;
+      session_id: number | null;
+      error: string | null;
+    }
+
+    interface CollectAllResponse {
+      total_rooms: number;
+      collected_rooms: number;
+      results: CollectRoomResult[];
+      message: string | null;
+    }
+
+    /* ---------- AI 分析 ---------- */
+    interface PromptTemplate {
+      id: number;
+      type: string;
+      name: string | null;
+      content: string;
+      version: number;
+      description: string | null;
+      created_at: string | null;
+    }
+
+    interface AiScoreResult {
+      completeness_score: number;
+      interactivity_score: number;
+      lead_guidance_score: number;
+      affinity_score?: number;
+      total_score: number;
+      strengths: string[];
+      weaknesses: string[];
+      suggestions: string[];
+    }
+
+    interface QaResult {
+      answer: string;
+      sources: { id: number; title: string | null; category: string | null }[];
+      has_result: boolean;
     }
   }
 }

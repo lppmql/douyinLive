@@ -127,3 +127,61 @@ export function triggerMockEnd() {
 export function fetchKnowledgeItems(params?: { category?: string }) {
   return backendRequest<Api.Douyin.KnowledgeItem[]>({ url: `${API_PREFIX}/knowledge-base/`, params });
 }
+
+/* ---------- 一键采集 ---------- */
+
+/** 一键采集所有主播房间数据 */
+export function collectAllData() {
+  return backendRequest<Api.Douyin.CollectAllResponse>({ url: `${API_PREFIX}/collector/collect-all`, method: 'POST' });
+}
+
+/* ---------- AI 分析 ---------- */
+
+/** 测试 DeepSeek 连通 */
+export function testAiConnection() {
+  return backendRequest<{ status: string; reply: string }>({ url: `${API_PREFIX}/ai/test`, method: 'POST' });
+}
+
+/** 话术评分 */
+export function scoreSession(sessionId: number) {
+  return backendRequest<{ status: string; result: Record<string, unknown> }>({ url: `${API_PREFIX}/ai/score/${sessionId}`, method: 'POST' });
+}
+
+/** 趋势分析 */
+export function trendAnalysis(sessionIds: number[]) {
+  return backendRequest<{ status: string; result: Record<string, unknown> }>({ url: `${API_PREFIX}/ai/trend`, method: 'POST', params: { session_ids: sessionIds } });
+}
+
+/** 异常检测 */
+export function detectAnomaly(sessionId: number) {
+  return backendRequest<{ status: string; result: Record<string, unknown> }>({ url: `${API_PREFIX}/ai/anomaly/${sessionId}`, method: 'POST' });
+}
+
+/** 优化建议 */
+export function optimizeSession(sessionId: number) {
+  return backendRequest<{ status: string; result: Record<string, unknown> }>({ url: `${API_PREFIX}/ai/optimize/${sessionId}`, method: 'POST' });
+}
+
+/** 高意向用户识别 */
+export function detectHighIntent(sessionId: number) {
+  return backendRequest<{ status: string; count: number; users: unknown[] }>({ url: `${API_PREFIX}/ai/high-intent/${sessionId}`, method: 'POST' });
+}
+
+/** 知识问答 */
+export function askKnowledge(question: string, category?: string) {
+  return backendRequest<{ answer: string; sources: unknown[]; has_result: boolean }>({
+    url: `${API_PREFIX}/ai/qa`,
+    method: 'POST',
+    data: { question, category }
+  });
+}
+
+/** 保存到知识库 */
+export function saveToKnowledgeBase(sessionId: number) {
+  return backendRequest<{ status: string; transcript_saved: number; analysis_saved: number }>({ url: `${API_PREFIX}/ai/kb/save/${sessionId}`, method: 'POST' });
+}
+
+/** 获取提示词模板列表 */
+export function fetchPrompts(type?: string) {
+  return backendRequest<Api.Douyin.PromptTemplate[]>({ url: `${API_PREFIX}/ai/prompts/`, params: { type } });
+}
