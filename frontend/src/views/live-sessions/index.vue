@@ -94,7 +94,14 @@ const metricColumns = [
   { title: '进入', key: 'enter_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.enter_count) },
   { title: '点赞', key: 'like_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.like_count) },
   { title: '评论', key: 'comment_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.comment_count) },
-  { title: '关注', key: 'follow_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.follow_count) }
+  { title: '关注', key: 'follow_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.follow_count) },
+  { title: '线索', key: 'clue_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.clue_count) },
+  { title: '风车', key: 'windmill_click_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.windmill_click_count) },
+  { title: '卡片', key: 'card_click_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.card_click_count) },
+  { title: '企微', key: 'wechat_add_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.wechat_add_count) },
+  { title: '表单数', key: 'form_submit_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.form_submit_count) },
+  { title: '表单人', key: 'form_submit_users', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.form_submit_users) },
+  { title: '消耗', key: 'cost_amount', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.cost_amount) }
 ];
 
 const commentColumns = [
@@ -323,29 +330,103 @@ onMounted(() => {
                 <NDescriptionsItem :label="$t('page.live-sessions.viewCount')">
                   {{ currentSession.total_viewers || 0 }}
                 </NDescriptionsItem>
+                <NDescriptionsItem label="看过人数">
+                  {{ currentSession.viewed_count || 0 }}
+                </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.onlineUsers')">
                   {{ currentSession.peak_online_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="平均在线人数">
+                  {{ currentSession.avg_online_count || 0 }}
                 </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.newFollowers')">
                   {{ currentSession.new_followers || 0 }}
                 </NDescriptionsItem>
+                <NDescriptionsItem label="关注率">
+                  {{ fmtPercent(currentSession.follow_rate) }}
+                </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.commentsCount')">
                   {{ currentSession.comments_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="评论人数">
+                  {{ currentSession.comment_users || 0 }}
                 </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.leads')">
                   {{ currentSession.leads_count || 0 }}
                 </NDescriptionsItem>
+                <NDescriptionsItem label="全场景线索人数">
+                  {{ currentSession.scene_leads_count || 0 }}
+                </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.adCost')">
                   {{ currentSession.ad_cost || 0 }}
                 </NDescriptionsItem>
+                <NDescriptionsItem label="线索转化率">
+                  {{ fmtPercent(currentSession.scene_lead_conversion_rate) }}
+                </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.exposureEnterRate')">
                   {{ fmtPercent(currentSession.exposure_enter_rate) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="场观粉丝占比">
+                  {{ fmtPercent(currentSession.fans_view_ratio) }}
                 </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.commentRate')">
                   {{ fmtPercent(currentSession.comment_rate) }}
                 </NDescriptionsItem>
                 <NDescriptionsItem :label="$t('page.live-sessions.interactionRate')">
                   {{ fmtPercent(currentSession.interaction_rate) }}
+                </NDescriptionsItem>
+              </NDescriptions>
+            </NCard>
+
+            <NCard :bordered="true" size="small" title="转化与互动补充指标">
+              <NDescriptions :column="2" size="small" bordered>
+                <NDescriptionsItem label="粉丝停留">
+                  {{ fmtSeconds(currentSession.fans_avg_watch_seconds || 0) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="私信人数">
+                  {{ currentSession.private_message_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="私信长效转化">
+                  {{ currentSession.private_message_longterm_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="小风车点击">
+                  {{ currentSession.mini_windmill_click_count || 0 }} / {{ fmtPercent(currentSession.mini_windmill_click_rate) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="卡片点击">
+                  {{ currentSession.card_click_count || 0 }} / {{ fmtPercent(currentSession.card_click_rate) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="分享">
+                  {{ currentSession.share_count || 0 }} / {{ currentSession.share_users || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="点赞">
+                  {{ currentSession.like_count || 0 }} / {{ currentSession.like_users || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="互动">
+                  {{ currentSession.interaction_count || 0 }} / {{ currentSession.interaction_users || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="观看次数">
+                  {{ currentSession.watch_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label=">1分钟观看">
+                  {{ currentSession.watch_over_1m_count || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="粉丝团">
+                  {{ currentSession.fans_club_join_count || 0 }} / {{ fmtPercent(currentSession.fans_club_join_rate) }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="打赏">
+                  {{ currentSession.gift_count || 0 }} / {{ currentSession.gift_amount || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="不感兴趣">
+                  {{ currentSession.dislike_count || 0 }} / {{ currentSession.dislike_users || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="企业微信">
+                  {{ currentSession.wechat_add_count || 0 }} / {{ currentSession.wechat_add_cost || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="表单提交">
+                  {{ currentSession.form_submit_count || 0 }} / {{ currentSession.form_submit_users || 0 }}
+                </NDescriptionsItem>
+                <NDescriptionsItem label="表单成本">
+                  {{ currentSession.form_submit_cost || 0 }}
                 </NDescriptionsItem>
               </NDescriptions>
             </NCard>

@@ -181,22 +181,88 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
             sm["leads_count"] = home_info["leads_count"]
         if sm.get("total_viewers") is not None:
             session.total_viewers = sm["total_viewers"]
+        if sm.get("viewed_count") is not None:
+            session.viewed_count = sm["viewed_count"]
+        if sm.get("avg_online_count") is not None:
+            session.avg_online_count = sm["avg_online_count"]
         if sm.get("peak_online_count") is not None:
             session.peak_online_count = sm["peak_online_count"]
         if sm.get("realtime_online_count") is not None:
             session.realtime_online_count = sm["realtime_online_count"]
         if sm.get("avg_watch_seconds") is not None:
             session.avg_watch_seconds = float(sm["avg_watch_seconds"])
+        if sm.get("fans_avg_watch_seconds") is not None:
+            session.fans_avg_watch_seconds = float(sm["fans_avg_watch_seconds"])
+        if sm.get("private_message_count") is not None:
+            session.private_message_count = sm["private_message_count"]
+        if sm.get("private_message_longterm_count") is not None:
+            session.private_message_longterm_count = sm["private_message_longterm_count"]
+        if sm.get("scene_leads_count") is not None:
+            session.scene_leads_count = sm["scene_leads_count"]
         if sm.get("ad_cost") is not None:
             session.ad_cost = float(sm["ad_cost"])
+        if sm.get("mini_windmill_click_count") is not None:
+            session.mini_windmill_click_count = sm["mini_windmill_click_count"]
+        if sm.get("mini_windmill_click_rate") is not None:
+            session.mini_windmill_click_rate = float(sm["mini_windmill_click_rate"])
+        if sm.get("card_click_count") is not None:
+            session.card_click_count = sm["card_click_count"]
+        if sm.get("card_click_rate") is not None:
+            session.card_click_rate = float(sm["card_click_rate"])
         if sm.get("new_followers") is not None:
             session.new_followers = sm["new_followers"]
+        if sm.get("follow_rate") is not None:
+            session.follow_rate = float(sm["follow_rate"])
+        if sm.get("share_count") is not None:
+            session.share_count = sm["share_count"]
+        if sm.get("share_users") is not None:
+            session.share_users = sm["share_users"]
+        if sm.get("like_count") is not None:
+            session.like_count = sm["like_count"]
+        if sm.get("like_users") is not None:
+            session.like_users = sm["like_users"]
         if sm.get("leads_count") is not None:
             session.leads_count = sm["leads_count"]
         if sm.get("comments_count") is not None:
             session.comments_count = sm["comments_count"]
+        if sm.get("comment_users") is not None:
+            session.comment_users = sm["comment_users"]
+        if sm.get("interaction_count") is not None:
+            session.interaction_count = sm["interaction_count"]
+        if sm.get("interaction_users") is not None:
+            session.interaction_users = sm["interaction_users"]
+        if sm.get("watch_count") is not None:
+            session.watch_count = sm["watch_count"]
+        if sm.get("watch_over_1m_count") is not None:
+            session.watch_over_1m_count = sm["watch_over_1m_count"]
+        if sm.get("fans_club_join_count") is not None:
+            session.fans_club_join_count = sm["fans_club_join_count"]
+        if sm.get("fans_club_join_rate") is not None:
+            session.fans_club_join_rate = float(sm["fans_club_join_rate"])
+        if sm.get("gift_count") is not None:
+            session.gift_count = sm["gift_count"]
+        if sm.get("gift_amount") is not None:
+            session.gift_amount = float(sm["gift_amount"])
+        if sm.get("dislike_count") is not None:
+            session.dislike_count = sm["dislike_count"]
+        if sm.get("dislike_users") is not None:
+            session.dislike_users = sm["dislike_users"]
+        if sm.get("wechat_add_count") is not None:
+            session.wechat_add_count = sm["wechat_add_count"]
+        if sm.get("wechat_add_cost") is not None:
+            session.wechat_add_cost = float(sm["wechat_add_cost"])
+        if sm.get("form_submit_count") is not None:
+            session.form_submit_count = sm["form_submit_count"]
+        if sm.get("form_submit_users") is not None:
+            session.form_submit_users = sm["form_submit_users"]
+        if sm.get("form_submit_cost") is not None:
+            session.form_submit_cost = float(sm["form_submit_cost"])
         if sm.get("exposure_enter_rate") is not None:
             session.exposure_enter_rate = float(sm["exposure_enter_rate"])
+        if sm.get("fans_view_ratio") is not None:
+            session.fans_view_ratio = float(sm["fans_view_ratio"])
+        if sm.get("scene_lead_conversion_rate") is not None:
+            session.scene_lead_conversion_rate = float(sm["scene_lead_conversion_rate"])
         if sm.get("comment_rate") is not None:
             session.comment_rate = float(sm["comment_rate"])
         if sm.get("interaction_rate") is not None:
@@ -407,6 +473,12 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
             "like_count": ["lp_screen_live_like_count", "like_count"],
             "comment_count": ["lp_screen_live_comment_count", "comment_count"],
             "follow_count": ["lp_screen_live_new_follow_count", "follow_count", "new_follow"],
+            "clue_count": ["lp_screen_clue_uv", "clue_count"],
+            "windmill_click_count": ["lp_screen_live_icon_click_count", "windmill_click_count"],
+            "card_click_count": ["lp_screen_live_clue_business_card_click_count", "card_click_count"],
+            "wechat_add_count": ["lp_screen_ad_biz_wechat_add_count", "wechat_add_count"],
+            "form_submit_count": ["lp_screen_ad_form_count", "form_submit_count"],
+            "form_submit_users": ["lp_screen_card_clue_uv", "form_submit_users"],
             "natural_traffic_count": ["natural_traffic", "natural_traffic_count"],
             "marketing_traffic_count": ["marketing_traffic", "marketing_traffic_count"],
         }
@@ -442,14 +514,47 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
     # 将 Cluerich key 映射到 LiveSession 字段
     session_field_map = {
         "total_viewers": ["accumulate_view_users", "cumulate_view_users", "view_users", "total_viewers"],
+        "viewed_count": ["lp_screen_uv_with_preview", "viewed_count"],
+        "avg_online_count": ["lp_screen_live_avg_online_uv_by_room", "avg_online_count"],
         "peak_online_count": ["lp_screen_live_peak_online", "peak_online", "peak_online_count", "max_online"],
         "realtime_online_count": ["lp_screen_live_user_realtime", "realtime_online", "online_count"],
         "avg_watch_seconds": ["lp_screen_live_avg_watch_duration", "avg_watch_duration", "avg_watch_seconds"],
+        "fans_avg_watch_seconds": ["lp_screen_live_fans_avg_watch_duration", "fans_avg_watch_seconds"],
+        "private_message_count": ["lp_screen_msg_conversation_count", "private_message_count"],
+        "private_message_longterm_count": ["lp_screen_longterm_msg_clue_uv", "private_message_longterm_count"],
+        "scene_leads_count": ["lp_screen_clue_uv", "scene_leads_count"],
         "ad_cost": ["lp_screen_live_ad_cost", "ad_cost", "cost_total"],
+        "mini_windmill_click_count": ["lp_screen_live_icon_click_count", "mini_windmill_click_count"],
+        "mini_windmill_click_rate": ["lp_screen_live_icon_click_rate", "mini_windmill_click_rate"],
+        "card_click_count": ["lp_screen_live_clue_business_card_click_count", "card_click_count"],
+        "card_click_rate": ["lp_screen_live_clue_business_card_click_rate", "card_click_rate"],
         "new_followers": ["lp_screen_live_new_follow_count", "new_followers", "new_follow_count"],
+        "follow_rate": ["lp_screen_live_follow_ratio", "follow_rate"],
+        "share_count": ["lp_screen_live_share_count", "share_count"],
+        "share_users": ["lp_screen_live_share_uv", "share_users"],
+        "like_count": ["lp_screen_live_like_count", "like_count"],
+        "like_users": ["lp_screen_live_like_uv", "like_users"],
         "leads_count": ["lp_screen_clue_uv", "leads_count", "clue_count", "clue_uv"],
         "comments_count": ["lp_screen_live_comment_count", "comments_count"],
+        "comment_users": ["lp_screen_live_comment_uv", "comment_users"],
+        "interaction_count": ["lp_screen_live_interaction_count", "interaction_count"],
+        "interaction_users": ["lp_screen_live_interaction_uv_count", "interaction_users"],
+        "watch_count": ["lp_screen_live_watch_count", "watch_count"],
+        "watch_over_1m_count": ["lp_screen_live_watch_gt_1min_count", "watch_over_1m_count"],
+        "fans_club_join_count": ["lp_screen_live_fans_club_join_uv", "fans_club_join_count"],
+        "fans_club_join_rate": ["lp_screen_live_fans_club_join_uv_ratio", "fans_club_join_rate"],
+        "gift_count": ["lp_screen_live_gift_count", "gift_count"],
+        "gift_amount": ["lp_screen_live_gift_amount", "gift_amount"],
+        "dislike_count": ["live_dislike_count", "dislike_count"],
+        "dislike_users": ["live_dislike_uv_by_room", "dislike_users"],
+        "wechat_add_count": ["lp_screen_ad_biz_wechat_add_count", "wechat_add_count"],
+        "wechat_add_cost": ["lp_screen_ad_biz_wechat_cost", "wechat_add_cost"],
+        "form_submit_count": ["lp_screen_ad_form_count", "form_submit_count"],
+        "form_submit_users": ["lp_screen_card_clue_uv", "form_submit_users"],
+        "form_submit_cost": ["lp_screen_ad_form_cost", "form_submit_cost"],
         "exposure_enter_rate": ["lp_screen_live_exposure_enter_rate", "exposure_enter_rate"],
+        "fans_view_ratio": ["lp_screen_live_fans_watch_ratio", "fans_view_ratio"],
+        "scene_lead_conversion_rate": ["lp_screen_live_clue_convert_ratio", "scene_lead_conversion_rate"],
         "comment_rate": ["lp_screen_live_comment_rate", "comment_rate"],
         "interaction_rate": ["lp_screen_live_interaction_rate", "interaction_rate"],
     }
@@ -702,6 +807,7 @@ async def _enrich_history_sessions(
 ) -> dict:
     """补齐历史场次的大屏详情、回放流和评论。"""
     del account
+    current_context = context
     all_sessions = (
         db.query(LiveSession)
         .filter(
@@ -726,12 +832,43 @@ async def _enrich_history_sessions(
         checked += 1
         try:
             detail = await asyncio.wait_for(
-                _scrape_history_session_detail(context, room_id, session),
+                _scrape_history_session_detail(current_context, room_id, session),
                 timeout=HISTORY_DETAIL_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
             logger.warning("历史场次详情采集超时，跳过: session_id=%s room_id=%s", session.id, room_id)
             continue
+        except Exception as exc:
+            if _is_context_closed_error(exc):
+                logger.warning("历史场次上下文已关闭，尝试恢复后重试: session_id=%s room_id=%s", session.id, room_id)
+                current_context, is_valid, message = await browser_manager.get_logged_in_context()
+                if not is_valid or not current_context:
+                    logger.warning("历史场次上下文恢复失败，停止补齐: %s", message)
+                    break
+                try:
+                    detail = await asyncio.wait_for(
+                        _scrape_history_session_detail(current_context, room_id, session),
+                        timeout=HISTORY_DETAIL_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("历史场次详情采集超时，跳过: session_id=%s room_id=%s", session.id, room_id)
+                    continue
+                except Exception as retry_exc:
+                    logger.warning(
+                        "历史场次详情采集失败，跳过: session_id=%s room_id=%s error=%s",
+                        session.id,
+                        room_id,
+                        retry_exc,
+                    )
+                    continue
+            else:
+                logger.warning(
+                    "历史场次详情采集失败，跳过: session_id=%s room_id=%s error=%s",
+                    session.id,
+                    room_id,
+                    exc,
+                )
+                continue
 
         if detail.get("validation_failed"):
             consecutive_mismatch += 1
@@ -795,7 +932,7 @@ async def _scrape_history_session_detail(
 ) -> dict:
     """从历史大屏页提取总览、趋势、回放流和评论。"""
     url = f"{LIVE_SCREEN_URL}?room_id={room_id}&fullscreen=0"
-    page = await context.new_page()
+    page = None
     hits = {}
 
     async def on_response(resp):
@@ -811,8 +948,9 @@ async def _scrape_history_session_detail(
         except Exception:
             pass
 
-    page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
     try:
+        page = await context.new_page()
+        page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(6)
         try:
@@ -849,7 +987,14 @@ async def _scrape_history_session_detail(
     except Exception:
         return {"overview": {}, "trend": [], "replay_url": None, "comments": [], "validation_failed": False}
     finally:
-        await page.close()
+        if page:
+            await page.close()
+
+
+def _is_context_closed_error(exc: Exception) -> bool:
+    """识别 Playwright 上下文/页面已关闭错误。"""
+    text = str(exc).lower()
+    return "target page, context or browser has been closed" in text or "browsercontext.new_page" in text
 
 
 async def _scrape_stream_url(context: BrowserContext, room_id: str) -> Optional[str]:
@@ -1004,6 +1149,13 @@ def _save_trend_metrics(db: Session, session_id: int, trend_rows: list[dict]) ->
             like_count=_safe_int(metrics.get("lp_screen_live_like_count")) or 0,
             comment_count=_safe_int(metrics.get("lp_screen_live_comment_count")) or 0,
             follow_count=_safe_int(metrics.get("lp_screen_live_follow_count")) or 0,
+            clue_count=_safe_int(metrics.get("lp_screen_clue_uv")) or 0,
+            windmill_click_count=_safe_int(metrics.get("lp_screen_live_icon_click_count")) or 0,
+            card_click_count=_safe_int(metrics.get("lp_screen_live_clue_business_card_click_count")) or 0,
+            wechat_add_count=_safe_int(metrics.get("lp_screen_ad_biz_wechat_add_count")) or 0,
+            form_submit_count=_safe_int(metrics.get("lp_screen_ad_form_count")) or 0,
+            form_submit_users=_safe_int(metrics.get("lp_screen_card_clue_uv")) or 0,
+            cost_amount=_safe_float(metrics.get("lp_screen_live_stat_cost")) or 0,
             natural_traffic_count=_safe_int(metrics.get("lp_screen_live_watch_count_natural")) or 0,
             marketing_traffic_count=_safe_int(metrics.get("lp_screen_live_watch_count_ad")) or 0,
         )
@@ -1071,6 +1223,15 @@ def _safe_int(val) -> Optional[int]:
         return None
     try:
         return int(float(str(val).replace(",", "")))
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_float(val) -> Optional[float]:
+    if val is None:
+        return None
+    try:
+        return float(str(val).replace(",", "").replace("%", ""))
     except (ValueError, TypeError):
         return None
 
@@ -1167,14 +1328,34 @@ def _apply_overview_to_session(session: LiveSession, overview_row: dict) -> bool
 
     mapping = {
         "total_viewers": "lp_screen_live_watch_uv",
+        "viewed_count": "lp_screen_uv_with_preview",
+        "avg_online_count": "lp_screen_live_avg_online_uv_by_room",
         "peak_online_count": "lp_screen_live_max_watch_uv_by_minute",
         "realtime_online_count": "lp_screen_live_user_realtime",
         "private_message_count": "lp_screen_msg_conversation_count",
+        "private_message_longterm_count": "lp_screen_longterm_msg_clue_uv",
         "scene_leads_count": "lp_screen_clue_uv",
         "leads_count": "lp_screen_clue_uv",
         "mini_windmill_click_count": "lp_screen_live_icon_click_count",
+        "card_click_count": "lp_screen_live_clue_business_card_click_count",
         "new_followers": "lp_screen_live_follow_uv",
         "comments_count": "lp_screen_live_comment_count",
+        "share_count": "lp_screen_live_share_count",
+        "share_users": "lp_screen_live_share_uv",
+        "like_count": "lp_screen_live_like_count",
+        "like_users": "lp_screen_live_like_uv",
+        "comment_users": "lp_screen_live_comment_uv",
+        "interaction_count": "lp_screen_live_interaction_count",
+        "interaction_users": "lp_screen_live_interaction_uv_count",
+        "watch_count": "lp_screen_live_watch_count",
+        "watch_over_1m_count": "lp_screen_live_watch_gt_1min_count",
+        "fans_club_join_count": "lp_screen_live_fans_club_join_uv",
+        "gift_count": "lp_screen_live_gift_count",
+        "dislike_count": "live_dislike_count",
+        "dislike_users": "live_dislike_uv_by_room",
+        "wechat_add_count": "lp_screen_ad_biz_wechat_add_count",
+        "form_submit_count": "lp_screen_ad_form_count",
+        "form_submit_users": "lp_screen_card_clue_uv",
     }
     for field, key in mapping.items():
         value = _safe_int(metrics.get(key))
@@ -1184,18 +1365,30 @@ def _apply_overview_to_session(session: LiveSession, overview_row: dict) -> bool
 
     float_mapping = {
         "avg_watch_seconds": "lp_screen_live_avg_watch_duration",
+        "fans_avg_watch_seconds": "lp_screen_live_fans_avg_watch_duration",
         "ad_cost": "lp_screen_live_stat_cost",
         "exposure_enter_rate": "lp_screen_live_enter_ratio",
+        "fans_view_ratio": "lp_screen_live_fans_watch_ratio",
+        "scene_lead_conversion_rate": "lp_screen_live_clue_convert_ratio",
+        "mini_windmill_click_rate": "lp_screen_live_icon_click_rate",
+        "card_click_rate": "lp_screen_live_clue_business_card_click_rate",
+        "follow_rate": "lp_screen_live_follow_ratio",
         "comment_rate": "lp_screen_live_comment_ratio",
         "interaction_rate": "lp_screen_live_interaction_ratio",
         "share_rate": "lp_screen_live_share_ratio",
         "like_rate": "lp_screen_live_like_ratio",
+        "fans_club_join_rate": "lp_screen_live_fans_club_join_uv_ratio",
+        "gift_amount": "lp_screen_live_gift_amount",
+        "wechat_add_cost": "lp_screen_ad_biz_wechat_cost",
+        "form_submit_cost": "lp_screen_ad_form_cost",
     }
     for field, key in float_mapping.items():
         raw = metrics.get(key)
         if raw is None:
             continue
-        value = float(raw)
+        value = _safe_float(raw)
+        if value is None:
+            continue
         if getattr(session, field) != value:
             setattr(session, field, value)
             changed = True

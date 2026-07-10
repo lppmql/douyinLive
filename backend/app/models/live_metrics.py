@@ -21,6 +21,13 @@ class LiveMetric(Base, TimestampMixin):
     like_count = Column(Integer, default=0, comment="点赞量")
     comment_count = Column(Integer, default=0, comment="评论量")
     follow_count = Column(Integer, default=0, comment="关注次数")
+    clue_count = Column(Integer, default=0, comment="全场景线索人数")
+    windmill_click_count = Column(Integer, default=0, comment="风车点击次数")
+    card_click_count = Column(Integer, default=0, comment="卡片点击次数")
+    wechat_add_count = Column(Integer, default=0, comment="企业微信添加数")
+    form_submit_count = Column(Integer, default=0, comment="表单提交数")
+    form_submit_users = Column(Integer, default=0, comment="表单提交人数")
+    cost_amount = Column(DECIMAL(10, 2), default=0, comment="消耗金额")
     natural_traffic_count = Column(Integer, default=0, comment="自然流量数")
     marketing_traffic_count = Column(Integer, default=0, comment="营销流量数")
 
