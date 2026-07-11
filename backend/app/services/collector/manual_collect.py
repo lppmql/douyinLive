@@ -14,6 +14,7 @@ from typing import Optional
 import re
 from urllib.parse import urlencode, urlparse, parse_qs
 from urllib.request import Request, urlopen
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from playwright.async_api import BrowserContext
 
@@ -36,7 +37,8 @@ COMMENT_URL = f"{LEADS_BASE}/pc/analysis/live-comment"
 HOME_URL = f"{LEADS_BASE}/pc/growth/home"
 HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
 HISTORY_DETAIL_BATCH_SIZE = 20
-HISTORY_DETAIL_TIMEOUT_SECONDS = 20
+HISTORY_DETAIL_TIMEOUT_SECONDS = 45
+HISTORY_DETAIL_CONCURRENCY = 2
 
 
 async def collect_all(db: Session) -> dict:
@@ -113,6 +115,9 @@ async def collect_all(db: Session) -> dict:
         # 历史接口负责补全全量场次，员工接口负责补全企业账号下的主播映射。
         history_sync = _sync_history_sessions(db, account, rooms[0])
         enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0])
+        pruned_unmapped_count = 0
+        if enterprise_sync["anchor_count"] > 0:
+            pruned_unmapped_count = _prune_unmapped_sessions(db, rooms[0])
         history_detail_progress = await _enrich_history_sessions(
             db,
             context,
@@ -132,6 +137,7 @@ async def collect_all(db: Session) -> dict:
             "enterprise_anchor_count": enterprise_sync["anchor_count"],
             "enterprise_session_synced_count": enterprise_sync["session_count"],
             "anchor_profile_synced_count": enterprise_sync["profile_count"],
+            "unmapped_session_pruned_count": pruned_unmapped_count,
             "history_detail_synced_count": history_detail_progress["enriched_count"],
             "history_detail_checked_count": history_detail_progress["checked_count"],
             "history_detail_remaining_count": history_detail_progress["remaining_count"],
@@ -141,6 +147,56 @@ async def collect_all(db: Session) -> dict:
     finally:
         # 注意：不关闭 context！它被 browser_manager 持久化了
         pass
+
+
+def _prune_unmapped_sessions(db: Session, room: LiveRoom) -> int:
+    """企业映射成功后删除无法安全归属主播的历史场次，避免污染场次列表。"""
+    child_tables = (
+        "high_intent_users",
+        "analysis_reports",
+        "leads",
+        "live_audience_profiles",
+        "asr_tasks",
+        "transcript_full_texts",
+        "transcript_segments",
+        "knowledge_base",
+        "stream_sources",
+        "comments",
+        "live_metrics",
+    )
+    session_ids = [
+        row[0]
+        for row in db.execute(
+            text(
+                "SELECT id FROM live_sessions "
+                "WHERE room_id = :room_id AND (anchor_name IS NULL OR anchor_name = '')"
+            ),
+            {"room_id": room.id},
+        ).all()
+    ]
+    if not session_ids:
+        return 0
+
+    placeholders = ",".join(f":session_id_{index}" for index in range(len(session_ids)))
+    params = {f"session_id_{index}": value for index, value in enumerate(session_ids)}
+
+    for table in child_tables:
+        db.execute(text(f"DELETE FROM {table} WHERE session_id IN ({placeholders})"), params)
+    db.execute(
+        text(f"UPDATE scraper_tasks SET session_id = NULL WHERE session_id IN ({placeholders})"),
+        params,
+    )
+    db.execute(text(f"DELETE FROM live_sessions WHERE id IN ({placeholders})"), params)
+    db.add(
+        ScraperLog(
+            level="info",
+            message=f"清理无主播归属历史场次: 删除={len(session_ids)}",
+            raw_json={"room_id": room.room_id_str, "deleted_count": len(session_ids)},
+        )
+    )
+    db.commit()
+    logger.info("清理无主播归属历史场次: room_id=%s deleted=%s", room.room_id_str, len(session_ids))
+    return len(session_ids)
 
 
 async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoom) -> dict:
@@ -300,6 +356,7 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
         stream_url = await _scrape_stream_url(context, room_id)
         if stream_url:
             session.stream_url = stream_url[:2000]
+            _save_stream_source(db, session.id, stream_url)
 
         db.commit()
 
@@ -791,11 +848,21 @@ def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom)
                 "Accept": "application/json,text/plain,*/*",
             },
         )
-        with urlopen(req, timeout=30) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+        try:
+            with urlopen(req, timeout=30) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            # 历史接口偶发断开时不能阻断企业主播映射和逐场详情采集。
+            logger.warning("历史场次接口暂时不可用，继续企业场次同步: %s", exc)
+            db.add(ScraperLog(level="warning", message=f"历史场次同步降级: {str(exc)[:500]}"))
+            db.commit()
+            return synced
         if (payload or {}).get("code") not in (0, None):
             message = (payload or {}).get("msg") or "历史场次接口返回错误"
-            raise RuntimeError(f"历史场次同步失败: {message}")
+            logger.warning("历史场次接口返回错误，继续企业主播同步: %s", message)
+            db.add(ScraperLog(level="warning", message=f"历史场次同步降级: {message}"))
+            db.commit()
+            return synced
 
         data = (payload or {}).get("data", {}) or {}
         history_rows = data.get("live_history") or []
@@ -875,9 +942,20 @@ async def _sync_enterprise_anchor_sessions(
         )
         await asyncio.sleep(4)
 
+        # 当前企业后台实际使用 feiyu_csrf_token；不同登录态下请求头可能尚未被页面触发，
+        # 因此从页面 Cookie 再兜底读取一次，避免接口 403 被误判为空主播列表。
+        if not csrf_token["value"]:
+            csrf_token["value"] = await page.evaluate(
+                """() => document.cookie.split(';').map(v => v.trim())
+                  .find(v => /^(feiyu_csrf_token|csrf_token|csrftoken|csrf-token)=/i.test(v))
+                  ?.split('=').slice(1).join('=') || ''"""
+            )
+
         accounts = await _fetch_enterprise_post(
             page, "/bff/statistic/live-comment/accounts", {"roomId": root_room_id}, csrf_token["value"]
         )
+        if accounts.get("code") == 403 or accounts.get("error_code") == 403:
+            raise RuntimeError("企业主播接口 CSRF 校验失败，请重新扫码登录")
         data = accounts.get("data", {}) if isinstance(accounts, dict) else {}
         employees = [data.get("self")] + (data.get("employeeList") or [])
         employees = [item for item in employees if isinstance(item, dict) and item.get("iesUid")]
@@ -969,7 +1047,7 @@ async def _fetch_enterprise_post(page, path: str, payload: dict, csrf_token: str
     result = await page.evaluate(
         """async ({path, payload, csrfToken}) => {
           const csrf = document.cookie.split(';').map(v => v.trim())
-            .find(v => /^(csrf_token|csrftoken|csrf-token)=/i.test(v))?.split('=').slice(1).join('=') || '';
+            .find(v => /^(feiyu_csrf_token|csrf_token|csrftoken|csrf-token)=/i.test(v))?.split('=').slice(1).join('=') || '';
           const resp = await fetch(path, {
             method: 'POST',
             credentials: 'include',
@@ -1030,72 +1108,50 @@ async def _enrich_history_sessions(
     )
 
     pending_sessions = [session for session in all_sessions if _needs_history_enrichment(session)]
-    # 先处理没有主播资料的旧历史场次，保证每次点击采集都能扩大主播覆盖率。
-    pending_sessions.sort(key=lambda session: (bool(session.anchor_name), -(session.id or 0)))
+    # 先覆盖从未尝试过的场次，再重试暂时失败的场次，避免 retryable 阻塞全量首轮采集。
+    pending_sessions.sort(
+        key=lambda session: (
+            session.detail_collection_status == "retryable",
+            bool(session.anchor_name),
+            -(session.id or 0),
+        )
+    )
     target_sessions = pending_sessions[:limit]
     enriched = 0
-    checked = 0
-    consecutive_mismatch = 0
-    for session in target_sessions:
+    checked = len(target_sessions)
+    semaphore = asyncio.Semaphore(HISTORY_DETAIL_CONCURRENCY)
+
+    async def scrape_one(session: LiveSession):
         room_id = _extract_room_id_from_dashboard_url(session.dashboard_url)
         if not room_id:
-            continue
-
-        checked += 1
-        try:
-            detail = await asyncio.wait_for(
-                _scrape_history_session_detail(current_context, room_id, session),
-                timeout=HISTORY_DETAIL_TIMEOUT_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("历史场次详情采集超时，跳过: session_id=%s room_id=%s", session.id, room_id)
-            session.detail_collection_status = "retryable"
-            session.detail_collection_error = "详情页采集超时，可在下次采集重试"
-            db.commit()
-            continue
-        except Exception as exc:
-            if _is_context_closed_error(exc):
-                logger.warning("历史场次上下文已关闭，尝试恢复后重试: session_id=%s room_id=%s", session.id, room_id)
-                current_context, is_valid, message = await browser_manager.get_logged_in_context()
-                if not is_valid or not current_context:
-                    logger.warning("历史场次上下文恢复失败，停止补齐: %s", message)
-                    break
-                try:
-                    detail = await asyncio.wait_for(
-                        _scrape_history_session_detail(current_context, room_id, session),
-                        timeout=HISTORY_DETAIL_TIMEOUT_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning("历史场次详情采集超时，跳过: session_id=%s room_id=%s", session.id, room_id)
-                    continue
-                except Exception as retry_exc:
-                    logger.warning(
-                        "历史场次详情采集失败，跳过: session_id=%s room_id=%s error=%s",
-                        session.id,
-                        room_id,
-                        retry_exc,
-                    )
-                    continue
-            else:
-                logger.warning(
-                    "历史场次详情采集失败，跳过: session_id=%s room_id=%s error=%s",
-                    session.id,
-                    room_id,
-                    exc,
+            return session, None, "缺少场次 room_id"
+        async with semaphore:
+            try:
+                detail = await asyncio.wait_for(
+                    _scrape_history_session_detail(current_context, room_id, session),
+                    timeout=HISTORY_DETAIL_TIMEOUT_SECONDS,
                 )
-                continue
+                return session, detail, None
+            except asyncio.TimeoutError:
+                return session, None, "详情页采集超时，可在下次采集重试"
+            except Exception as exc:
+                return session, None, f"详情页采集失败: {str(exc)[:450]}"
+
+    detail_results = await asyncio.gather(*(scrape_one(session) for session in target_sessions))
+    for session, detail, error in detail_results:
+        if error:
+            session.detail_collection_status = "retryable"
+            session.detail_collection_error = error
+            db.commit()
+            logger.warning("历史场次详情采集失败: session_id=%s error=%s", session.id, error)
+            continue
 
         if detail.get("validation_failed"):
-            consecutive_mismatch += 1
             session.detail_collection_status = "unavailable"
             session.detail_collection_error = "平台详情页未回显该场次时间，无法安全确认主播归属"
             db.commit()
-            if consecutive_mismatch >= 5:
-                logger.info("历史详情连续 %s 场校验失败，停止继续补齐更早场次", consecutive_mismatch)
-                break
             continue
 
-        consecutive_mismatch = 0
         session.detail_collection_status = "complete"
         session.detail_collection_error = None
         overview = detail.get("overview", {})
@@ -1105,11 +1161,12 @@ async def _enrich_history_sessions(
         anchor_profile = detail.get("anchor_profile", {}) or {}
 
         changed = _apply_session_anchor_profile(session, anchor_profile)
-
         changed = _apply_overview_to_session(session, overview) or changed
         if replay_url and session.stream_url != replay_url:
             session.stream_url = replay_url[:2000]
             changed = True
+        if replay_url:
+            _save_stream_source(db, session.id, replay_url)
 
         metrics_count = _save_trend_metrics(db, session.id, trend_rows)
         comments_count = _save_comments(db, session.id, comments_data)
@@ -1119,21 +1176,22 @@ async def _enrich_history_sessions(
 
         if changed or metrics_count or comments_count:
             db.commit()
-            enriched += 1
-            logger.info(
-                "历史场次详情补齐: session_id=%s, anchor=%s, metrics=%s, comments=%s, stream=%s",
-                session.id,
-                session.anchor_name or "未知主播",
-                metrics_count,
-                comments_count,
-                bool(session.stream_url),
-            )
+        enriched += 1
+        logger.info(
+            "历史场次详情补齐: session_id=%s, anchor=%s, metrics=%s, comments=%s, stream=%s",
+            session.id,
+            session.anchor_name or "未知主播",
+            metrics_count,
+            comments_count,
+            bool(session.stream_url),
+        )
 
     progress = {
         "enriched_count": enriched,
         "checked_count": checked,
         "remaining_count": max(len(pending_sessions) - checked, 0),
         "batch_size": limit,
+        "concurrency": HISTORY_DETAIL_CONCURRENCY,
     }
     db.add(
         ScraperLog(
@@ -1436,6 +1494,32 @@ def _save_trend_metrics(db: Session, session_id: int, trend_rows: list[dict]) ->
     return count
 
 
+def _save_stream_source(db: Session, session_id: int, stream_url: str) -> None:
+    """保存可供后续 ASR 使用的流/回放地址，按场次和地址幂等。"""
+    normalized = str(stream_url or "").strip()
+    if not normalized:
+        return
+    exists = (
+        db.query(StreamSource)
+        .filter(StreamSource.session_id == session_id, StreamSource.m3u8_url == normalized[:2000])
+        .first()
+    )
+    if exists:
+        exists.status = "active"
+        exists.fetched_at = datetime.utcnow()
+        return
+    source_type = "m3u8" if ".m3u8" in normalized.lower() else "replay"
+    db.add(
+        StreamSource(
+            session_id=session_id,
+            source_type=source_type,
+            m3u8_url=normalized[:2000],
+            status="active",
+            fetched_at=datetime.utcnow(),
+        )
+    )
+
+
 def _save_comments(db: Session, session_id: int, comments: list) -> int:
     """保存评论数据"""
     existing_pairs = {
@@ -1716,15 +1800,9 @@ def _merge_room_profile(primary: dict, fallback: dict) -> dict:
 
 def _needs_history_enrichment(session: LiveSession) -> bool:
     """判断历史场次是否还需要继续补齐详情。"""
-    if session.detail_collection_status == "unavailable":
-        return False
-    return not (
-        bool(session.anchor_name)
-        and
-        (session.peak_online_count or 0) > 0
-        and (session.comments_count or 0) > 0
-        and bool(session.stream_url)
-    )
+    # complete 表示本场详情页已经真实访问并保存结果，即使平台返回 0 评论/0 指标，
+    # 也不能因为“没有数据”而在每次点击采集时无限重复请求。
+    return session.detail_collection_status in (None, "", "pending", "retryable")
 
 
 def _parse_comments_from_live_screen_text(body_text: str, live_start_time: Optional[datetime]) -> list[dict]:

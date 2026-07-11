@@ -122,6 +122,7 @@ class CollectAllResponse(BaseModel):
     enterprise_anchor_count: int = 0
     enterprise_session_synced_count: int = 0
     anchor_profile_synced_count: int = 0
+    unmapped_session_pruned_count: int = 0
     history_detail_synced_count: int = 0
     history_detail_checked_count: int = 0
     history_detail_remaining_count: int = 0

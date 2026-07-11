@@ -259,6 +259,7 @@ declare namespace Api {
       enterprise_anchor_count: number;
       enterprise_session_synced_count: number;
       anchor_profile_synced_count: number;
+      unmapped_session_pruned_count: number;
       history_detail_synced_count: number;
       history_detail_checked_count: number;
       history_detail_remaining_count: number;

@@ -464,6 +464,7 @@ onUnmounted(() => {
                 历史场次同步 {{ collectAllResult.history_synced_count || 0 }} 场；
                 企业主播 {{ collectAllResult.enterprise_anchor_count || 0 }} 个；
                 主播映射 {{ collectAllResult.anchor_profile_synced_count || 0 }} 条；
+                清理无归属场次 {{ collectAllResult.unmapped_session_pruned_count || 0 }} 场；
                 本次补详情 {{ collectAllResult.history_detail_synced_count || 0 }}/{{ collectAllResult.history_detail_checked_count || 0 }} 场；
                 剩余待补 {{ collectAllResult.history_detail_remaining_count || 0 }} 场；
                 单次最多补 {{ collectAllResult.history_detail_batch_size || 0 }} 场
