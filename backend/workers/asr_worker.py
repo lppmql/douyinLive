@@ -40,6 +40,7 @@ class AsrWorker:
         """主循环"""
         self._running = True
         logger.info(f"ASR Worker 启动 (并发上限: {settings.MAX_REALTIME_ASR_TASKS})")
+        self._recover_stale_tasks()
 
         while self._running:
             try:
@@ -50,6 +51,21 @@ class AsrWorker:
             except Exception as e:
                 logger.error(f"ASR Worker 异常: {e}")
                 await asyncio.sleep(10)
+
+    def _recover_stale_tasks(self):
+        """Worker 重启时把遗留 processing 任务标记为可重试失败。"""
+        db = SessionLocal()
+        try:
+            stale = db.query(AsrTask).filter(AsrTask.status == "processing").all()
+            for task in stale:
+                task.status = "failed"
+                task.error_message = "Worker 重启时回收未完成任务，可重新排队"
+                task.completed_at = datetime.utcnow()
+            if stale:
+                db.commit()
+                logger.warning("Worker 回收 %s 个遗留 ASR 任务", len(stale))
+        finally:
+            db.close()
 
     async def _poll_tasks(self):
         """轮询 queued 任务"""

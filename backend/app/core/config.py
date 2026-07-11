@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     ASR_SAMPLE_RATE: int = 16000
     ASR_MAX_QUEUED: int = 5
     ASR_TASK_TIMEOUT_SECONDS: int = 600
+    ASR_NO_AUDIO_TIMEOUT_SECONDS: int = 30
 
     # Playwright / 采集
     PLAYWRIGHT_HEADLESS: bool = True

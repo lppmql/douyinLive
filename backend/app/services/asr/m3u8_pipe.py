@@ -74,7 +74,17 @@ class M3u8Pipe:
 
         try:
             while True:
-                frame = await self._process.stdout.read(PCM_FRAME_SIZE)
+                try:
+                    frame = await asyncio.wait_for(
+                        self._process.stdout.read(PCM_FRAME_SIZE),
+                        timeout=settings.ASR_NO_AUDIO_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "ffmpeg 超过 %ss 未输出音频，结束流读取",
+                        settings.ASR_NO_AUDIO_TIMEOUT_SECONDS,
+                    )
+                    break
                 if not frame:
                     break
                 # 不足一帧的丢弃
