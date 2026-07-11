@@ -112,9 +112,12 @@ async def collect_all(db: Session) -> dict:
                 }
             results.append(result)
 
-        # 历史接口负责补全全量场次，员工接口负责补全企业账号下的主播映射。
-        history_sync = _sync_history_sessions(db, account, rooms[0])
+        # 企业接口能返回主播和场次的稳定映射时，不再反复导入无法归属的旧历史；
+        # 只有企业接口不可用时才使用历史接口兜底。
         enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0])
+        history_sync = 0
+        if enterprise_sync["anchor_count"] == 0:
+            history_sync = _sync_history_sessions(db, account, rooms[0])
         pruned_unmapped_count = 0
         if enterprise_sync["anchor_count"] > 0:
             pruned_unmapped_count = _prune_unmapped_sessions(db, rooms[0])
