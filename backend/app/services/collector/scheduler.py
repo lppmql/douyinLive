@@ -68,11 +68,12 @@ class SchedulerManager:
         logger.info("SchedulerManager 已启动")
 
     async def stop(self):
-        """停止调度器"""
+        """停止调度器并释放登录浏览器，避免停止监控后继续占用内存。"""
         if self._scheduler and self._scheduler.running:
             self._scheduler.shutdown(wait=False)
         self._running = False
         self._session_jobs.clear()
+        await browser_manager.close()
         logger.info("SchedulerManager 已停止")
 
     @property

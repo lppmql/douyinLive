@@ -1,7 +1,7 @@
 """Pydantic 数据模型 - 请求/响应"""
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 # ===== 直播间 =====
@@ -34,13 +34,11 @@ class LiveRoomUpdate(BaseModel):
 
 
 class LiveRoomResponse(LiveRoomBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 # ===== 直播场次 =====
 class LiveSessionBase(BaseModel):
@@ -68,6 +66,8 @@ class LiveSessionUpdate(BaseModel):
 
 
 class LiveSessionResponse(LiveSessionBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     anchor_name: Optional[str] = None
     anchor_nickname: Optional[str] = None
@@ -124,10 +124,6 @@ class LiveSessionResponse(LiveSessionBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
-
 class LiveMetricDetailResponse(BaseModel):
     """直播大屏的单个时间点指标。"""
 
@@ -154,14 +150,12 @@ class LiveMetricDetailResponse(BaseModel):
 class LiveAudienceProfileResponse(BaseModel):
     """单场直播的观众画像分布。"""
 
+    model_config = ConfigDict(from_attributes=True)
+
     dimension_type: str
     dimension_name: str
     ratio: float = 0
     count: int = 0
-
-    class Config:
-        from_attributes = True
-
 
 class LiveSessionDetailResponse(BaseModel):
     """直播场次详情页需要的完整采集结果。"""
@@ -192,12 +186,10 @@ class CommentCreate(CommentBase):
 
 
 class CommentResponse(CommentBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 LiveSessionDetailResponse.model_rebuild()
 
@@ -217,14 +209,12 @@ class TranscriptSegmentCreate(TranscriptSegmentBase):
 
 
 class TranscriptSegmentResponse(TranscriptSegmentBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     ai_score: Optional[float] = None
     is_high_conversion: int = 0
     created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 # ===== 留资 =====
 class LeadBase(BaseModel):
@@ -241,12 +231,10 @@ class LeadCreate(LeadBase):
 
 
 class LeadResponse(LeadBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 # ===== 知识库 =====
 class KnowledgeBaseBase(BaseModel):
@@ -262,12 +250,10 @@ class KnowledgeBaseCreate(KnowledgeBaseBase):
 
 
 class KnowledgeBaseResponse(KnowledgeBaseBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 # ===== AI 分析报告 =====
 class AnalysisReportBase(BaseModel):
@@ -282,9 +268,8 @@ class AnalysisReportCreate(AnalysisReportBase):
 
 
 class AnalysisReportResponse(AnalysisReportBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     report_content: Optional[dict] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True

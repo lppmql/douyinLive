@@ -1,7 +1,7 @@
 """认证相关 Pydantic 模型 — 登录 / 用户信息 / 用户管理"""
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ===== 登录认证 =====
@@ -30,6 +30,8 @@ class UserInfoData(BaseModel):
 
 class UserResponse(BaseModel):
     """用户信息响应"""
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     username: str
     nickname: Optional[str] = None
@@ -41,10 +43,6 @@ class UserResponse(BaseModel):
     last_login_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 class UserCreate(BaseModel):
     """创建用户请求"""

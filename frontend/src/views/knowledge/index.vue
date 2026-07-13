@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { NTag, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
-import { askKnowledge, fetchKnowledgeItems } from '@/service/api/douyin';
+import { askKnowledge, fetchKnowledgeItems, syncRecentKnowledge } from '@/service/api/douyin';
 
 defineOptions({ name: 'Knowledge' });
 
@@ -11,6 +11,23 @@ const message = useMessage();
 /* ---------- 知识库列表 ---------- */
 const items = ref<Api.Douyin.KnowledgeItem[]>([]);
 const loading = ref(false);
+const syncing = ref(false);
+
+async function syncRecent() {
+  syncing.value = true;
+  try {
+    const res = await syncRecentKnowledge(20);
+    const data = res.data;
+    message.success(
+      `已同步 ${data?.session_count || 0} 场：新增数据 ${data?.live_data_saved || 0} 条、评论 ${data?.comments_saved || 0} 条`
+    );
+    await loadItems();
+  } catch {
+    message.error('同步知识库失败');
+  } finally {
+    syncing.value = false;
+  }
+}
 
 async function loadItems() {
   loading.value = true;
@@ -29,7 +46,7 @@ onMounted(loadItems);
 /* ---------- 聊天 ---------- */
 const question = ref('');
 const chatting = ref(false);
-const messages = ref<{ role: 'user' | 'ai'; content: string }[]>([]);
+const messages = ref<{ role: 'user' | 'ai'; content: string; sources?: Api.Douyin.KnowledgeSource[] }[]>([]);
 const chatEndRef = ref<HTMLElement | null>(null);
 
 async function sendQuestion() {
@@ -40,7 +57,7 @@ async function sendQuestion() {
   chatting.value = true;
   try {
     const res = await askKnowledge(q);
-    messages.value.push({ role: 'ai', content: res.data?.answer || '暂无回答' });
+    messages.value.push({ role: 'ai', content: res.data?.answer || '暂无回答', sources: res.data?.sources || [] });
   } catch {
     messages.value.push({ role: 'ai', content: '请求失败，请稍后重试' });
   }
@@ -55,10 +72,13 @@ async function sendQuestion() {
     <NGi span="1 m:2">
       <NCard :bordered="false" class="card-wrapper">
         <template #header>
-          <NSpace>
-            <SvgIcon icon="mdi:book-open-variant" class="text-22px" />
-            <span class="text-16px font-bold">{{ $t('page.knowledge.title') }}</span>
-          </NSpace>
+          <div class="flex w-full items-center justify-between gap-12px">
+            <NSpace><SvgIcon icon="mdi:book-open-variant" class="text-22px" /><span class="text-16px font-bold">{{ $t('page.knowledge.title') }}</span></NSpace>
+            <NButton type="primary" secondary :loading="syncing" @click="syncRecent">
+              <template #icon><SvgIcon icon="mdi:database-sync-outline" /></template>
+              同步最近20场
+            </NButton>
+          </div>
         </template>
         <NAlert type="info" closable>无数据时，可先在场次页面运行 AI 分析后保存到知识库</NAlert>
         <NSpin :show="loading">
@@ -112,6 +132,9 @@ async function sendQuestion() {
               "
             >
               {{ msg.content }}
+              <div v-if="msg.sources?.length" class="mt-8px border-t border-gray-200/60 pt-6px text-11px text-gray-500">
+                引用：{{ msg.sources.map(source => `${source.title || '未命名'}${source.session_id ? `（场次${source.session_id}）` : ''}`).join('、') }}
+              </div>
             </div>
           </div>
         </div>

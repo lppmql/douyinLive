@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.live_metrics import LiveMetric
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional
 
@@ -21,12 +21,10 @@ class MetricCreate(BaseModel):
 
 
 class MetricResponse(MetricCreate):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 router = APIRouter(prefix="/live-metrics", tags=["直播指标"])
 

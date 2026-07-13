@@ -1,12 +1,17 @@
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根目录（config.py → app/core/ → backend/ → 项目根目录）
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(PROJECT_ROOT / ".env"),
+        env_file_encoding="utf-8",
+    )
+
     # 应用
     APP_NAME: str = "抖音留资直播分析系统"
     APP_VERSION: str = "0.1.0"
@@ -66,10 +71,5 @@ class Settings(BaseSettings):
         if self.DATABASE_URL:
             return self.DATABASE_URL
         return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
-
-    class Config:
-        env_file = str(PROJECT_ROOT / ".env")
-        env_file_encoding = "utf-8"
-
 
 settings = Settings()

@@ -10,9 +10,10 @@ from app.services.ai.prompt_service import get_prompt
 from app.services.ai.scoring import score_session_transcript, batch_score_recent
 from app.services.ai.analysis import analyze_trend, detect_anomalies
 from app.services.ai.high_intent_service import identify_high_intent, list_high_intent_users
-from app.services.ai.kb_service import qa_search, save_transcript_to_kb, save_analysis_to_kb
+from app.services.ai.kb_service import qa_search, sync_session_to_kb
 from app.models.analysis_reports import AnalysisReport
 from app.models.high_intent_users import HighIntentUser
+from app.models.live_sessions import LiveSession
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI-分析"])
@@ -78,13 +79,11 @@ def run_transcript_ai_pipeline(session_id: int, db: Session = Depends(get_db)):
     result = score_session_transcript(session_id, db)
     if result is None:
         raise HTTPException(400, "没有足够的已完成话术，无法执行 AI 分析")
-    transcript_saved = save_transcript_to_kb(db, session_id)
-    analysis_saved = save_analysis_to_kb(db, session_id)
+    saved = sync_session_to_kb(db, session_id)
     return {
         "status": "ok",
         "result": result,
-        "transcript_saved": transcript_saved,
-        "analysis_saved": analysis_saved,
+        **saved,
     }
 
 
@@ -213,11 +212,24 @@ def knowledge_qa(req: QaRequest, db: Session = Depends(get_db)):
 
 @router.post("/kb/save/{session_id}")
 def save_to_knowledge_base(session_id: int, db: Session = Depends(get_db)):
-    """将话术和分析结果保存到知识库"""
-    transcript_count = save_transcript_to_kb(db, session_id)
-    analysis_count = save_analysis_to_kb(db, session_id)
-    return {
-        "status": "ok",
-        "transcript_saved": transcript_count,
-        "analysis_saved": analysis_count,
-    }
+    """将直播数据、评论、话术和分析结果统一保存到知识库。"""
+    if not db.get(LiveSession, session_id):
+        raise HTTPException(404, "直播场次不存在")
+    return {"status": "ok", **sync_session_to_kb(db, session_id)}
+
+
+@router.post("/kb/sync/recent")
+def sync_recent_to_knowledge_base(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """增量同步最近真实场次；不依赖 ASR，已有数据和评论即可入库。"""
+    sessions = db.query(LiveSession).filter(
+        LiveSession.detail_collection_status == "complete",
+    ).order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc()).limit(limit).all()
+    totals = {"live_data_saved": 0, "comments_saved": 0, "transcript_saved": 0, "analysis_saved": 0}
+    for session in sessions:
+        result = sync_session_to_kb(db, session.id)
+        for key, value in result.items():
+            totals[key] += value
+    return {"status": "ok", "session_count": len(sessions), **totals}

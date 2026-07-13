@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
 from app.models.prompt_templates import PromptTemplate
@@ -19,6 +19,8 @@ class PromptCreate(BaseModel):
 
 
 class PromptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     type: str
     name: str | None
@@ -26,10 +28,6 @@ class PromptResponse(BaseModel):
     version: int
     description: str | None
     created_at: datetime | None = None
-
-    class Config:
-        from_attributes = True
-
 
 @router.get("/", response_model=list[PromptResponse])
 def list_prompt_templates(

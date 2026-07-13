@@ -295,6 +295,22 @@ declare namespace Api {
       created_at: string;
     }
 
+    interface KnowledgeSource {
+      id: number;
+      title: string | null;
+      category: string | null;
+      source_type: string | null;
+      session_id: number | null;
+    }
+
+    interface KnowledgeSyncResult {
+      status: string;
+      live_data_saved: number;
+      comments_saved: number;
+      transcript_saved: number;
+      analysis_saved: number;
+    }
+
     /* ---------- 刷新数据采集 ---------- */
     interface CollectRoomResult {
       room_id: string;

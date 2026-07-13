@@ -1,7 +1,7 @@
 """Phase 3: 采集相关 Pydantic 数据模型"""
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ===== 采集账号 =====
@@ -23,6 +23,8 @@ class ScraperAccountUpdate(BaseModel):
 
 
 class ScraperAccountResponse(ScraperAccountBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     viewport_width: Optional[int] = None
     viewport_height: Optional[int] = None
@@ -32,10 +34,6 @@ class ScraperAccountResponse(ScraperAccountBase):
     last_login_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 # ===== 采集任务 =====
 class ScraperTaskBase(BaseModel):
@@ -50,6 +48,8 @@ class ScraperTaskCreate(ScraperTaskBase):
 
 
 class ScraperTaskResponse(ScraperTaskBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
@@ -69,10 +69,6 @@ class ScraperTaskResponse(ScraperTaskBase):
     remaining_detail_count: int = 0
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
-
 # ===== 采集日志 =====
 class ScraperLogBase(BaseModel):
     task_id: Optional[int] = None
@@ -81,13 +77,11 @@ class ScraperLogBase(BaseModel):
 
 
 class ScraperLogResponse(ScraperLogBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     raw_json: Optional[Any] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
-
 
 # ===== 采集器状态 =====
 class CollectorStatusResponse(BaseModel):

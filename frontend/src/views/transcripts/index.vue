@@ -165,7 +165,11 @@ async function runAiPipeline() {
   if (!selectedSessionId.value) return;
   try {
     const res = await runTranscriptAiPipeline(selectedSessionId.value);
-    const saved = (res.data?.transcript_saved ?? 0) + (res.data?.analysis_saved ?? 0);
+    const saved =
+      (res.data?.live_data_saved ?? 0) +
+      (res.data?.comments_saved ?? 0) +
+      (res.data?.transcript_saved ?? 0) +
+      (res.data?.analysis_saved ?? 0);
     message.success(`AI 分析完成，知识库新增 ${saved} 条`);
   } catch {
     message.error('请先完成该场次的话术转写');

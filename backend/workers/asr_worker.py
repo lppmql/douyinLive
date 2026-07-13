@@ -28,7 +28,7 @@ from app.services.asr.m3u8_pipe import M3u8Pipe
 from app.services.asr.funasr_client import FunasrClient
 from app.services.asr.websocket_manager import ws_manager
 from app.services.ai.scoring import score_session_transcript
-from app.services.ai.kb_service import save_transcript_to_kb, save_analysis_to_kb
+from app.services.ai.kb_service import sync_session_to_kb
 
 
 class AsrWorker:
@@ -184,14 +184,12 @@ class AsrWorker:
                 # ASR 成功后自动完成 AI 评分和知识库同步；AI 失败不回滚真实话术。
                 try:
                     score = score_session_transcript(task.session_id, db)
-                    transcript_saved = save_transcript_to_kb(db, task.session_id)
-                    analysis_saved = save_analysis_to_kb(db, task.session_id)
+                    knowledge_saved = sync_session_to_kb(db, task.session_id)
                     logger.info(
-                        "任务 %s AI 闭环完成: score=%s, transcript_kb=%s, analysis_kb=%s",
+                        "任务 %s AI 闭环完成: score=%s, knowledge=%s",
                         task_id,
                         (score or {}).get("total_score"),
-                        transcript_saved,
-                        analysis_saved,
+                        knowledge_saved,
                     )
                 except Exception as ai_exc:
                     logger.exception("任务 %s AI 分析或知识库同步失败: %s", task_id, ai_exc)

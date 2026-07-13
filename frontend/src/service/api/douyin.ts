@@ -169,7 +169,7 @@ export function fetchAnalysisAlerts(sessionId: number) {
 }
 
 export function runTranscriptAiPipeline(sessionId: number) {
-  return backendRequest<{ status: string; transcript_saved: number; analysis_saved: number }>({
+  return backendRequest<Api.Douyin.KnowledgeSyncResult & { result: Record<string, unknown> }>({
     url: `${API_PREFIX}/ai/pipeline/${sessionId}`,
     method: 'POST'
   });
@@ -275,7 +275,7 @@ export function detectHighIntent(sessionId: number) {
 
 /** 知识问答 */
 export function askKnowledge(question: string, category?: string) {
-  return backendRequest<{ answer: string; sources: unknown[]; has_result: boolean }>({
+  return backendRequest<{ answer: string; sources: Api.Douyin.KnowledgeSource[]; has_result: boolean }>({
     url: `${API_PREFIX}/ai/qa`,
     method: 'POST',
     data: { question, category }
@@ -284,9 +284,18 @@ export function askKnowledge(question: string, category?: string) {
 
 /** 保存到知识库 */
 export function saveToKnowledgeBase(sessionId: number) {
-  return backendRequest<{ status: string; transcript_saved: number; analysis_saved: number }>({
+  return backendRequest<Api.Douyin.KnowledgeSyncResult>({
     url: `${API_PREFIX}/ai/kb/save/${sessionId}`,
     method: 'POST'
+  });
+}
+
+/** 增量同步最近场次的数据、评论、话术和分析到知识库 */
+export function syncRecentKnowledge(limit = 20) {
+  return backendRequest<Api.Douyin.KnowledgeSyncResult & { session_count: number }>({
+    url: `${API_PREFIX}/ai/kb/sync/recent`,
+    method: 'POST',
+    params: { limit }
   });
 }
 
