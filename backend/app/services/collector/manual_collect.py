@@ -960,7 +960,15 @@ async def _sync_enterprise_anchor_sessions(
             "/bff/statistic/live-comment/accounts",
             {"roomId": root_room_id},
             csrf_token["value"],
-            row_keys=("employeeList", "employee_list", "records", "list"),
+            row_keys=(
+                "employeeList",
+                "employee_list",
+                "enterpiseList",
+                "enterpriseList",
+                "enterprise_list",
+                "records",
+                "list",
+            ),
         )
         employees = ([account_self] if account_self else []) + employee_rows
         unique_employees = {}
@@ -1125,8 +1133,7 @@ async def _fetch_enterprise_rows(
         for key in row_keys:
             value = data.get(key)
             if isinstance(value, list):
-                page_rows = [item for item in value if isinstance(item, dict)]
-                break
+                page_rows.extend(item for item in value if isinstance(item, dict))
 
         added = 0
         for item in page_rows:

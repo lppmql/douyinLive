@@ -41,6 +41,29 @@ class EnterprisePaginationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rows, [{"roomId": "same-room"}])
         self.assertEqual(page.calls, [1, 2])
 
+    async def test_merges_employee_and_enterprise_lists(self):
+        page = FakePage({
+            "default": {
+                "data": {
+                    "employeeList": [{"iesUid": "employee"}],
+                    "enterpiseList": [{"iesUid": "enterprise"}],
+                }
+            }
+        })
+
+        rows, _ = await _fetch_enterprise_rows(
+            page,
+            "/accounts",
+            {},
+            "",
+            ("employeeList", "enterpiseList"),
+        )
+
+        self.assertEqual(
+            [row["iesUid"] for row in rows],
+            ["employee", "enterprise"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
