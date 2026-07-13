@@ -24,12 +24,10 @@ class ScraperAccountUpdate(BaseModel):
 
 class ScraperAccountResponse(ScraperAccountBase):
     id: int
-    storage_state_path: Optional[str] = None
-    user_agent: Optional[str] = None
     viewport_width: Optional[int] = None
     viewport_height: Optional[int] = None
-    cookies_json: Optional[str] = None
-    browser_fingerprint_json: Optional[str] = None
+    cookie_saved: bool = False
+    fingerprint_saved: bool = False
     expires_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
     created_at: datetime
@@ -99,6 +97,14 @@ class LoginStatusResponse(BaseModel):
     status: str  # pending / scanning / success / failed / timeout
     account: Optional[ScraperAccountResponse] = None
     message: str = ""
+
+
+class AccountHealthResponse(BaseModel):
+    account_id: int
+    valid: bool
+    login_status: str
+    checked_at: datetime
+    message: str
 
 
 # ===== 一键采集结果 =====

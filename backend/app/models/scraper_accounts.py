@@ -20,3 +20,11 @@ class ScraperAccount(Base, TimestampMixin):
     last_login_at = Column(DateTime, nullable=True, comment="最后登录时间")
     cookies_json = Column(Text, nullable=True, comment="Cookie 备份(JSON)")
     browser_fingerprint_json = Column(Text, nullable=True, comment="浏览器指纹快照(JSON)")
+
+    @property
+    def cookie_saved(self) -> bool:
+        return bool(self.cookies_json and self.storage_state_path)
+
+    @property
+    def fingerprint_saved(self) -> bool:
+        return bool(self.browser_fingerprint_json)

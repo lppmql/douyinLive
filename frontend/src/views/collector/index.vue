@@ -11,6 +11,8 @@ import {
   fetchLoginStatus,
   reCollectorLogin,
   deleteCollectorAccount,
+  checkCollectorAccountHealth,
+  fetchCollectorTasks,
   fetchMonitorStatus,
   startMonitor,
   stopMonitor,
@@ -31,14 +33,26 @@ const loading = ref(true);
 const collectorStatus = ref<Api.Douyin.CollectorStatus | null>(null);
 const accounts = ref<Api.Douyin.CollectorAccount[]>([]);
 const logs = ref<Api.Douyin.CollectorLog[]>([]);
+const tasks = ref<Api.Douyin.CollectorTask[]>([]);
+const accountSectionRef = ref<HTMLElement | null>(null);
+const logSectionRef = ref<HTMLElement | null>(null);
+const accountHighlight = ref(false);
+const logHighlight = ref(false);
+const taskDrawerVisible = ref(false);
+const logLevel = ref('all');
+const now = ref(Date.now());
+const silentRefreshing = ref(false);
+const accountHealthLoadingId = ref<number | null>(null);
 
 const loggedInAccountCount = computed(() => accounts.value.filter(item => item.login_status === 'logged_in').length);
 const errorLogCount = computed(() => logs.value.filter(item => item.level === 'error').length);
 const hasAvailableAccount = computed(() => loggedInAccountCount.value > 0);
+const activeTasks = computed(() => tasks.value.filter(item => ['pending', 'running'].includes(item.status)));
 
 const getAccountRowKey = (row: Api.Douyin.CollectorAccount) => row.id;
 const getLogRowKey = (row: Api.Douyin.CollectorLog) => row.id;
 const getCollectResultRowKey = (row: Api.Douyin.CollectRoomResult) => row.room_id;
+const getTaskRowKey = (row: Api.Douyin.CollectorTask) => row.id;
 
 type LoginState = 'idle' | 'pending' | 'scanning' | 'success' | 'failed' | 'timeout' | 'not_found';
 
@@ -48,7 +62,9 @@ const qrImage = ref('');
 const loginTaskId = ref<number | null>(null);
 const loginStatus = ref<LoginState>('idle');
 const loginMessage = ref('');
-let loginPollTimer: ReturnType<typeof setInterval> | null = null;
+let loginPollTimer: number | null = null;
+let dataPollTimer: number | null = null;
+let clockTimer: number | null = null;
 
 /* ---------- 监控 ---------- */
 const monitorStatus = ref<Api.Douyin.MonitorStatus | null>(null);
@@ -57,6 +73,15 @@ const monitorLoading = ref(false);
 /* ---------- 一键采集 ---------- */
 const collectAllLoading = ref(false);
 const collectAllResult = ref<Api.Douyin.CollectAllResponse | null>(null);
+const collectionRunning = computed(
+  () => collectAllLoading.value || activeTasks.value.some(item => item.task_type === 'collect_all')
+);
+const collectDisabledReason = computed(() => {
+  if (!hasAvailableAccount.value) return '请先扫码登录可用采集账号';
+  if (monitorStatus.value?.running) return '当前正在直播监控中，请先停止监控再执行全量历史采集';
+  if (collectionRunning.value) return '已有全量采集任务正在运行，请勿重复提交';
+  return '';
+});
 
 async function loadMonitorStatus() {
   const res = await fetchMonitorStatus();
@@ -64,6 +89,10 @@ async function loadMonitorStatus() {
 }
 
 async function handleStartMonitor() {
+  if (collectionRunning.value) {
+    message.warning('全量采集正在运行，请等待任务结束后再启动监控');
+    return;
+  }
   monitorLoading.value = true;
   try {
     const res = await startMonitor();
@@ -128,22 +157,103 @@ async function handleCollectAll() {
 }
 
 /* ---------- 加载数据 ---------- */
-async function loadData() {
-  loading.value = true;
+async function loadData(silent = false) {
+  if (silent) silentRefreshing.value = true;
+  else loading.value = true;
   try {
-    const [statusRes, accountsRes, logsRes] = await Promise.all([
+    const [statusRes, accountsRes, logsRes, tasksRes, monitorRes] = await Promise.all([
       fetchCollectorStatus(),
       fetchCollectorAccounts(),
-      fetchCollectorLogs({ limit: 50 })
+      fetchCollectorLogs({ limit: 50, level: logLevel.value === 'all' ? undefined : logLevel.value }),
+      fetchCollectorTasks(),
+      fetchMonitorStatus()
     ]);
     if (statusRes.data != null) collectorStatus.value = statusRes.data;
     if (accountsRes.data != null) accounts.value = accountsRes.data;
     if (logsRes.data != null) logs.value = logsRes.data;
+    if (tasksRes.data != null) tasks.value = tasksRes.data;
+    if (monitorRes.data != null) monitorStatus.value = monitorRes.data;
   } catch {
-    message.error('加载采集数据失败');
+    if (!silent) message.error('加载采集数据失败');
   } finally {
-    loading.value = false;
+    if (silent) silentRefreshing.value = false;
+    else loading.value = false;
   }
+}
+
+async function filterLogs(level: string) {
+  logLevel.value = level;
+  await loadData(true);
+  scrollToSection(logSectionRef, logHighlight);
+}
+
+function scrollToSection(section: typeof accountSectionRef, highlight: typeof accountHighlight) {
+  section.value?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  highlight.value = true;
+  window.setTimeout(() => {
+    highlight.value = false;
+  }, 1800);
+}
+
+function openAccounts() {
+  scrollToSection(accountSectionRef, accountHighlight);
+}
+
+function openTasks() {
+  taskDrawerVisible.value = true;
+}
+
+async function openErrors() {
+  await filterLogs('error');
+}
+
+async function handleAccountHealth(row: Api.Douyin.CollectorAccount) {
+  accountHealthLoadingId.value = row.id;
+  try {
+    const res = await checkCollectorAccountHealth(row.id);
+    if (res.data?.valid) message.success(res.data.message);
+    else message.warning(res.data?.message || '账号登录状态已失效');
+    await loadData(true);
+  } catch {
+    message.error('账号存活检查失败');
+  } finally {
+    accountHealthLoadingId.value = null;
+  }
+}
+
+function formatLogTime(value: string) {
+  const timestamp = parseBackendTime(value);
+  if (!Number.isFinite(timestamp)) return value || '-';
+  const diff = Math.max(0, now.value - timestamp);
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  const date = new Date(timestamp);
+  const pad = (num: number) => String(num).padStart(2, '0');
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function formatFullTime(value: string | null) {
+  if (!value) return '-';
+  return new Date(parseBackendTime(value)).toLocaleString('zh-CN', { hour12: false });
+}
+
+function parseBackendTime(value: string) {
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  return new Date(hasTimezone ? value : `${value}Z`).getTime();
+}
+
+function startDataPolling() {
+  stopDataPolling();
+  dataPollTimer = window.setInterval(() => {
+    if (collectionRunning.value || collectorStatus.value?.active_task_count || taskDrawerVisible.value) {
+      loadData(true);
+    }
+  }, 5000);
+}
+
+function stopDataPolling() {
+  if (dataPollTimer) window.clearInterval(dataPollTimer);
+  dataPollTimer = null;
 }
 
 /* ---------- 扫码登录流程 ---------- */
@@ -182,10 +292,11 @@ async function handleReLogin(accountId: number) {
 }
 
 async function handleDeleteAccount(accountId: number) {
+  const account = accounts.value.find(item => item.id === accountId);
   dialog.warning({
-    title: $t('common.confirm'),
-    content: $t('page.collector.confirmDelete'),
-    positiveText: $t('common.confirm'),
+    title: '删除采集账号',
+    content: `确定删除“${account?.account_name || `账号 #${accountId}`}”吗？删除后将清空本地 Cookie 与浏览器环境指纹，后续必须重新扫码登录。历史直播数据不会删除。`,
+    positiveText: '确认删除并清空登录状态',
     negativeText: $t('common.cancel'),
     onPositiveClick: async () => {
       try {
@@ -200,9 +311,9 @@ async function handleDeleteAccount(accountId: number) {
 }
 
 async function pollLoginStatus() {
-  if (loginPollTimer) clearInterval(loginPollTimer);
+  if (loginPollTimer) window.clearInterval(loginPollTimer);
 
-  loginPollTimer = setInterval(async () => {
+  loginPollTimer = window.setInterval(async () => {
     if (!loginTaskId.value) return;
 
     try {
@@ -244,7 +355,7 @@ async function pollLoginStatus() {
 
 function stopLoginPoll() {
   if (loginPollTimer) {
-    clearInterval(loginPollTimer);
+    window.clearInterval(loginPollTimer);
     loginPollTimer = null;
   }
 }
@@ -269,7 +380,22 @@ const accountColumns = [
   {
     title: () => $t('page.collector.douyinId'),
     key: 'douyin_id',
-    ellipsis: { tooltip: true }
+    minWidth: 150,
+    ellipsis: { tooltip: true },
+    render(row: Api.Douyin.CollectorAccount) {
+      if (row.douyin_id) return row.douyin_id;
+      return h(
+        NButton,
+        {
+          text: true,
+          type: 'warning',
+          size: 'tiny',
+          loading: accountHealthLoadingId.value === row.id,
+          onClick: () => handleAccountHealth(row)
+        },
+        { default: () => '未获取 / 点此刷新' }
+      );
+    }
   },
   {
     title: () => $t('page.collector.loginStatus'),
@@ -296,9 +422,23 @@ const accountColumns = [
   {
     title: () => $t('common.action'),
     key: 'actions',
-    width: 140,
+    width: 220,
     render(row: Api.Douyin.CollectorAccount) {
       const btns: ReturnType<typeof h>[] = [];
+      btns.push(
+        h(
+          NButton,
+          {
+            text: true,
+            type: 'primary',
+            size: 'tiny',
+            loading: accountHealthLoadingId.value === row.id,
+            disabled: collectionRunning.value || Boolean(monitorStatus.value?.running),
+            onClick: () => handleAccountHealth(row)
+          },
+          { default: () => '检查存活' }
+        )
+      );
       if (row.login_status === 'expired') {
         btns.push(
           h(
@@ -358,7 +498,14 @@ const collectResultColumns = [
 ];
 
 const logColumns = [
-  { title: () => $t('page.collector.logTime'), key: 'created_at', width: 180 },
+  {
+    title: () => $t('page.collector.logTime'),
+    key: 'created_at',
+    width: 150,
+    render(row: Api.Douyin.CollectorLog) {
+      return h('span', { title: formatFullTime(row.created_at) }, formatLogTime(row.created_at));
+    }
+  },
   {
     title: () => $t('page.collector.logLevel'),
     key: 'level',
@@ -375,14 +522,63 @@ const logColumns = [
   { title: () => $t('page.collector.logMessage'), key: 'message', minWidth: 420, ellipsis: { tooltip: true } }
 ];
 
+const taskColumns = [
+  { title: '任务 ID', key: 'id', width: 90 },
+  {
+    title: '任务类型',
+    key: 'task_type',
+    minWidth: 120,
+    render(row: Api.Douyin.CollectorTask) {
+      const labels: Record<string, string> = {
+        collect_all: '全量采集',
+        login: '扫码登录',
+        metrics: '指标采集',
+        comments: '评论采集',
+        leads: '留资采集',
+        profile: '画像采集'
+      };
+      return labels[row.task_type] || row.task_type;
+    }
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 100,
+    render(row: Api.Douyin.CollectorTask) {
+      const states: Record<string, { label: string; type: 'info' | 'warning' | 'success' | 'error' }> = {
+        pending: { label: '排队中', type: 'info' },
+        running: { label: '运行中', type: 'warning' },
+        completed: { label: '已完成', type: 'success' },
+        failed: { label: '失败', type: 'error' }
+      };
+      const state = states[row.status] || { label: row.status, type: 'info' as const };
+      return h(NTag, { type: state.type, size: 'small', round: true }, { default: () => state.label });
+    }
+  },
+  {
+    title: '开始时间',
+    key: 'started_at',
+    width: 180,
+    render(row: Api.Douyin.CollectorTask) {
+      return formatFullTime(row.started_at);
+    }
+  },
+  { title: '失败原因', key: 'error_message', minWidth: 220, ellipsis: { tooltip: true } }
+];
+
 /* ---------- 生命周期 ---------- */
 onMounted(() => {
   loadData();
-  loadMonitorStatus();
+  startDataPolling();
+  clockTimer = window.setInterval(() => {
+    now.value = Date.now();
+  }, 30_000);
 });
 
 onUnmounted(() => {
   stopLoginPoll();
+  stopDataPolling();
+  if (clockTimer) window.clearInterval(clockTimer);
 });
 </script>
 
@@ -410,7 +606,15 @@ onUnmounted(() => {
             </NCard>
           </NGi>
           <NGi>
-            <NCard :bordered="false" class="card-wrapper h-full" size="small">
+            <NCard
+              :bordered="false"
+              class="card-wrapper h-full cursor-pointer transition-shadow hover:shadow-md"
+              size="small"
+              role="button"
+              tabindex="0"
+              @click="openAccounts"
+              @keydown.enter="openAccounts"
+            >
               <div class="flex items-center justify-between gap-12px">
                 <div>
                   <div class="text-13px text-gray-500">可用账号</div>
@@ -440,7 +644,15 @@ onUnmounted(() => {
             </NCard>
           </NGi>
           <NGi>
-            <NCard :bordered="false" class="card-wrapper h-full" size="small">
+            <NCard
+              :bordered="false"
+              class="card-wrapper h-full cursor-pointer transition-shadow hover:shadow-md"
+              size="small"
+              role="button"
+              tabindex="0"
+              @click="openTasks"
+              @keydown.enter="openTasks"
+            >
               <div class="flex items-center justify-between gap-12px">
                 <div>
                   <div class="text-13px text-gray-500">当前任务</div>
@@ -450,7 +662,9 @@ onUnmounted(() => {
                   <SvgIcon icon="mdi:progress-clock" class="text-24px" />
                 </div>
               </div>
-              <div class="mt-16px text-12px text-gray-500">近 50 条日志中 {{ errorLogCount }} 条异常</div>
+              <NButton class="mt-12px" text type="error" size="tiny" @click.stop="openErrors">
+                近 50 条日志中 {{ errorLogCount }} 条异常，点击查看
+              </NButton>
             </NCard>
           </NGi>
         </NGrid>
@@ -468,16 +682,23 @@ onUnmounted(() => {
                   自动发现账号下全部主播，依次同步直播场次、主播资料、指标、评论和观众画像。采集期间请勿删除当前账号。
                 </NAlert>
                 <div class="flex flex-wrap items-center gap-12px">
-                  <NButton
-                    type="primary"
-                    size="large"
-                    :loading="collectAllLoading"
-                    :disabled="!hasAvailableAccount"
-                    @click="handleCollectAll"
-                  >
-                    <template #icon><SvgIcon icon="mdi:database-arrow-down-outline" /></template>
-                    {{ collectAllLoading ? '正在采集全部数据' : '开始全量采集' }}
-                  </NButton>
+                  <NTooltip :disabled="!collectDisabledReason">
+                    <template #trigger>
+                      <span>
+                        <NButton
+                          type="primary"
+                          size="large"
+                          :loading="collectAllLoading"
+                          :disabled="Boolean(collectDisabledReason)"
+                          @click="handleCollectAll"
+                        >
+                          <template #icon><SvgIcon icon="mdi:database-arrow-down-outline" /></template>
+                          {{ collectAllLoading ? '正在采集全部数据' : '开始全量采集' }}
+                        </NButton>
+                      </span>
+                    </template>
+                    {{ collectDisabledReason }}
+                  </NTooltip>
                   <span class="text-12px text-gray-500">采集完成后自动刷新账号状态与最近日志</span>
                 </div>
 
@@ -543,6 +764,7 @@ onUnmounted(() => {
                   block
                   :type="monitorStatus?.running ? 'warning' : 'primary'"
                   :loading="monitorLoading"
+                  :disabled="!monitorStatus?.running && collectionRunning"
                   @click="monitorStatus?.running ? handleStopMonitor() : handleStartMonitor()"
                 >
                   <template #icon>
@@ -559,50 +781,91 @@ onUnmounted(() => {
           </NGi>
         </NGrid>
 
-        <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.accountList')">
-          <template #header-extra>
-            <NSpace>
-              <NButton size="small" :loading="loading" @click="loadData">
-                <template #icon><SvgIcon icon="mdi:refresh" /></template>
-                {{ $t('common.refresh') }}
-              </NButton>
-              <NButton type="primary" size="small" @click="handleStartLogin">
-                <template #icon><SvgIcon icon="mdi:qrcode-scan" /></template>
-                {{ $t('page.collector.scanLogin') }}
-              </NButton>
-            </NSpace>
-          </template>
-          <NDataTable
-            :loading="loading"
-            :columns="accountColumns"
-            :data="accounts"
-            :row-key="getAccountRowKey"
-            :scroll-x="800"
-            :bordered="false"
-            size="small"
-            :empty-text="$t('page.collector.noAccount')"
-          />
-        </NCard>
+        <div
+          ref="accountSectionRef"
+          class="scroll-mt-16px rounded-8px transition-shadow duration-300"
+          :class="{ 'ring-2 ring-primary ring-offset-2': accountHighlight }"
+        >
+          <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.accountList')">
+            <template #header-extra>
+              <NSpace>
+                <NButton size="small" :loading="loading" @click="() => loadData()">
+                  <template #icon><SvgIcon icon="mdi:refresh" /></template>
+                  {{ $t('common.refresh') }}
+                </NButton>
+                <NButton type="primary" size="small" @click="handleStartLogin">
+                  <template #icon><SvgIcon icon="mdi:qrcode-scan" /></template>
+                  {{ $t('page.collector.scanLogin') }}
+                </NButton>
+              </NSpace>
+            </template>
+            <NDataTable
+              :loading="loading"
+              :columns="accountColumns"
+              :data="accounts"
+              :row-key="getAccountRowKey"
+              :scroll-x="900"
+              :bordered="false"
+              size="small"
+              :empty-text="$t('page.collector.noAccount')"
+            />
+          </NCard>
+        </div>
 
-        <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.logTitle')">
-          <template #header-extra>
-            <NButton size="small" :loading="loading" @click="loadData">
-              <template #icon><SvgIcon icon="mdi:refresh" /></template>
-              {{ $t('common.refresh') }}
-            </NButton>
-          </template>
-          <NDataTable
-            :loading="loading"
-            :columns="logColumns"
-            :data="logs"
-            :row-key="getLogRowKey"
-            :scroll-x="720"
-            :bordered="false"
-            size="small"
-          />
-        </NCard>
+        <div
+          ref="logSectionRef"
+          class="scroll-mt-16px rounded-8px transition-shadow duration-300"
+          :class="{ 'ring-2 ring-primary ring-offset-2': logHighlight }"
+        >
+          <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.logTitle')">
+            <template #header-extra>
+              <NSpace>
+                <NRadioGroup v-model:value="logLevel" size="small" @update:value="filterLogs">
+                  <NRadioButton value="all">全部</NRadioButton>
+                  <NRadioButton value="info">信息</NRadioButton>
+                  <NRadioButton value="warn">警告</NRadioButton>
+                  <NRadioButton value="error">异常</NRadioButton>
+                </NRadioGroup>
+                <NButton size="small" :loading="loading || silentRefreshing" @click="() => loadData()">
+                  <template #icon><SvgIcon icon="mdi:refresh" /></template>
+                  {{ $t('common.refresh') }}
+                </NButton>
+              </NSpace>
+            </template>
+            <NDataTable
+              :loading="loading"
+              :columns="logColumns"
+              :data="logs"
+              :row-key="getLogRowKey"
+              :scroll-x="720"
+              :bordered="false"
+              size="small"
+            />
+          </NCard>
+        </div>
       </NSpace>
     </NSpin>
+
+    <NDrawer v-model:show="taskDrawerVisible" :width="560" placement="right">
+      <NDrawerContent title="采集任务队列" closable>
+        <div class="mb-12px flex justify-end">
+          <NTag :type="activeTasks.length ? 'warning' : 'success'" round size="small">
+            {{ activeTasks.length ? `${activeTasks.length} 个运行中` : '当前空闲' }}
+          </NTag>
+        </div>
+        <NAlert class="mb-16px" type="info" :bordered="false">
+          任务运行期间页面每 5 秒静默刷新；任务结束后自动停止高频请求。
+        </NAlert>
+        <NDataTable
+          :columns="taskColumns"
+          :data="tasks"
+          :row-key="getTaskRowKey"
+          :scroll-x="720"
+          :bordered="false"
+          size="small"
+        />
+      </NDrawerContent>
+    </NDrawer>
 
     <!-- 扫码登录弹窗 -->
     <NModal

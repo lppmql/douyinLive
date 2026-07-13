@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
 from app.models.live_rooms import LiveRoom
+from app.models.scraper_tasks import ScraperTask
 from app.schemas.monitor import (
     MonitorStatusResponse,
     MonitorRoomItem,
@@ -29,9 +30,15 @@ def get_monitor_status():
 
 
 @router.post("/start", response_model=MonitorActionResponse)
-async def start_monitor():
+async def start_monitor(db: Session = Depends(get_db)):
     """启动监控"""
     import asyncio
+    running_collect = db.query(ScraperTask).filter(
+        ScraperTask.task_type == "collect_all",
+        ScraperTask.status == "running",
+    ).first()
+    if running_collect:
+        raise HTTPException(409, f"全量采集任务 #{running_collect.id} 正在运行，请等待任务结束")
     await scheduler_manager.start()
     return MonitorActionResponse(success=True, message="监控已启动")
 

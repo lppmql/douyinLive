@@ -236,6 +236,24 @@ class BrowserManager:
         await context.close()
         return None, False, "登录已过期，请重新扫码登录"
 
+    async def check_account_health(self, account: ScraperAccount) -> tuple[bool, str]:
+        """使用账号保存的 Cookie 与指纹做隔离的轻量登录态检查。"""
+        if not account.storage_state_path or not Path(account.storage_state_path).is_file():
+            return False, "未找到账号登录状态文件，请重新扫码"
+
+        context = await self.create_context(
+            account.storage_state_path,
+            self._load_account_fingerprint(account),
+        )
+        try:
+            expired = await self.check_login_expired(context)
+            return (False, "Cookie 已失效，请重新扫码") if expired else (True, "账号登录状态有效")
+        except Exception as exc:
+            logger.warning("账号存活检查失败 account_id=%s: %s", account.id, exc)
+            return False, "账号检查失败，请稍后重试"
+        finally:
+            await context.close()
+
     async def set_logged_in_context(self, context: BrowserContext, storage_path: str, account_id: int):
         """
         设置持久化登录上下文（登录成功后调用）

@@ -137,7 +137,10 @@ declare namespace Api {
       account_name: string | null;
       douyin_id: string | null;
       login_status: 'logged_in' | 'expired' | 'never';
-      storage_state_path: string | null;
+      cookie_saved: boolean;
+      fingerprint_saved: boolean;
+      viewport_width: number | null;
+      viewport_height: number | null;
       last_login_at: string | null;
       expires_at: string | null;
       created_at: string;
@@ -156,7 +159,7 @@ declare namespace Api {
       id: number;
       account_id: number | null;
       session_id: number | null;
-      task_type: 'login' | 'metrics' | 'comments' | 'leads' | 'profile';
+      task_type: 'login' | 'collect_all' | 'metrics' | 'comments' | 'leads' | 'profile';
       status: 'pending' | 'running' | 'completed' | 'failed';
       started_at: string | null;
       completed_at: string | null;
@@ -172,6 +175,14 @@ declare namespace Api {
     interface LoginStatusResponse {
       status: 'pending' | 'scanning' | 'success' | 'failed' | 'timeout' | 'not_found';
       account: CollectorAccount | null;
+      message: string;
+    }
+
+    interface AccountHealthResponse {
+      account_id: number;
+      valid: boolean;
+      login_status: 'logged_in' | 'expired';
+      checked_at: string;
       message: string;
     }
 

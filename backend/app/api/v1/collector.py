@@ -18,11 +18,13 @@ from app.schemas.scraper import (
     CollectorStatusResponse,
     LoginStartResponse,
     LoginStatusResponse,
+    AccountHealthResponse,
     CollectAllResponse,
 )
 from app.services.collector.browser import browser_manager
 from app.services.collector.browser import STORAGE_DIR
 from app.services.collector.manual_collect import collect_all
+from app.services.collector.scheduler import scheduler_manager
 
 router = APIRouter(prefix="/collector", tags=["数据采集"])
 
@@ -118,6 +120,29 @@ async def delete_account(account_id: int, db: Session = Depends(get_db)):
             pass
 
     return {"message": "删除成功", "detached_task_count": task_count}
+
+
+@router.post("/accounts/{account_id}/health", response_model=AccountHealthResponse)
+async def check_account_health(account_id: int, db: Session = Depends(get_db)):
+    """静默验证账号 Cookie 是否仍然有效，不执行数据采集。"""
+    account = db.query(ScraperAccount).get(account_id)
+    if not account:
+        raise HTTPException(404, "账号不存在")
+    if scheduler_manager.running:
+        raise HTTPException(409, "直播监控运行中，请先停止监控再检查账号")
+    if db.query(ScraperTask).filter(ScraperTask.status == "running").count():
+        raise HTTPException(409, "当前有采集任务运行，请等待任务结束后再检查账号")
+
+    valid, message = await browser_manager.check_account_health(account)
+    account.login_status = "logged_in" if valid else "expired"
+    db.commit()
+    return AccountHealthResponse(
+        account_id=account.id,
+        valid=valid,
+        login_status=account.login_status,
+        checked_at=datetime.utcnow(),
+        message=message,
+    )
 
 
 # ===== 扫码登录 =====
@@ -239,5 +264,36 @@ def list_tasks(
 @router.post("/collect-all", response_model=CollectAllResponse)
 async def manual_collect_all(db: Session = Depends(get_db)):
     """一键采集所有主播房间的大屏数据"""
-    result = await collect_all(db)
-    return result
+    if scheduler_manager.running:
+        raise HTTPException(409, "直播监控运行中，请先停止监控再执行全量采集")
+    existing = db.query(ScraperTask).filter(
+        ScraperTask.task_type == "collect_all",
+        ScraperTask.status == "running",
+    ).first()
+    if existing:
+        raise HTTPException(409, f"全量采集任务 #{existing.id} 正在运行，请勿重复提交")
+
+    account = db.query(ScraperAccount).filter(
+        ScraperAccount.login_status == "logged_in"
+    ).order_by(ScraperAccount.last_login_at.desc()).first()
+    task = ScraperTask(
+        account_id=account.id if account else None,
+        task_type="collect_all",
+        status="running",
+        started_at=datetime.utcnow(),
+    )
+    db.add(task)
+    db.commit()
+    try:
+        result = await collect_all(db)
+        task.status = "completed" if result.get("collected_rooms", 0) else "failed"
+        if task.status == "failed":
+            task.error_message = result.get("message") or "未采集到房间数据"
+        return result
+    except Exception as exc:
+        task.status = "failed"
+        task.error_message = str(exc)[:2000]
+        raise
+    finally:
+        task.completed_at = datetime.utcnow()
+        db.commit()

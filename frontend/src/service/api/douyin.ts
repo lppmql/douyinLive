@@ -47,7 +47,10 @@ export function fetchCollectorTasks(params?: { status?: string; taskType?: strin
 
 /** 启动扫码登录 */
 export function startCollectorLogin() {
-  return backendRequest<Api.Douyin.LoginStartResponse>({ url: `${API_PREFIX}/collector/accounts/login`, method: 'POST' });
+  return backendRequest<Api.Douyin.LoginStartResponse>({
+    url: `${API_PREFIX}/collector/accounts/login`,
+    method: 'POST'
+  });
 }
 
 /** 获取登录二维码 */
@@ -57,17 +60,30 @@ export function fetchLoginQR(taskId: number) {
 
 /** 获取登录状态 */
 export function fetchLoginStatus(taskId: number) {
-  return backendRequest<Api.Douyin.LoginStatusResponse>({ url: `${API_PREFIX}/collector/login-tasks/${taskId}/status` });
+  return backendRequest<Api.Douyin.LoginStatusResponse>({
+    url: `${API_PREFIX}/collector/login-tasks/${taskId}/status`
+  });
 }
 
 /** 重新扫码登录 */
 export function reCollectorLogin(accountId: number) {
-  return backendRequest<Api.Douyin.LoginStartResponse>({ url: `${API_PREFIX}/collector/accounts/${accountId}/re-login`, method: 'POST' });
+  return backendRequest<Api.Douyin.LoginStartResponse>({
+    url: `${API_PREFIX}/collector/accounts/${accountId}/re-login`,
+    method: 'POST'
+  });
 }
 
 /** 删除采集账号 */
 export function deleteCollectorAccount(accountId: number) {
   return backendRequest<void>({ url: `${API_PREFIX}/collector/accounts/${accountId}`, method: 'DELETE' });
+}
+
+/** 静默检查账号 Cookie 存活状态 */
+export function checkCollectorAccountHealth(accountId: number) {
+  return backendRequest<Api.Douyin.AccountHealthResponse>({
+    url: `${API_PREFIX}/collector/accounts/${accountId}/health`,
+    method: 'POST'
+  });
 }
 
 /* ---------- 话术/ASR ---------- */
@@ -182,27 +198,43 @@ export function testAiConnection() {
 
 /** 话术评分 */
 export function scoreSession(sessionId: number) {
-  return backendRequest<{ status: string; result: Record<string, unknown> }>({ url: `${API_PREFIX}/ai/score/${sessionId}`, method: 'POST' });
+  return backendRequest<{ status: string; result: Record<string, unknown> }>({
+    url: `${API_PREFIX}/ai/score/${sessionId}`,
+    method: 'POST'
+  });
 }
 
 /** 趋势分析 */
 export function trendAnalysis(sessionIds: number[]) {
-  return backendRequest<{ status: string; result: Record<string, unknown> }>({ url: `${API_PREFIX}/ai/trend`, method: 'POST', params: { session_ids: sessionIds } });
+  return backendRequest<{ status: string; result: Record<string, unknown> }>({
+    url: `${API_PREFIX}/ai/trend`,
+    method: 'POST',
+    params: { session_ids: sessionIds }
+  });
 }
 
 /** 异常检测 */
 export function detectAnomaly(sessionId: number) {
-  return backendRequest<{ status: string; result: Record<string, unknown> }>({ url: `${API_PREFIX}/ai/anomaly/${sessionId}`, method: 'POST' });
+  return backendRequest<{ status: string; result: Record<string, unknown> }>({
+    url: `${API_PREFIX}/ai/anomaly/${sessionId}`,
+    method: 'POST'
+  });
 }
 
 /** 优化建议 */
 export function optimizeSession(sessionId: number) {
-  return backendRequest<{ status: string; result: Record<string, unknown> }>({ url: `${API_PREFIX}/ai/optimize/${sessionId}`, method: 'POST' });
+  return backendRequest<{ status: string; result: Record<string, unknown> }>({
+    url: `${API_PREFIX}/ai/optimize/${sessionId}`,
+    method: 'POST'
+  });
 }
 
 /** 高意向用户识别 */
 export function detectHighIntent(sessionId: number) {
-  return backendRequest<{ status: string; count: number; users: unknown[] }>({ url: `${API_PREFIX}/ai/high-intent/${sessionId}`, method: 'POST' });
+  return backendRequest<{ status: string; count: number; users: unknown[] }>({
+    url: `${API_PREFIX}/ai/high-intent/${sessionId}`,
+    method: 'POST'
+  });
 }
 
 /** 知识问答 */
@@ -216,7 +248,10 @@ export function askKnowledge(question: string, category?: string) {
 
 /** 保存到知识库 */
 export function saveToKnowledgeBase(sessionId: number) {
-  return backendRequest<{ status: string; transcript_saved: number; analysis_saved: number }>({ url: `${API_PREFIX}/ai/kb/save/${sessionId}`, method: 'POST' });
+  return backendRequest<{ status: string; transcript_saved: number; analysis_saved: number }>({
+    url: `${API_PREFIX}/ai/kb/save/${sessionId}`,
+    method: 'POST'
+  });
 }
 
 /** 获取提示词模板列表 */
