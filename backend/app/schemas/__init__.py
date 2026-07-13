@@ -151,12 +151,22 @@ class LiveMetricDetailResponse(BaseModel):
     marketing_traffic_count: int = 0
 
 
+class LiveAudienceProfileResponse(BaseModel):
+    """单场直播的观众画像分布。"""
+
+    dimension_type: str
+    dimension_name: str
+    ratio: float = 0
+    count: int = 0
+
+
 class LiveSessionDetailResponse(BaseModel):
     """直播场次详情页需要的完整采集结果。"""
 
     session: LiveSessionResponse
     metrics: list[LiveMetricDetailResponse]
     comments: list["CommentResponse"]
+    profiles: list[LiveAudienceProfileResponse]
     stream_url: Optional[str] = None
     stream_source_count: int = 0
 

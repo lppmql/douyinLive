@@ -8,6 +8,7 @@ from app.models.live_rooms import LiveRoom
 from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
+from app.models.live_audience_profiles import LiveAudienceProfile
 from app.schemas import (
     LiveMetricDetailResponse,
     LiveSessionCreate,
@@ -110,11 +111,18 @@ def get_session_details(
         .all()
     )
     latest_stream = next((item.m3u8_url for item in stream_sources if item.status == "active"), None)
+    profiles = (
+        db.query(LiveAudienceProfile)
+        .filter(LiveAudienceProfile.session_id == session_id)
+        .order_by(LiveAudienceProfile.dimension_type, LiveAudienceProfile.ratio.desc())
+        .all()
+    )
 
     return LiveSessionDetailResponse(
         session=LiveSessionResponse(**_attach_room_profile(session)),
         metrics=[LiveMetricDetailResponse.model_validate(item, from_attributes=True) for item in metrics],
         comments=comments,
+        profiles=profiles,
         stream_url=latest_stream or session.stream_url,
         stream_source_count=len(stream_sources),
     )

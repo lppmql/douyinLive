@@ -134,8 +134,16 @@ declare namespace Api {
       session: LiveSession;
       metrics: LiveMetric[];
       comments: LiveComment[];
+      profiles: LiveAudienceProfile[];
       stream_url: string | null;
       stream_source_count: number;
+    }
+
+    interface LiveAudienceProfile {
+      dimension_type: string;
+      dimension_name: string;
+      ratio: number;
+      count: number;
     }
 
     /* ---------- 采集（后端返回 snake_case） ---------- */

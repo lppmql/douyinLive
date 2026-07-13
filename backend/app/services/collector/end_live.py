@@ -42,11 +42,12 @@ async def process_live_end(db: Session, session_id: int):
         ).scalar() or 0
 
         # 更新场次
-        now = datetime.utcnow()
+        # 企业后台的场次时间按服务器本地时区保存为无时区 datetime，结束时间需保持一致。
+        now = datetime.now()
         session.live_end_time = now
         session.live_status = "ended"
         if session.live_start_time:
-            session.live_duration_seconds = int((now - session.live_start_time).total_seconds())
+            session.live_duration_seconds = max(0, int((now - session.live_start_time).total_seconds()))
         if metrics_stats and metrics_stats.peak_online:
             session.peak_online_count = metrics_stats.peak_online
         session.comments_count = comment_count

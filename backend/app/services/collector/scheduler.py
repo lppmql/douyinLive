@@ -197,7 +197,7 @@ class SchedulerManager:
 
             session.live_status = "live"
             session.session_title = item.get("session_title") or session.session_title or "直播场次"
-            session.live_start_time = item.get("live_start_time") or session.live_start_time or datetime.utcnow()
+            session.live_start_time = item.get("live_start_time") or session.live_start_time or datetime.now()
             for field in ("anchor_name", "anchor_nickname", "anchor_avatar_url", "douyin_id", "douyin_uid"):
                 value = item.get(field)
                 if value:
@@ -228,7 +228,7 @@ class SchedulerManager:
         session = LiveSession(
             room_id=room.id,
             session_title=result.session_title or f"{room.anchor_name} 直播",
-            live_start_time=result.start_time or datetime.utcnow(),
+            live_start_time=result.start_time or datetime.now(),
             live_status="live",
             dashboard_url=f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room.room_id_str or room.id}",
         )
@@ -343,7 +343,7 @@ class SchedulerManager:
             ).all()
             for s in expired:
                 # 如果开播超过 12 小时没有下播标记，自动结束
-                if s.live_start_time and (datetime.utcnow() - s.live_start_time).total_seconds() > 43200:
+                if s.live_start_time and (datetime.now() - s.live_start_time).total_seconds() > 43200:
                     from app.services.collector.end_live import process_live_end
                     await process_live_end(db, s.id)
                     self.remove_session_jobs(s.id)

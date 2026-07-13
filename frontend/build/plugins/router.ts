@@ -19,6 +19,14 @@ export function setupElegantRouter() {
         return `/login/:module(${moduleReg})?`;
       }
 
+      if (routeName === 'live-session-detail') {
+        return '/live-sessions/:id';
+      }
+
+      if (routeName === 'live-session-ai-analysis') {
+        return '/live-sessions/:id/ai-analysis';
+      }
+
       return routePath;
     },
     onRouteMetaGen(routeName) {
@@ -33,6 +41,12 @@ export function setupElegantRouter() {
 
       if (constantRoutes.includes(key)) {
         meta.constant = true;
+      }
+
+      if (routeName === 'live-session-detail' || routeName === 'live-session-ai-analysis') {
+        meta.hideInMenu = true;
+        meta.activeMenu = 'live-sessions';
+        meta.multiTab = true;
       }
 
       return meta;

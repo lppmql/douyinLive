@@ -172,6 +172,8 @@ const routeMap: RouteMap = {
   "home": "/home",
   "iframe-page": "/iframe-page/:url",
   "knowledge": "/knowledge",
+  "live-session-ai-analysis": "/live-sessions/:id/ai-analysis",
+  "live-session-detail": "/live-sessions/:id",
   "live-sessions": "/live-sessions",
   "login": "/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?",
   "transcripts": "/transcripts",
