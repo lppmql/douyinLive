@@ -20,7 +20,7 @@ const searchForm = reactive({
 });
 const searchParams = reactive({
   current: 1,
-  size: 20,
+  size: 10,
   anchor_name: undefined as string | undefined,
   live_status: undefined as string | undefined,
   detail_status: undefined as string | undefined
@@ -87,6 +87,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.anchorName'),
       key: 'anchor_name',
       width: 220,
+      fixed: 'left',
       render(row: Api.Douyin.LiveSession) {
         return h('div', { class: 'flex items-center gap-8px min-w-0' }, [
           h(NAvatar, {
@@ -195,6 +196,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('common.action'),
       key: 'actions',
       width: 80,
+      fixed: 'right',
       render(row: Api.Douyin.LiveSession) {
         return h(NButton, { text: true, type: 'primary', size: 'tiny', onClick: () => openDetail(row) }, () => '详情');
       }
@@ -216,9 +218,9 @@ const {
   transform: response => defaultTransform(response),
   onPaginationParamsChange: ({ page, pageSize }) => {
     searchParams.current = page || 1;
-    searchParams.size = pageSize || 20;
+    searchParams.size = pageSize || 10;
   },
-  defaultPageSize: 20,
+  defaultPageSize: 10,
   paginationProps: { pageSizes: [10, 20, 50, 100] },
   columns: createColumns
 });
@@ -303,6 +305,7 @@ async function handleReset() {
         :data="sessions"
         :pagination="mobilePagination"
         :scroll-x="scrollX"
+        :max-height="460"
         :row-key="row => row.id"
         :bordered="false"
         :single-line="false"
