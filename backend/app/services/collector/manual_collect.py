@@ -1142,7 +1142,7 @@ async def _sync_enterprise_anchor_sessions(
                     session.stream_url = str(stream_url)[:2000]
                     changed = True
                 live_status = _first_value(item, "liveStatus", "live_status", "status")
-                session.live_status = "ended" if end_time else ("live" if str(live_status) == "1" else session.live_status or "finished")
+                session.live_status = "ended" if end_time else ("live" if _is_enterprise_live_status(live_status) else session.live_status or "finished")
                 if changed:
                     profile_count += 1
 
@@ -1211,13 +1211,14 @@ async def _fetch_enterprise_rows(
     payload: dict,
     csrf_token: str,
     row_keys: tuple[str, ...],
+    max_pages: int = ENTERPRISE_MAX_PAGES,
 ) -> tuple[list[dict], Optional[dict]]:
     """分页读取企业接口，并兼容不同版本的列表字段。"""
     rows: list[dict] = []
     seen: set[str] = set()
     self_profile = None
 
-    for page_no in range(1, ENTERPRISE_MAX_PAGES + 1):
+    for page_no in range(1, max_pages + 1):
         page_payload = {
             **payload,
             "pageNum": page_no,
@@ -1262,6 +1263,80 @@ async def _fetch_enterprise_rows(
     if len(rows) >= ENTERPRISE_PAGE_SIZE * ENTERPRISE_MAX_PAGES:
         logger.warning("企业接口达到最大分页限制: path=%s rows=%s", path, len(rows))
     return rows, self_profile
+
+
+def _is_enterprise_live_status(value) -> bool:
+    """企业后台当前以 2 表示直播中；兼容旧接口曾使用的 1。"""
+    return str(value).strip().lower() in {"1", "2", "live", "living"}
+
+
+async def discover_enterprise_live_sessions(context: BrowserContext, room: LiveRoom) -> list[dict]:
+    """轻量读取企业账号下全部主播的最新场次，返回正在直播的场次。"""
+    root_room_id = str(room.room_id_str or "").strip()
+    if not root_room_id:
+        return []
+
+    page = await context.new_page()
+    try:
+        await page.goto(
+            f"{COMMENT_URL}?roomId={root_room_id}&fullscreen=0",
+            wait_until="domcontentloaded",
+            timeout=30000,
+        )
+        await page.wait_for_timeout(3000)
+        csrf_token = await page.evaluate(
+            """() => document.cookie.split(';').map(v => v.trim())
+              .find(v => /^(feiyu_csrf_token|csrf_token|csrftoken|csrf-token)=/i.test(v))
+              ?.split('=').slice(1).join('=') || ''"""
+        )
+        employee_rows, account_self = await _fetch_enterprise_rows(
+            page,
+            "/bff/statistic/live-comment/accounts",
+            {"roomId": root_room_id},
+            csrf_token,
+            row_keys=(
+                "employeeList", "employee_list", "enterpiseList", "enterpriseList",
+                "enterprise_list", "records", "list",
+            ),
+        )
+        profiles = ([account_self] if account_self else []) + employee_rows
+        unique_profiles = {}
+        for profile in profiles:
+            if not isinstance(profile, dict):
+                continue
+            uid = _first_value(profile, "iesUid", "ies_uid", "uid", "id")
+            if uid not in (None, ""):
+                unique_profiles[str(uid)] = profile
+
+        live_sessions = []
+        for uid, profile in unique_profiles.items():
+            rows, _ = await _fetch_enterprise_rows(
+                page,
+                "/bff/statistic/live-comment/room-lists",
+                {"iesUid": uid},
+                csrf_token,
+                row_keys=("roomLists", "roomList", "room_lists", "records", "list"),
+                max_pages=1,
+            )
+            for item in rows:
+                child_room_id = str(_first_value(item, "roomId", "room_id", "id") or "").strip()
+                end_time = _parse_epoch_dt(_first_value(item, "liveEndTime", "live_end_time", "endTime", "end_time"))
+                status = _first_value(item, "liveStatus", "live_status", "status")
+                if not child_room_id or end_time or not _is_enterprise_live_status(status):
+                    continue
+                live_sessions.append({
+                    "dashboard_url": f"{LIVE_SCREEN_URL}?room_id={child_room_id}&fullscreen=0",
+                    "session_title": _first_value(item, "title", "roomTitle", "room_title", "sessionTitle"),
+                    "live_start_time": _parse_epoch_dt(_first_value(item, "liveStartTime", "live_start_time", "startTime", "start_time")),
+                    "anchor_name": _first_value(profile, "iesName", "ies_name", "nickname", "name"),
+                    "anchor_nickname": _first_value(profile, "iesName", "ies_name", "nickname", "name"),
+                    "anchor_avatar_url": _first_value(profile, "avatarUrl", "avatar_url", "avatar"),
+                    "douyin_id": _first_value(profile, "iesUniqId", "iesId", "ies_id", "douyinId", "douyin_id"),
+                    "douyin_uid": uid,
+                })
+        return live_sessions
+    finally:
+        await page.close()
 
 
 def _first_value(data: dict, *keys: str):

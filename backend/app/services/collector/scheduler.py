@@ -139,20 +139,19 @@ class SchedulerManager:
         from app.core.database import SessionLocal
         from app.models.live_rooms import LiveRoom
         from app.models.live_sessions import LiveSession
-        from app.services.collector.monitor import MockLiveDetector, CluerichLiveDetector
+        from app.services.collector.monitor import MockLiveDetector
 
         db = SessionLocal()
         try:
-            if settings.MONITOR_MOCK_MODE:
-                detector = MockLiveDetector()
-            else:
-                detector = CluerichLiveDetector()
-
             rooms = db.query(LiveRoom).filter(LiveRoom.status == True).all()
             self._last_error = None
             for room in rooms:
-                room_id_for_url = room.room_id_str or str(room.id)
-                dashboard_url = f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room_id_for_url}" if not settings.MONITOR_MOCK_MODE else ""
+                if not settings.MONITOR_MOCK_MODE:
+                    await self._monitor_enterprise_room(db, room)
+                    continue
+
+                detector = MockLiveDetector()
+                dashboard_url = ""
                 result = await detector.detect(dashboard_url)
 
                 detection_error = (result.raw_data or {}).get("error")
@@ -177,10 +176,55 @@ class SchedulerManager:
         finally:
             db.close()
 
+    async def _monitor_enterprise_room(self, db: Session, room):
+        """按企业账号下的全部主播同步当前开播场次。"""
+        from app.models.live_sessions import LiveSession
+        from app.services.collector.manual_collect import discover_enterprise_live_sessions
+
+        context, is_valid, message = await browser_manager.get_logged_in_context()
+        if not is_valid or not context:
+            raise RuntimeError(message or "采集账号登录状态不可用")
+
+        live_items = await discover_enterprise_live_sessions(context, room)
+        live_urls = {item["dashboard_url"] for item in live_items}
+        for item in live_items:
+            session = db.query(LiveSession).filter(
+                LiveSession.room_id == room.id,
+                LiveSession.dashboard_url == item["dashboard_url"],
+            ).first()
+            if session is None:
+                session = LiveSession(room_id=room.id, dashboard_url=item["dashboard_url"])
+                db.add(session)
+
+            session.live_status = "live"
+            session.session_title = item.get("session_title") or session.session_title or "直播场次"
+            session.live_start_time = item.get("live_start_time") or session.live_start_time or datetime.utcnow()
+            for field in ("anchor_name", "anchor_nickname", "anchor_avatar_url", "douyin_id", "douyin_uid"):
+                value = item.get(field)
+                if value:
+                    setattr(session, field, value)
+            db.commit()
+            db.refresh(session)
+            if session.id not in self._session_jobs:
+                self.add_session_jobs(session.id, session.dashboard_url)
+
+        active_sessions = db.query(LiveSession).filter(
+            LiveSession.room_id == room.id,
+            LiveSession.live_status == "live",
+        ).all()
+        for session in active_sessions:
+            if session.dashboard_url not in live_urls:
+                await self._end_live_session(db, session)
+
+        logger.info(
+            "企业直播监控完成: room=%s active_anchors=%s",
+            room.id,
+            len(live_items),
+        )
+
     async def _on_live_start(self, db: Session, room, result):
         """开播事件处理"""
         from app.models.live_sessions import LiveSession
-        from app.services.collector.end_live import process_live_end
 
         session = LiveSession(
             room_id=room.id,
@@ -205,8 +249,14 @@ class SchedulerManager:
             LiveSession.live_status == "live",
         ).first()
         if active_session:
-            await process_live_end(db, active_session.id)
-            self.remove_session_jobs(active_session.id)
+            await self._end_live_session(db, active_session)
+
+    async def _end_live_session(self, db: Session, session):
+        """结束指定场次，避免同一企业账号的多主播互相覆盖。"""
+        from app.services.collector.end_live import process_live_end
+
+        await process_live_end(db, session.id)
+        self.remove_session_jobs(session.id)
 
     async def _collect_wrapper(self, session_id: int, dashboard_url: str, job_type: str):
         """统一采集包装器 — 异常处理 + 任务记录"""

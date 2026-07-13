@@ -1,6 +1,9 @@
 import unittest
 
-from app.services.collector.manual_collect import _fetch_enterprise_rows
+from app.services.collector.manual_collect import (
+    _fetch_enterprise_rows,
+    _is_enterprise_live_status,
+)
 
 
 class FakePage:
@@ -63,6 +66,24 @@ class EnterprisePaginationTest(unittest.IsolatedAsyncioTestCase):
             [row["iesUid"] for row in rows],
             ["employee", "enterprise"],
         )
+
+    async def test_can_limit_room_lookup_to_latest_page(self):
+        page = FakePage({
+            1: {"data": {"roomLists": [{"roomId": "latest"}], "hasMore": True}},
+            2: {"data": {"roomLists": [{"roomId": "older"}], "hasMore": False}},
+        })
+
+        rows, _ = await _fetch_enterprise_rows(
+            page, "/rooms", {}, "", ("roomLists",), max_pages=1
+        )
+
+        self.assertEqual(rows, [{"roomId": "latest"}])
+        self.assertEqual(page.calls, [1])
+
+    def test_recognizes_real_enterprise_live_status(self):
+        self.assertTrue(_is_enterprise_live_status("2"))
+        self.assertTrue(_is_enterprise_live_status(1))
+        self.assertFalse(_is_enterprise_live_status("4"))
 
 
 if __name__ == "__main__":
