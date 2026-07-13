@@ -999,6 +999,11 @@ async def _sync_enterprise_anchor_sessions(
                 if end_time and session.live_end_time != end_time:
                     session.live_end_time = end_time
                     changed = True
+                if start_time and end_time:
+                    duration_seconds = max(0, int((end_time - start_time).total_seconds()))
+                    if session.live_duration_seconds != duration_seconds:
+                        session.live_duration_seconds = duration_seconds
+                        changed = True
                 if item.get("title") and session.session_title != item["title"]:
                     session.session_title = str(item["title"])[:200]
                     changed = True

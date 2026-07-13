@@ -1,5 +1,6 @@
 """Phase 5: WebSocket 转写 + REST 话术接口"""
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -15,22 +16,17 @@ from datetime import datetime
 rest_router = APIRouter(prefix="/transcripts", tags=["话术转写"])
 
 
-@rest_router.post("/{session_id}/queue")
-def queue_transcription(session_id: int, db: Session = Depends(get_db)):
-    """为指定场次排队转写，复用已采集流源并避免重复任务。"""
-    session = db.query(LiveSession).get(session_id)
-    if not session:
-        raise HTTPException(404, "直播场次不存在")
-
+def _queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrTask, bool]:
+    """创建单场转写任务；批量和单场接口共用同一套幂等规则。"""
     stream = (
         db.query(StreamSource)
-        .filter(StreamSource.session_id == session_id, StreamSource.status == "active")
+        .filter(StreamSource.session_id == session.id, StreamSource.status == "active")
         .order_by(StreamSource.fetched_at.desc(), StreamSource.id.desc())
         .first()
     )
     if not stream and session.stream_url:
         stream = StreamSource(
-            session_id=session_id,
+            session_id=session.id,
             m3u8_url=session.stream_url[:2000],
             headers_json={"Referer": session.dashboard_url or ""},
             status="active",
@@ -39,25 +35,105 @@ def queue_transcription(session_id: int, db: Session = Depends(get_db)):
         db.add(stream)
         db.flush()
     if not stream:
-        raise HTTPException(400, "该场次暂无可用直播流，请先重新采集流地址")
+        raise ValueError("该场次暂无可用直播流，请先重新采集流地址")
 
     existing = (
         db.query(AsrTask)
-        .filter(AsrTask.session_id == session_id, AsrTask.status.in_(["queued", "processing"]))
+        .filter(AsrTask.session_id == session.id, AsrTask.status.in_(["queued", "processing", "completed"]))
         .order_by(AsrTask.created_at.desc())
         .first()
     )
     if existing:
-        return {"task_id": existing.id, "status": existing.status, "created": False}
+        return existing, False
 
-    task = AsrTask(session_id=session_id, stream_id=stream.id, status="queued", task_type="offline")
+    task = AsrTask(session_id=session.id, stream_id=stream.id, status="queued", task_type="offline")
     db.add(task)
+    db.flush()
+    return task, True
+
+
+@rest_router.post("/{session_id:int}/queue")
+def queue_transcription(session_id: int, db: Session = Depends(get_db)):
+    """为指定场次排队转写，复用已采集流源并避免重复任务。"""
+    session = db.get(LiveSession, session_id)
+    if not session:
+        raise HTTPException(404, "直播场次不存在")
+
+    try:
+        task, created = _queue_session_transcription(db, session)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     db.commit()
     db.refresh(task)
-    return {"task_id": task.id, "status": task.status, "created": True}
+    return {"task_id": task.id, "status": task.status, "created": created}
 
 
-@rest_router.get("/{session_id}/segments")
+@rest_router.post("/batch/queue-by-anchor")
+def queue_transcription_by_anchor(
+    per_anchor: int = Query(1, ge=1, le=3),
+    min_duration_seconds: int = Query(600, ge=60, le=7200),
+    db: Session = Depends(get_db),
+):
+    """每位主播增量选择较短的真实回放排队，默认每位一场。"""
+    anchors = [
+        row[0]
+        for row in db.query(LiveSession.anchor_name)
+        .filter(LiveSession.anchor_name.isnot(None), LiveSession.anchor_name != "")
+        .distinct()
+        .order_by(LiveSession.anchor_name.asc())
+        .all()
+    ]
+    results = []
+    created_count = 0
+    for anchor in anchors:
+        sessions = (
+            db.query(LiveSession)
+            .join(StreamSource, StreamSource.session_id == LiveSession.id)
+            .filter(
+                LiveSession.anchor_name == anchor,
+                LiveSession.live_duration_seconds >= min_duration_seconds,
+                StreamSource.status == "active",
+            )
+            .order_by(LiveSession.live_duration_seconds.asc(), LiveSession.live_start_time.desc())
+            .all()
+        )
+        selected = 0
+        for session in sessions:
+            task, created = _queue_session_transcription(db, session)
+            if task.status == "completed":
+                continue
+            results.append({
+                "anchor_name": anchor,
+                "session_id": session.id,
+                "duration_seconds": session.live_duration_seconds,
+                "task_id": task.id,
+                "status": task.status,
+                "created": created,
+            })
+            created_count += int(created)
+            selected += 1
+            if selected >= per_anchor:
+                break
+
+    db.commit()
+    return {
+        "anchor_count": len(anchors),
+        "selected_count": len(results),
+        "created_count": created_count,
+        "tasks": results,
+    }
+
+
+@rest_router.get("/tasks/status")
+def get_transcription_task_status(db: Session = Depends(get_db)):
+    """返回话术任务汇总，供页面显示真实排队进度。"""
+    counts = {"queued": 0, "processing": 0, "completed": 0, "failed": 0}
+    for status, count in db.query(AsrTask.status, func.count(AsrTask.id)).group_by(AsrTask.status):
+        counts[status or "failed"] = count
+    return counts
+
+
+@rest_router.get("/{session_id:int}/segments")
 def list_transcript_segments(
     session_id: int,
     limit: int = Query(200, le=500),
@@ -85,7 +161,7 @@ def list_transcript_segments(
     ]
 
 
-@rest_router.get("/{session_id}/full-text")
+@rest_router.get("/{session_id:int}/full-text")
 def get_full_text(session_id: int, db: Session = Depends(get_db)):
     """获取某场直播的完整话术文本"""
     record = (

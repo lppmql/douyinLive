@@ -74,8 +74,9 @@ class AsrWorker:
         try:
             queued = (
                 db.query(AsrTask)
+                .join(LiveSession, LiveSession.id == AsrTask.session_id)
                 .filter(AsrTask.status == "queued")
-                .order_by(AsrTask.created_at.asc())
+                .order_by(LiveSession.live_duration_seconds.asc(), AsrTask.created_at.asc())
                 .limit(settings.ASR_MAX_QUEUED)
                 .all()
             )
@@ -94,7 +95,7 @@ class AsrWorker:
             pipe = None
             client = None
             try:
-                task = db.query(AsrTask).get(task_id)
+                task = db.get(AsrTask, task_id)
                 if not task or task.status != "queued":
                     return
 
@@ -122,7 +123,7 @@ class AsrWorker:
                 # 获取流源
                 stream = None
                 if task.stream_id:
-                    stream = db.query(StreamSource).get(task.stream_id)
+                    stream = db.get(StreamSource, task.stream_id)
 
                 m3u8_url = stream.m3u8_url if stream else "https://mock.stream/live.m3u8"
                 headers = dict(stream.headers_json) if stream and stream.headers_json else {}
@@ -176,7 +177,7 @@ class AsrWorker:
                 message = f"转写超过 {task_timeout} 秒，可能是直播流已过期或识别服务繁忙"
                 logger.warning("任务 %s 超时: %s", task_id, message)
                 if db:
-                    task = db.query(AsrTask).get(task_id)
+                    task = db.get(AsrTask, task_id)
                     if task:
                         task.status = "failed"
                         task.error_message = message
@@ -185,7 +186,7 @@ class AsrWorker:
             except Exception as e:
                 logger.error(f"任务 {task_id} 失败: {e}")
                 if db:
-                    task = db.query(AsrTask).get(task_id)
+                    task = db.get(AsrTask, task_id)
                     if task:
                         task.status = "failed"
                         task.error_message = str(e)[:200]

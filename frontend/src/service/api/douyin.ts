@@ -89,6 +89,25 @@ export function queueTranscript(sessionId: number) {
   });
 }
 
+export function queueTranscriptsByAnchor(perAnchor = 1) {
+  return backendRequest<{
+    anchor_count: number;
+    selected_count: number;
+    created_count: number;
+    tasks: Array<{ anchor_name: string; session_id: number; task_id: number; status: string; created: boolean }>;
+  }>({
+    url: `${API_PREFIX}/transcripts/batch/queue-by-anchor`,
+    method: 'POST',
+    params: { per_anchor: perAnchor }
+  });
+}
+
+export function fetchTranscriptTaskStatus() {
+  return backendRequest<Record<'queued' | 'processing' | 'completed' | 'failed', number>>({
+    url: `${API_PREFIX}/transcripts/tasks/status`
+  });
+}
+
 /* ---------- AI 分析 ---------- */
 
 /** 获取 AI 评分 */

@@ -7,7 +7,9 @@ import {
   fetchTranscriptSegments,
   fetchTranscriptFullText,
   fetchLiveSessions,
+  fetchTranscriptTaskStatus,
   queueTranscript,
+  queueTranscriptsByAnchor,
   runTranscriptAiPipeline
 } from '@/service/api/douyin';
 
@@ -22,7 +24,9 @@ const sessions = ref<{ id: number; title: string }[]>([]);
 const segments = ref<Api.Douyin.TranscriptSegment[]>([]);
 const fullText = ref('');
 const loading = ref(true);
+const batchLoading = ref(false);
 const selectedSessionId = ref<number | null>(null);
+const taskSummary = ref({ queued: 0, processing: 0, completed: 0, failed: 0 });
 
 /* ---------- WebSocket ---------- */
 const wsUrl = computed(() => {
@@ -64,9 +68,38 @@ async function loadSessions() {
   try {
     const res = await fetchLiveSessions();
     if (res.data) {
-      sessions.value = res.data.map((s: any) => ({ id: s.id, title: s.session_title || `场次 ${s.id}` }));
+      sessions.value = res.data.map((s: any) => {
+        const date = s.live_start_time ? String(s.live_start_time).slice(0, 16).replace('T', ' ') : '时间未知';
+        const minutes = Math.max(0, Math.round((s.live_duration_seconds || 0) / 60));
+        return {
+          id: s.id,
+          title: `${s.anchor_name || '未知主播'} · ${date} · ${minutes}分钟 · #${s.id}`
+        };
+      });
     }
   } catch { /* ignore */ }
+}
+
+async function loadTaskSummary() {
+  try {
+    const res = await fetchTranscriptTaskStatus();
+    if (res.data) taskSummary.value = res.data;
+  } catch { /* 页面仍可使用单场转写 */ }
+}
+
+async function queueAnchorBatch() {
+  batchLoading.value = true;
+  try {
+    const res = await queueTranscriptsByAnchor(1);
+    const data = res.data;
+    if (!data) throw new Error('批量任务响应为空');
+    message.success(`已覆盖 ${data.anchor_count} 位主播，新建 ${data.created_count} 个真实转写任务`);
+    await loadTaskSummary();
+  } catch {
+    message.error('批量排队失败，请确认已采集到真实直播流');
+  } finally {
+    batchLoading.value = false;
+  }
 }
 
 async function selectSession(sessionId: number) {
@@ -154,6 +187,7 @@ function getStatusLabel(status: string): string {
 /* ---------- 生命周期 ---------- */
 onMounted(() => {
   loadSessions();
+  loadTaskSummary();
 });
 
 onUnmounted(() => {
@@ -183,12 +217,16 @@ watch(selectedSessionId, (newId) => {
             v-model:value="selectedSessionId"
             :placeholder="$t('page.transcripts.selectSession')"
             :options="sessions.map(s => ({ label: s.title, value: s.id }))"
-            style="width: 200px"
+            style="width: 420px"
             size="small"
             @update:value="selectSession"
           />
         </NSpace>
         <NSpace :size="12">
+          <NTag type="info" round size="small">排队 {{ taskSummary.queued }}</NTag>
+          <NTag type="warning" round size="small">处理中 {{ taskSummary.processing }}</NTag>
+          <NTag type="success" round size="small">完成 {{ taskSummary.completed }}</NTag>
+          <NTag v-if="taskSummary.failed" type="error" round size="small">失败 {{ taskSummary.failed }}</NTag>
           <NTag :type="wsConnected ? 'success' : 'default'" round size="small">
             {{ wsConnected ? $t('page.transcripts.wsConnected') : $t('page.transcripts.wsDisconnected') }}
           </NTag>
@@ -200,6 +238,9 @@ watch(selectedSessionId, (newId) => {
           </NButton>
           <NButton size="small" type="primary" @click="startTranscription" :disabled="!selectedSessionId">
             开始转写
+          </NButton>
+          <NButton size="small" type="primary" secondary :loading="batchLoading" @click="queueAnchorBatch">
+            各主播增量转写
           </NButton>
           <NButton size="small" @click="runAiPipeline" :disabled="!selectedSessionId">
             AI 分析并入库
