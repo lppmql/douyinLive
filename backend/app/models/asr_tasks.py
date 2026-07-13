@@ -1,5 +1,5 @@
 """ASR 转写任务表 — 并发控制与管理"""
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 
@@ -7,6 +7,9 @@ class AsrTask(Base, TimestampMixin):
     """ASR 转写任务"""
 
     __tablename__ = "asr_tasks"
+    __table_args__ = (
+        Index("idx_asr_tasks_status_created", "status", "created_at"),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="任务ID")
     session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次")

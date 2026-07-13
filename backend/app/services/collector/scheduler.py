@@ -51,6 +51,7 @@ class SchedulerManager:
             id="monitor_check",
             replace_existing=True,
             misfire_grace_time=30,
+            next_run_time=datetime.now(),
         )
 
         # 清理过期 job

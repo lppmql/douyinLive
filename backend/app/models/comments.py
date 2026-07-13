@@ -1,5 +1,5 @@
 """评论/弹幕表"""
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 
@@ -7,6 +7,10 @@ class Comment(Base, TimestampMixin):
     """评论/弹幕 - 含高意向标记、情绪"""
 
     __tablename__ = "comments"
+    __table_args__ = (
+        Index("idx_comments_session_time", "session_id", "comment_time", "id"),
+        Index("idx_comments_intent_time", "is_high_intent", "comment_time"),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="ID")
     session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")

@@ -2,7 +2,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from .config import settings
 
-engine = create_engine(settings.db_url, echo=settings.DEBUG)
+engine = create_engine(
+    settings.db_url,
+    echo=settings.DEBUG,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

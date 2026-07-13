@@ -173,7 +173,26 @@ class BrowserManager:
 
         db = SessionLocal()
         try:
-            return db.query(ScraperAccount).get(account_id)
+            return db.get(ScraperAccount, account_id)
+        finally:
+            db.close()
+
+    def _find_latest_logged_in_account(self) -> Optional[ScraperAccount]:
+        """查找最近登录且登录状态文件仍存在的采集账号。"""
+        db = SessionLocal()
+        try:
+            accounts = db.query(ScraperAccount).filter(
+                ScraperAccount.login_status == "logged_in",
+                ScraperAccount.storage_state_path.isnot(None),
+            ).order_by(ScraperAccount.last_login_at.desc(), ScraperAccount.id.desc()).all()
+            return next(
+                (
+                    account
+                    for account in accounts
+                    if account.storage_state_path and Path(account.storage_state_path).is_file()
+                ),
+                None,
+            )
         finally:
             db.close()
 
@@ -219,7 +238,12 @@ class BrowserManager:
 
         # 没有持久化上下文，从 StorageState 文件恢复
         if not self._logged_in_storage_path:
-            return None, False, "没有登录账号"
+            account = self._find_latest_logged_in_account()
+            if not account:
+                return None, False, "没有可恢复的登录账号，请重新扫码"
+            self._logged_in_account_id = account.id
+            self._logged_in_storage_path = account.storage_state_path
+            logger.info("已从数据库恢复采集账号引用: account_id=%s", account.id)
 
         account = self._find_account_by_id(self._logged_in_account_id)
         if account is None:

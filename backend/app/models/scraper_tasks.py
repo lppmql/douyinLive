@@ -1,5 +1,5 @@
 """采集任务表"""
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 
@@ -7,6 +7,9 @@ class ScraperTask(Base, TimestampMixin):
     """采集任务 — 记录每次采集操作"""
 
     __tablename__ = "scraper_tasks"
+    __table_args__ = (
+        Index("idx_scraper_tasks_status_type", "status", "task_type", "id"),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="任务ID")
     account_id = Column(Integer, ForeignKey("scraper_accounts.id"), nullable=True, comment="关联采集账号ID")

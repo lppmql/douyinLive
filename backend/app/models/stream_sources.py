@@ -1,5 +1,5 @@
 """直播流源表 — m3u8 地址和请求头"""
-from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, JSON, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 
@@ -7,6 +7,9 @@ class StreamSource(Base, TimestampMixin):
     """直播流源信息"""
 
     __tablename__ = "stream_sources"
+    __table_args__ = (
+        Index("idx_stream_sources_session_status_time", "session_id", "status", "fetched_at"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="流源ID")
     session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次")

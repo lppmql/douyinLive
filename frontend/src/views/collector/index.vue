@@ -167,7 +167,7 @@ async function loadData(silent = false) {
   if (silent) silentRefreshing.value = true;
   else loading.value = true;
   try {
-    const [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes] = await Promise.all([
+    const [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes] = await Promise.allSettled([
       fetchCollectorStatus(),
       fetchCollectorAccounts(),
       fetchCollectorLogs({
@@ -179,12 +179,17 @@ async function loadData(silent = false) {
       fetchMonitorStatus(),
       fetchAsrControlStatus()
     ]);
-    if (statusRes.data != null) collectorStatus.value = statusRes.data;
-    if (accountsRes.data != null) accounts.value = accountsRes.data;
-    if (logsRes.data != null) logs.value = logsRes.data;
-    if (tasksRes.data != null) tasks.value = tasksRes.data;
-    if (monitorRes.data != null) monitorStatus.value = monitorRes.data;
-    if (asrRes.data != null) asrStatus.value = asrRes.data;
+    if (statusRes.status === 'fulfilled' && statusRes.value.data != null) collectorStatus.value = statusRes.value.data;
+    if (accountsRes.status === 'fulfilled' && accountsRes.value.data != null) accounts.value = accountsRes.value.data;
+    if (logsRes.status === 'fulfilled' && logsRes.value.data != null) logs.value = logsRes.value.data;
+    if (tasksRes.status === 'fulfilled' && tasksRes.value.data != null) tasks.value = tasksRes.value.data;
+    if (monitorRes.status === 'fulfilled' && monitorRes.value.data != null) monitorStatus.value = monitorRes.value.data;
+    if (asrRes.status === 'fulfilled' && asrRes.value.data != null) asrStatus.value = asrRes.value.data;
+
+    const failedCount = [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes].filter(
+      result => result.status === 'rejected'
+    ).length;
+    if (failedCount && !silent) message.warning(`${failedCount} 项数据暂时加载失败，其他区域已正常更新`);
   } catch {
     if (!silent) message.error('加载采集数据失败');
   } finally {

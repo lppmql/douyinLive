@@ -1,5 +1,5 @@
 """直播场次表 - 核心表"""
-from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, Text, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
 
@@ -8,6 +8,10 @@ class LiveSession(Base, TimestampMixin):
     """直播场次 - 包含所有核心指标、流量来源、转化漏斗"""
 
     __tablename__ = "live_sessions"
+    __table_args__ = (
+        Index("idx_live_sessions_status_room", "live_status", "room_id", "id"),
+        Index("idx_live_sessions_detail_time", "detail_collection_status", "live_start_time"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="场次ID")
     room_id = Column(Integer, ForeignKey("live_rooms.id"), nullable=False, comment="关联直播间ID")
