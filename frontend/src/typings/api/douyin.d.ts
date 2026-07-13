@@ -265,7 +265,7 @@ declare namespace Api {
       created_at: string;
     }
 
-    /* ---------- 一键采集 ---------- */
+    /* ---------- 刷新数据采集 ---------- */
     interface CollectRoomResult {
       room_id: string;
       anchor_name: string;
@@ -292,6 +292,7 @@ declare namespace Api {
       history_detail_checked_count: number;
       history_detail_remaining_count: number;
       history_detail_batch_size: number;
+      history_detail_failed_count: number;
       results: CollectRoomResult[];
       message: string | null;
     }

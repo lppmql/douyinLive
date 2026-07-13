@@ -80,7 +80,7 @@ let clockTimer: number | null = null;
 const monitorStatus = ref<Api.Douyin.MonitorStatus | null>(null);
 const monitorLoading = ref(false);
 
-/* ---------- 一键采集 ---------- */
+/* ---------- 刷新数据采集 ---------- */
 const collectAllLoading = ref(false);
 const collectAllResult = ref<Api.Douyin.CollectAllResponse | null>(null);
 const collectionRunning = computed(
@@ -88,8 +88,8 @@ const collectionRunning = computed(
 );
 const collectDisabledReason = computed(() => {
   if (!hasAvailableAccount.value) return '请先扫码登录可用采集账号';
-  if (monitorStatus.value?.running) return '当前正在直播监控中，请先停止监控再执行全量历史采集';
-  if (collectionRunning.value) return '已有全量采集任务正在运行，请勿重复提交';
+  if (monitorStatus.value?.running) return '当前正在直播监控中，请先停止监控再刷新采集数据';
+  if (collectionRunning.value) return '已有刷新数据采集任务正在运行，请勿重复提交';
   return '';
 });
 
@@ -100,7 +100,7 @@ async function loadMonitorStatus() {
 
 async function handleStartMonitor() {
   if (collectionRunning.value) {
-    message.warning('全量采集正在运行，请等待任务结束后再启动监控');
+    message.warning('刷新数据采集正在运行，请等待任务结束后再启动监控');
     return;
   }
   monitorLoading.value = true;
@@ -141,7 +141,7 @@ async function handleTriggerEnd() {
   await loadMonitorStatus();
 }
 
-/* ---------- 一键采集 ---------- */
+/* ---------- 刷新数据采集 ---------- */
 async function handleCollectAll() {
   collectAllLoading.value = true;
   collectAllResult.value = null;
@@ -150,16 +150,12 @@ async function handleCollectAll() {
     collectAllResult.value = res.data;
     if (res.data?.collected_rooms && res.data.collected_rooms > 0) {
       message.success(`采集完成：${res.data.collected_rooms}/${res.data.total_rooms} 个房间`);
-      if ((res.data.history_detail_remaining_count || 0) > 0) {
-        message.info(
-          `历史场次本次补齐 ${res.data.history_detail_synced_count} 场，剩余 ${res.data.history_detail_remaining_count} 场，继续点一次会接着补`
-        );
-      }
+      message.info(`全部场次检查完成，本次补齐 ${res.data.history_detail_synced_count || 0} 场详情`);
     } else if (res.data?.message) {
       message.warning(res.data.message);
     }
   } catch {
-    message.error('一键采集失败');
+    message.error('刷新数据采集失败');
   } finally {
     collectAllLoading.value = false;
     await loadData();
@@ -656,7 +652,7 @@ const taskColumns = [
     minWidth: 120,
     render(row: Api.Douyin.CollectorTask) {
       const labels: Record<string, string> = {
-        collect_all: '全量采集',
+        collect_all: '刷新数据采集',
         login: '扫码登录',
         metrics: '指标采集',
         comments: '评论采集',
@@ -827,7 +823,7 @@ onUnmounted(() => {
 
         <NGrid cols="1 l:3" responsive="screen" :x-gap="16" :y-gap="16">
           <NGi span="1 l:2">
-            <NCard :bordered="false" class="card-wrapper h-full" title="全量数据采集">
+            <NCard :bordered="false" class="card-wrapper h-full" title="刷新数据采集">
               <template #header-extra>
                 <NTag v-if="collectAllLoading" type="warning" round size="small">任务执行中</NTag>
                 <NTag v-else-if="hasAvailableAccount" type="success" round size="small">账号已就绪</NTag>
@@ -835,7 +831,7 @@ onUnmounted(() => {
               </template>
               <div class="flex flex-col gap-16px">
                 <NAlert type="info" :show-icon="true" :bordered="false">
-                  自动发现账号下全部主播，依次同步直播场次、主播资料、指标、评论和观众画像。采集期间请勿删除当前账号。
+                  重新发现账号下全部主播和直播场次，并补齐每场直播的主播资料、指标、评论和观众画像。本轮会检查全部待补场次。
                 </NAlert>
                 <div
                   class="flex flex-wrap items-center justify-between gap-12px rounded-10px bg-gray-100 p-12px dark:bg-white/5"
@@ -889,7 +885,7 @@ onUnmounted(() => {
                           @click="handleCollectAll"
                         >
                           <template #icon><SvgIcon icon="mdi:database-arrow-down-outline" /></template>
-                          {{ collectAllLoading ? '正在采集全部数据' : '开始全量采集' }}
+                          {{ collectAllLoading ? '正在刷新全部数据' : '刷新数据采集' }}
                         </NButton>
                       </span>
                     </template>
@@ -969,7 +965,7 @@ onUnmounted(() => {
                       <NStatistic label="本次补详情" :value="collectAllResult.history_detail_synced_count || 0" />
                     </NGi>
                     <NGi>
-                      <NStatistic label="剩余待补" :value="collectAllResult.history_detail_remaining_count || 0" />
+                      <NStatistic label="本次失败" :value="collectAllResult.history_detail_failed_count || 0" />
                     </NGi>
                   </NGrid>
                   <NDataTable

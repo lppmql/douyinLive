@@ -299,18 +299,18 @@ def list_tasks(
     return q.order_by(ScraperTask.id.desc()).limit(50).all()
 
 
-# ===== 一键采集 =====
+# ===== 刷新数据采集 =====
 @router.post("/collect-all", response_model=CollectAllResponse)
 async def manual_collect_all(db: Session = Depends(get_db)):
-    """一键采集所有主播房间的大屏数据"""
+    """刷新全部主播、直播场次及场次详情数据。"""
     if scheduler_manager.running:
-        raise HTTPException(409, "直播监控运行中，请先停止监控再执行全量采集")
+        raise HTTPException(409, "直播监控运行中，请先停止监控再刷新数据采集")
     existing = db.query(ScraperTask).filter(
         ScraperTask.task_type == "collect_all",
         ScraperTask.status == "running",
     ).first()
     if existing:
-        raise HTTPException(409, f"全量采集任务 #{existing.id} 正在运行，请勿重复提交")
+        raise HTTPException(409, f"刷新数据采集任务 #{existing.id} 正在运行，请勿重复提交")
 
     account = db.query(ScraperAccount).filter(
         ScraperAccount.login_status == "logged_in"
@@ -375,7 +375,7 @@ async def manual_collect_all(db: Session = Depends(get_db)):
             ScraperLog(
                 task_id=task.id,
                 level="error",
-                message=f"全量采集任务失败: {str(exc)}",
+                message=f"刷新数据采集任务失败: {str(exc)}",
                 raw_json={
                     "stage": "failed",
                     "event": "task_failed",

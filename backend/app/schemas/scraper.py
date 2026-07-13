@@ -123,7 +123,7 @@ class AsrControlResponse(BaseModel):
     message: str = ""
 
 
-# ===== 一键采集结果 =====
+# ===== 刷新数据采集结果 =====
 class CollectRoomResult(BaseModel):
     room_id: str = ""
     anchor_name: str = ""
@@ -150,5 +150,6 @@ class CollectAllResponse(BaseModel):
     history_detail_checked_count: int = 0
     history_detail_remaining_count: int = 0
     history_detail_batch_size: int = 0
+    history_detail_failed_count: int = 0
     results: list[CollectRoomResult] = Field(default_factory=list)
     message: Optional[str] = None

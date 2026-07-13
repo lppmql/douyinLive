@@ -1,5 +1,5 @@
 """
-一键采集服务 — 采集所有主播的大屏数据
+刷新数据采集服务 - 采集所有主播及直播场次的完整数据
 
 原则：
 - room_id 只是访问大屏页的入口参数，不代表主播
@@ -36,7 +36,6 @@ LIVE_SCREEN_URL = f"{LEADS_BASE}/pc/analysis/live-screen"
 COMMENT_URL = f"{LEADS_BASE}/pc/analysis/live-comment"
 HOME_URL = f"{LEADS_BASE}/pc/growth/home"
 HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
-HISTORY_DETAIL_BATCH_SIZE = 20
 HISTORY_DETAIL_TIMEOUT_SECONDS = 45
 HISTORY_DETAIL_CONCURRENCY = 2
 ENTERPRISE_PAGE_SIZE = 100
@@ -52,7 +51,7 @@ async def collect_all(
     progress_callback: Optional[ProgressCallback] = None,
 ) -> dict:
     """
-    一键采集所有房间的数据
+    刷新采集所有房间、主播和直播场次的数据
     先访问大屏页，从页面实际数据中提取场次信息，再入库
     """
     def report(stage: str, percent: int, current: int, total: int, message: str, details=None):
@@ -162,20 +161,37 @@ async def collect_all(
 
         # 未映射只代表当前接口暂时没返回主播关系，不能在采集过程中删除真实场次。
         pruned_unmapped_count = 0
-        report("detail_enrichment", 78, 0, HISTORY_DETAIL_BATCH_SIZE, "正在补齐场次指标、评论和主播资料")
+        report("detail_enrichment", 78, 0, 0, "正在检查全部场次的指标、评论和主播资料")
+
+        def report_detail_progress(checked: int, total: int, enriched: int, failed: int) -> None:
+            percent = 78 + int(checked / max(total, 1) * 16)
+            report(
+                "detail_enrichment",
+                percent,
+                checked,
+                total,
+                f"场次详情已处理 {checked}/{total}，补齐 {enriched} 场，失败 {failed} 场",
+                {
+                    "checked_count": checked,
+                    "total_count": total,
+                    "enriched_count": enriched,
+                    "failed_count": failed,
+                },
+            )
+
         history_detail_progress = await _enrich_history_sessions(
             db,
             context,
             account,
             rooms[0],
-            limit=HISTORY_DETAIL_BATCH_SIZE,
+            progress_callback=report_detail_progress,
         )
         report(
             "detail_enrichment",
             94,
             history_detail_progress["checked_count"],
             history_detail_progress["batch_size"],
-            f"本批补齐 {history_detail_progress['enriched_count']} 场，剩余 {history_detail_progress['remaining_count']} 场",
+            f"全部场次已检查，本次补齐 {history_detail_progress['enriched_count']} 场，失败 {history_detail_progress['failed_count']} 场",
             history_detail_progress,
         )
 
@@ -197,9 +213,10 @@ async def collect_all(
             "history_detail_checked_count": history_detail_progress["checked_count"],
             "history_detail_remaining_count": history_detail_progress["remaining_count"],
             "history_detail_batch_size": history_detail_progress["batch_size"],
+            "history_detail_failed_count": history_detail_progress["failed_count"],
             "results": results,
         }
-        report("completed", 100, collected, len(rooms), "全量采集完成", final_result)
+        report("completed", 100, collected, len(rooms), "刷新数据采集完成", final_result)
         return final_result
     finally:
         # 注意：不关闭 context！它被 browser_manager 持久化了
@@ -1286,9 +1303,9 @@ async def _enrich_history_sessions(
     context: BrowserContext,
     account: ScraperAccount,
     room: LiveRoom,
-    limit: int = HISTORY_DETAIL_BATCH_SIZE,
+    progress_callback: Optional[Callable[[int, int, int, int], None]] = None,
 ) -> dict:
-    """补齐历史场次的大屏详情、回放流和评论。"""
+    """尝试补齐全部历史场次的大屏详情、回放流和评论。"""
     del account
     current_context = context
     all_sessions = (
@@ -1311,9 +1328,10 @@ async def _enrich_history_sessions(
             -(session.id or 0),
         )
     )
-    target_sessions = pending_sessions[:limit]
+    target_sessions = pending_sessions
     enriched = 0
-    checked = len(target_sessions)
+    checked = 0
+    failed = 0
     semaphore = asyncio.Semaphore(HISTORY_DETAIL_CONCURRENCY)
 
     async def scrape_one(session: LiveSession):
@@ -1332,19 +1350,27 @@ async def _enrich_history_sessions(
             except Exception as exc:
                 return session, None, f"详情页采集失败: {str(exc)[:450]}"
 
-    detail_results = await asyncio.gather(*(scrape_one(session) for session in target_sessions))
-    for session, detail, error in detail_results:
+    detail_tasks = [asyncio.create_task(scrape_one(session)) for session in target_sessions]
+    for detail_task in asyncio.as_completed(detail_tasks):
+        session, detail, error = await detail_task
+        checked += 1
         if error:
+            failed += 1
             session.detail_collection_status = "retryable"
             session.detail_collection_error = error
             db.commit()
             logger.warning("历史场次详情采集失败: session_id=%s error=%s", session.id, error)
+            if progress_callback:
+                progress_callback(checked, len(target_sessions), enriched, failed)
             continue
 
         if detail.get("validation_failed"):
             session.detail_collection_status = "unavailable"
             session.detail_collection_error = "平台详情页未回显该场次时间，无法安全确认主播归属"
             db.commit()
+            failed += 1
+            if progress_callback:
+                progress_callback(checked, len(target_sessions), enriched, failed)
             continue
 
         session.detail_collection_status = "complete"
@@ -1372,6 +1398,8 @@ async def _enrich_history_sessions(
         if changed or metrics_count or comments_count:
             db.commit()
         enriched += 1
+        if progress_callback:
+            progress_callback(checked, len(target_sessions), enriched, failed)
         logger.info(
             "历史场次详情补齐: session_id=%s, anchor=%s, metrics=%s, comments=%s, stream=%s",
             session.id,
@@ -1384,16 +1412,17 @@ async def _enrich_history_sessions(
     progress = {
         "enriched_count": enriched,
         "checked_count": checked,
-        "remaining_count": max(len(pending_sessions) - checked, 0),
-        "batch_size": limit,
+        "remaining_count": 0,
+        "batch_size": len(target_sessions),
+        "failed_count": failed,
         "concurrency": HISTORY_DETAIL_CONCURRENCY,
     }
     db.add(
         ScraperLog(
             level="info",
             message=(
-                f"历史详情批次完成: 检查={checked}, 补齐={enriched}, "
-                f"剩余={progress['remaining_count']}"
+                f"历史详情刷新完成: 检查={checked}, 补齐={enriched}, "
+                f"失败={failed}"
             ),
             raw_json=progress,
         )

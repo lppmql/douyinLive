@@ -38,7 +38,7 @@ async def start_monitor(db: Session = Depends(get_db)):
         ScraperTask.status == "running",
     ).first()
     if running_collect:
-        raise HTTPException(409, f"全量采集任务 #{running_collect.id} 正在运行，请等待任务结束")
+        raise HTTPException(409, f"刷新数据采集任务 #{running_collect.id} 正在运行，请等待任务结束")
     await scheduler_manager.start()
     return MonitorActionResponse(success=True, message="监控已启动")
 

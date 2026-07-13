@@ -195,11 +195,15 @@ export function fetchKnowledgeItems(params?: { category?: string }) {
   return backendRequest<Api.Douyin.KnowledgeItem[]>({ url: `${API_PREFIX}/knowledge-base/`, params });
 }
 
-/* ---------- 一键采集 ---------- */
+/* ---------- 刷新数据采集 ---------- */
 
-/** 一键采集所有主播房间数据 */
+/** 刷新全部主播、直播场次及场次详情数据 */
 export function collectAllData() {
-  return backendRequest<Api.Douyin.CollectAllResponse>({ url: `${API_PREFIX}/collector/collect-all`, method: 'POST' });
+  return backendRequest<Api.Douyin.CollectAllResponse>({
+    url: `${API_PREFIX}/collector/collect-all`,
+    method: 'POST',
+    timeout: 30 * 60 * 1000
+  });
 }
 
 /* ---------- AI 分析 ---------- */
