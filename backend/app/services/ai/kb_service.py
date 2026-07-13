@@ -121,6 +121,10 @@ def save_transcript_to_kb(db: Session, session_id: int) -> int:
         KnowledgeBase.source_type == "transcript",
     ).first()
     if existing:
+        existing.content = full_text
+        existing.title = f"话术 - 场次{session_id}"
+        existing.category = "优质话术"
+        db.commit()
         return 0
 
     kb = KnowledgeBase(

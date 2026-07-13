@@ -27,6 +27,8 @@ from app.models.live_sessions import LiveSession
 from app.services.asr.m3u8_pipe import M3u8Pipe
 from app.services.asr.funasr_client import FunasrClient
 from app.services.asr.websocket_manager import ws_manager
+from app.services.ai.scoring import score_session_transcript
+from app.services.ai.kb_service import save_transcript_to_kb, save_analysis_to_kb
 
 
 class AsrWorker:
@@ -34,6 +36,7 @@ class AsrWorker:
 
     def __init__(self):
         self._semaphore = asyncio.Semaphore(settings.MAX_REALTIME_ASR_TASKS or 1)
+        self._active_tasks: set[asyncio.Task] = set()
         self._running = False
         self._poll_interval = 5  # 秒
 
@@ -70,6 +73,11 @@ class AsrWorker:
 
     async def _poll_tasks(self):
         """轮询 queued 任务"""
+        max_tasks = settings.MAX_REALTIME_ASR_TASKS or 1
+        available_slots = max(0, max_tasks - len(self._active_tasks))
+        if available_slots == 0:
+            return
+
         db = SessionLocal()
         try:
             queued = (
@@ -77,14 +85,14 @@ class AsrWorker:
                 .join(LiveSession, LiveSession.id == AsrTask.session_id)
                 .filter(AsrTask.status == "queued")
                 .order_by(LiveSession.live_duration_seconds.asc(), AsrTask.created_at.asc())
-                .limit(settings.ASR_MAX_QUEUED)
+                .limit(min(settings.ASR_MAX_QUEUED, available_slots))
                 .all()
             )
 
             for task in queued:
-                if self._semaphore.locked():
-                    break
-                asyncio.create_task(self._process_task(task.id))
+                worker_task = asyncio.create_task(self._process_task(task.id))
+                self._active_tasks.add(worker_task)
+                worker_task.add_done_callback(self._active_tasks.discard)
         finally:
             db.close()
 
@@ -172,6 +180,21 @@ class AsrWorker:
                 task.completed_at = datetime.utcnow()
                 db.commit()
                 logger.info(f"任务 {task_id} 完成: {segment_count} 个片段")
+
+                # ASR 成功后自动完成 AI 评分和知识库同步；AI 失败不回滚真实话术。
+                try:
+                    score = score_session_transcript(task.session_id, db)
+                    transcript_saved = save_transcript_to_kb(db, task.session_id)
+                    analysis_saved = save_analysis_to_kb(db, task.session_id)
+                    logger.info(
+                        "任务 %s AI 闭环完成: score=%s, transcript_kb=%s, analysis_kb=%s",
+                        task_id,
+                        (score or {}).get("total_score"),
+                        transcript_saved,
+                        analysis_saved,
+                    )
+                except Exception as ai_exc:
+                    logger.exception("任务 %s AI 分析或知识库同步失败: %s", task_id, ai_exc)
 
             except asyncio.TimeoutError:
                 message = f"转写超过 {task_timeout} 秒，可能是直播流已过期或识别服务繁忙"

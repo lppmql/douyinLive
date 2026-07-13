@@ -120,6 +120,11 @@ class FunasrClient:
             start = max(0.0, elapsed_seconds - 3.0)
             end = elapsed_seconds
             timestamp = data.get("timestamp")
+            if isinstance(timestamp, str):
+                try:
+                    timestamp = json.loads(timestamp)
+                except json.JSONDecodeError:
+                    timestamp = None
             if isinstance(timestamp, list) and timestamp:
                 first = timestamp[0]
                 last = timestamp[-1]

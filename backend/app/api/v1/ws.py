@@ -99,6 +99,15 @@ def queue_transcription_by_anchor(
         )
         selected = 0
         for session in sessions:
+            latest_task = (
+                db.query(AsrTask)
+                .filter(AsrTask.session_id == session.id)
+                .order_by(AsrTask.created_at.desc(), AsrTask.id.desc())
+                .first()
+            )
+            # 批量增量不反复消耗已确认无语音/失效的回放；单场接口仍可人工重试。
+            if latest_task and latest_task.status == "failed":
+                continue
             task, created = _queue_session_transcription(db, session)
             if task.status == "completed":
                 continue

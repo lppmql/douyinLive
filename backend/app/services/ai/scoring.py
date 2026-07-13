@@ -67,14 +67,22 @@ def score_session_transcript(session_id: int, db: Session | None = None) -> dict
             return None
 
         # 保存评分到 analysis_reports
-        report = AnalysisReport(
-            session_id=session_id,
-            report_type="speech_score",
-            report_title=f"话术评分 - 场次{session_id}",
-            report_content=result,
-            summary=result.get("total_score", "未知"),
-        )
-        db.add(report)
+        report = db.query(AnalysisReport).filter(
+            AnalysisReport.session_id == session_id,
+            AnalysisReport.report_type == "speech_score",
+        ).order_by(AnalysisReport.id.desc()).first()
+        if report:
+            report.report_title = f"话术评分 - 场次{session_id}"
+            report.report_content = result
+            report.summary = result.get("total_score", "未知")
+        else:
+            db.add(AnalysisReport(
+                session_id=session_id,
+                report_type="speech_score",
+                report_title=f"话术评分 - 场次{session_id}",
+                report_content=result,
+                summary=result.get("total_score", "未知"),
+            ))
 
         # 更新 transcript_segments 的 AI 评分（整体评分）
         total_score = result.get("total_score")
