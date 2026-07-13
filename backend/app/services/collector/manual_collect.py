@@ -1529,8 +1529,9 @@ async def _scrape_history_session_detail(
     context: BrowserContext,
     room_id: str,
     session: LiveSession,
+    validate_history: bool = True,
 ) -> dict:
-    """从历史大屏页提取总览、趋势、回放流和评论。"""
+    """从大屏页提取总览、趋势、回放流和评论。"""
     url = f"{LIVE_SCREEN_URL}?room_id={room_id}&fullscreen=0"
     page = None
     hits = {}
@@ -1569,7 +1570,7 @@ async def _scrape_history_session_detail(
             pass
 
         body_text = await page.evaluate("document.body?.innerText || ''")
-        if not _is_expected_history_session(body_text, session):
+        if validate_history and not _is_expected_history_session(body_text, session):
             logger.warning(
                 "历史场次详情页校验失败，跳过写入: session_id=%s room_id=%s",
                 session.id,
@@ -1587,7 +1588,9 @@ async def _scrape_history_session_detail(
         anchor_profile = await _reveal_session_anchor(page)
 
         overview_rows = (((hits.get("overview") or {}).get("data", {}) or {}).get("statRows")) or []
-        trend_rows = (((hits.get("data") or {}).get("data", {}) or {}).get("trend")) or []
+        data_payload = ((hits.get("data") or {}).get("data", {}) or {})
+        trend_rows = data_payload.get("trend") or []
+        profiles = _parse_watch_profiles(data_payload.get("watchProfile"))
         replay_url = (((hits.get("replay") or {}).get("data", {}) or {}).get("replayUrl")) or None
         comments = _parse_comments_from_live_screen_text(body_text, session.live_start_time)
         return {
@@ -1596,12 +1599,101 @@ async def _scrape_history_session_detail(
             "replay_url": replay_url,
             "comments": comments,
             "anchor_profile": anchor_profile,
+            "profiles": profiles,
         }
-    except Exception:
-        return {"overview": {}, "trend": [], "replay_url": None, "comments": [], "anchor_profile": {}, "validation_failed": False}
+    except Exception as exc:
+        return {
+            "overview": {}, "trend": [], "replay_url": None, "comments": [],
+            "anchor_profile": {}, "validation_failed": False, "error": str(exc)[:500],
+        }
     finally:
         if page:
             await page.close()
+
+
+async def collect_live_session_snapshot(
+    db: Session,
+    context: BrowserContext,
+    session: LiveSession,
+) -> dict:
+    """按刷新采集的完整结构更新一场正在直播的场次。"""
+    room_id = _extract_room_id_from_dashboard_url(session.dashboard_url)
+    if not room_id:
+        raise RuntimeError("直播场次缺少 room_id，无法采集完整数据")
+
+    detail = await _scrape_history_session_detail(
+        context,
+        room_id,
+        session,
+        validate_history=False,
+    )
+    if detail.get("error"):
+        raise RuntimeError(f"实时完整快照页面采集失败: {detail['error']}")
+    overview = detail.get("overview", {})
+    trend_rows = detail.get("trend", [])
+    comments_data = detail.get("comments", [])
+    profiles = detail.get("profiles", [])
+    anchor_profile = detail.get("anchor_profile", {}) or {}
+    replay_url = detail.get("replay_url")
+
+    changed = _apply_session_anchor_profile(session, anchor_profile)
+    changed = _apply_overview_to_session(session, overview) or changed
+    metrics_count = _save_trend_metrics(db, session.id, trend_rows)
+    comments_count = _save_comments(db, session.id, comments_data)
+    profiles_count = 0
+    if profiles:
+        db.query(LiveAudienceProfile).filter(LiveAudienceProfile.session_id == session.id).delete()
+        profiles_count = _save_profiles(db, session.id, profiles)
+    if comments_count:
+        session.comments_count = max(session.comments_count or 0, comments_count)
+        changed = True
+    if replay_url and session.stream_url != replay_url:
+        session.stream_url = replay_url[:2000]
+        _save_stream_source(db, session.id, replay_url)
+        changed = True
+    if changed:
+        db.commit()
+
+    result = {
+        "overview_field_count": len((overview.get("metrics", {}) or {})),
+        "trend_row_count": len(trend_rows),
+        "new_metric_count": metrics_count,
+        "new_comment_count": comments_count,
+        "profile_count": profiles_count,
+        "stream_saved": bool(replay_url),
+        "anchor_profile_updated": bool(anchor_profile),
+    }
+    logger.info("实时完整快照采集完成: session=%s result=%s", session.id, result)
+    return result
+
+
+def _parse_watch_profiles(raw_rows) -> list[dict]:
+    """解析大屏 watchProfile 中以 JSON 字符串返回的实时用户画像。"""
+    profiles = []
+    field_prefix = "lp_screen_live_watch_profile_"
+    for row in raw_rows or []:
+        fields = row.get("fields", {}) if isinstance(row, dict) else {}
+        for key, raw_value in fields.items():
+            if not key.startswith(field_prefix):
+                continue
+            dimension_type = key.removeprefix(field_prefix)
+            try:
+                values = json.loads(raw_value) if isinstance(raw_value, str) else raw_value
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(values, dict):
+                continue
+            for name, ratio in values.items():
+                parsed_ratio = _safe_float(ratio)
+                if parsed_ratio is None:
+                    continue
+                profiles.append({
+                    "dimension_type": dimension_type,
+                    "dimension_name": str(name),
+                    "ratio": parsed_ratio,
+                    "count": 0,
+                })
+    return profiles
 
 
 def _is_context_closed_error(exc: Exception) -> bool:

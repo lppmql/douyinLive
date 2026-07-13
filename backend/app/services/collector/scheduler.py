@@ -84,22 +84,21 @@ class SchedulerManager:
         if session_id in self._session_jobs:
             return
 
+        # 指标、趋势、评论和主播信息通过同一个大屏页面统一采集，避免多个页面
+        # 并发争用同一个登录上下文，也确保实时链路与刷新采集使用相同数据结构。
         jobs = {}
-        for job_type, interval in [
-            ("metrics", max(settings.METRICS_COLLECT_INTERVAL, 10)),
-            ("comments", max(settings.COMMENT_COLLECT_INTERVAL, 20)),
-            ("profiles", max(settings.PROFILE_COLLECT_INTERVAL, 30)),
-        ]:
-            job_id = f"{job_type}_{session_id}"
-            self._scheduler.add_job(
-                self._collect_wrapper,
-                IntervalTrigger(seconds=interval),
-                id=job_id,
-                args=[session_id, dashboard_url, job_type],
-                replace_existing=True,
-                misfire_grace_time=15,
-            )
-            jobs[job_type] = job_id
+        detail_id = f"live_detail_{session_id}"
+        self._scheduler.add_job(
+            self._collect_wrapper,
+            IntervalTrigger(seconds=max(settings.METRICS_COLLECT_INTERVAL, 30)),
+            id=detail_id,
+            args=[session_id, dashboard_url, "live_detail"],
+            replace_existing=True,
+            misfire_grace_time=20,
+            max_instances=1,
+            coalesce=True,
+        )
+        jobs["live_detail"] = detail_id
 
         # 流刷新 job
         refresh_id = f"stream_refresh_{session_id}"
@@ -297,6 +296,21 @@ class SchedulerManager:
                     if session:
                         session.stream_url = stream_url[:2000]
                         db.commit()
+            elif job_type == "live_detail":
+                from app.models.live_sessions import LiveSession
+                from app.services.collector.manual_collect import collect_live_session_snapshot
+
+                session = db.get(LiveSession, session_id)
+                if not session:
+                    raise RuntimeError(f"直播场次不存在: {session_id}")
+                result = await collect_live_session_snapshot(db, context, session)
+                task.progress_percent = 100
+                task.progress_stage = "live_detail"
+                task.progress_message = (
+                    f"汇总字段 {result['overview_field_count']}，趋势 {result['trend_row_count']} 条，"
+                    f"新增指标 {result['new_metric_count']} 条，新增评论 {result['new_comment_count']} 条，"
+                    f"画像 {result['profile_count']} 条"
+                )
             else:
                 collector_cls = collector_map.get(job_type)
                 if not collector_cls:
