@@ -1534,24 +1534,25 @@ async def _scrape_history_session_detail(
     """从大屏页提取总览、趋势、回放流和评论。"""
     url = f"{LIVE_SCREEN_URL}?room_id={room_id}&fullscreen=0"
     page = None
-    hits = {}
+    hits = {"overview": [], "data": [], "replay": []}
+    response_tasks = []
 
     async def on_response(resp):
         try:
             if "json" not in resp.headers.get("content-type", ""):
                 return
             if "/bff/statistic/live-screen/overview" in resp.url:
-                hits["overview"] = await resp.json()
+                hits["overview"].append(await resp.json())
             elif "/bff/statistic/live-screen/data" in resp.url:
-                hits["data"] = await resp.json()
+                hits["data"].append(await resp.json())
             elif "/bff/statistic/live-screen/v3/get-live-replay" in resp.url:
-                hits["replay"] = await resp.json()
+                hits["replay"].append(await resp.json())
         except Exception:
             pass
 
     try:
         page = await context.new_page()
-        page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
+        page.on("response", lambda r: response_tasks.append(asyncio.create_task(on_response(r))))
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(6)
         try:
@@ -1570,6 +1571,8 @@ async def _scrape_history_session_detail(
             pass
 
         body_text = await page.evaluate("document.body?.innerText || ''")
+        if response_tasks:
+            await asyncio.gather(*response_tasks, return_exceptions=True)
         if validate_history and not _is_expected_history_session(body_text, session):
             logger.warning(
                 "历史场次详情页校验失败，跳过写入: session_id=%s room_id=%s",
@@ -1587,17 +1590,32 @@ async def _scrape_history_session_detail(
         # 企业主账号页面默认会脱敏显示主播名，点击小眼睛后才能读取本场真实主播。
         anchor_profile = await _reveal_session_anchor(page)
 
-        overview_rows = (((hits.get("overview") or {}).get("data", {}) or {}).get("statRows")) or []
-        data_payload = ((hits.get("data") or {}).get("data", {}) or {})
+        overview_rows = []
+        for payload in hits["overview"]:
+            overview_rows.extend(((payload.get("data", {}) or {}).get("statRows")) or [])
+        data_payload = {}
+        for payload in hits["data"]:
+            inner = payload.get("data", {}) or {}
+            if isinstance(inner, dict):
+                for key, value in inner.items():
+                    if value not in (None, [], {}):
+                        data_payload[key] = value
         trend_rows = data_payload.get("trend") or []
         profiles = _parse_watch_profiles(data_payload.get("watchProfile"))
-        replay_url = (((hits.get("replay") or {}).get("data", {}) or {}).get("replayUrl")) or None
-        comments = _parse_comments_from_live_screen_text(body_text, session.live_start_time)
+        replay_url = next((
+            ((payload.get("data", {}) or {}).get("replayUrl"))
+            for payload in reversed(hits["replay"])
+            if ((payload.get("data", {}) or {}).get("replayUrl"))
+        ), None)
+        comments, comments_authoritative = await _fetch_all_session_comments(page, room_id)
+        if not comments_authoritative:
+            comments = _parse_comments_from_live_screen_text(body_text, session.live_start_time)
         return {
             "overview": overview_rows[0] if overview_rows else {},
             "trend": trend_rows,
             "replay_url": replay_url,
             "comments": comments,
+            "comments_authoritative": comments_authoritative,
             "anchor_profile": anchor_profile,
             "profiles": profiles,
         }
@@ -1609,6 +1627,43 @@ async def _scrape_history_session_detail(
     finally:
         if page:
             await page.close()
+
+
+async def _fetch_all_session_comments(page, room_id: str) -> tuple[list[dict], bool]:
+    """通过评论接口分页读取整场评论，DOM 文本仅作为接口失败时的兜底。"""
+    page_size = 1000
+    comments: list[dict] = []
+    total = None
+    authoritative = False
+    page_no = 1
+    while total is None or len(comments) < total:
+        response = await _fetch_enterprise_post(
+            page,
+            "/bff/statistic/live-comment/comment-list",
+            {"roomId": room_id, "page": str(page_no), "size": str(page_size)},
+        )
+        data = response.get("data", {}) if isinstance(response, dict) else {}
+        if not isinstance(data, dict):
+            break
+        authoritative = "comments" in data and "total" in data
+        total = _safe_int(data.get("total")) or 0
+        rows = data.get("comments") or []
+        if not isinstance(rows, list) or not rows:
+            break
+        for item in rows:
+            if not isinstance(item, dict) or not item.get("content"):
+                continue
+            comments.append({
+                "user_nickname": item.get("nickName") or "未知",
+                "user_sec_uid": item.get("secUId") or None,
+                "webcast_uid": item.get("webcastUid") or None,
+                "comment_content": str(item.get("content")),
+                "comment_time": _parse_comment_time(item.get("createTime")),
+            })
+        if len(rows) < page_size:
+            break
+        page_no += 1
+    return comments, authoritative
 
 
 async def collect_live_session_snapshot(
@@ -1639,12 +1694,19 @@ async def collect_live_session_snapshot(
     changed = _apply_session_anchor_profile(session, anchor_profile)
     changed = _apply_overview_to_session(session, overview) or changed
     metrics_count = _save_trend_metrics(db, session.id, trend_rows)
-    comments_count = _save_comments(db, session.id, comments_data)
+    comments_count = (
+        _replace_session_comments(db, session.id, comments_data)
+        if detail.get("comments_authoritative")
+        else _save_comments(db, session.id, comments_data)
+    )
     profiles_count = 0
     if profiles:
         db.query(LiveAudienceProfile).filter(LiveAudienceProfile.session_id == session.id).delete()
         profiles_count = _save_profiles(db, session.id, profiles)
-    if comments_count:
+    if detail.get("comments_authoritative"):
+        session.comments_count = comments_count
+        changed = True
+    elif comments_count:
         session.comments_count = max(session.comments_count or 0, comments_count)
         changed = True
     if replay_url and session.stream_url != replay_url:
@@ -1923,7 +1985,7 @@ def _save_stream_source(db: Session, session_id: int, stream_url: str) -> None:
 def _save_comments(db: Session, session_id: int, comments: list) -> int:
     """保存评论数据"""
     existing_pairs = {
-        _comment_identity(row.comment_content or "", row.comment_time)
+        _comment_identity(row.user_nickname, row.comment_content or "", row.comment_time, row.user_sec_uid)
         for row in db.query(Comment).filter(Comment.session_id == session_id).all()
     }
     seen_pairs = set()
@@ -1934,7 +1996,8 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
         if not content:
             continue
 
-        pair = _comment_identity(content, comment_time)
+        nickname = c.get("user_nickname", "未知")
+        pair = _comment_identity(nickname, content, comment_time, c.get("user_sec_uid"))
         if pair in existing_pairs or pair in seen_pairs:
             continue
         seen_pairs.add(pair)
@@ -1942,7 +2005,9 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
         if content:
             comment = Comment(
                 session_id=session_id,
-                user_nickname=c.get("user_nickname", "未知"),
+                user_nickname=nickname,
+                user_sec_uid=c.get("user_sec_uid"),
+                webcast_uid=c.get("webcast_uid"),
                 comment_content=content,
                 comment_time=comment_time or datetime.utcnow(),
             )
@@ -1951,6 +2016,40 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
     if count:
         db.commit()
     return count
+
+
+def _replace_session_comments(db: Session, session_id: int, comments: list) -> int:
+    """用平台完整评论快照替换旧的 DOM 残缺结果，并继承人工分析字段。"""
+    old_rows = db.query(Comment).filter(Comment.session_id == session_id).all()
+    annotations = {}
+    for row in old_rows:
+        key = ((row.user_nickname or "").strip(), (row.comment_content or "").strip())
+        annotations.setdefault(key, (row.is_high_intent, row.sentiment, row.keywords))
+
+    db.query(Comment).filter(Comment.session_id == session_id).delete(synchronize_session=False)
+    seen = set()
+    for item in comments:
+        nickname = str(item.get("user_nickname") or "未知").strip()
+        content = str(item.get("comment_content") or "").strip()
+        comment_time = item.get("comment_time")
+        identity = _comment_identity(nickname, content, comment_time, item.get("user_sec_uid"))
+        if not content or identity in seen:
+            continue
+        seen.add(identity)
+        annotation = annotations.get((nickname, content), (0, None, None))
+        db.add(Comment(
+            session_id=session_id,
+            user_nickname=nickname,
+            user_sec_uid=item.get("user_sec_uid"),
+            webcast_uid=item.get("webcast_uid"),
+            comment_content=content,
+            comment_time=comment_time or datetime.utcnow(),
+            is_high_intent=annotation[0] or 0,
+            sentiment=annotation[1],
+            keywords=annotation[2],
+        ))
+    db.commit()
+    return len(seen)
 
 
 def _parse_comment_time(value) -> Optional[datetime]:
@@ -2263,7 +2362,13 @@ def _load_storage_cookies(storage_state_path: str) -> dict[str, str]:
     return cookies
 
 
-def _comment_identity(content: str, comment_time: Optional[datetime]) -> tuple[str, Optional[datetime]]:
-    """没有真实评论时间时，退化为仅按内容去重，避免重复采集整批旧评论。"""
+def _comment_identity(
+    nickname: Optional[str],
+    content: str,
+    comment_time: Optional[datetime],
+    user_sec_uid: Optional[str] = None,
+) -> tuple[str, str, Optional[datetime]]:
+    """按稳定用户、内容和时间去重，不误删不同用户同一秒的相同评论。"""
     normalized_time = comment_time.replace(microsecond=0) if isinstance(comment_time, datetime) else None
-    return (content, normalized_time)
+    user_identity = str(user_sec_uid or nickname or "未知").strip()
+    return (user_identity, content, normalized_time)

@@ -122,6 +122,8 @@ declare namespace Api {
       id: number;
       session_id: number;
       user_nickname: string | null;
+      user_sec_uid: string | null;
+      webcast_uid: string | null;
       comment_content: string | null;
       comment_time: string | null;
       is_high_intent: number;

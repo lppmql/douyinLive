@@ -7,12 +7,15 @@ const page = ref(1);
 const pageSize = 12;
 
 const groups = computed(() => {
-  const map = new Map<string, Api.Douyin.LiveComment[]>();
+  const map = new Map<string, { user: string; comments: Api.Douyin.LiveComment[] }>();
   props.comments.forEach(comment => {
     const user = comment.user_nickname?.trim() || '匿名用户';
-    map.set(user, [...(map.get(user) || []), comment]);
+    const identity = comment.user_sec_uid || user;
+    const group = map.get(identity) || { user, comments: [] };
+    group.comments.push(comment);
+    map.set(identity, group);
   });
-  return [...map.entries()].map(([user, comments]) => ({ user, comments })).sort((a, b) => b.comments.length - a.comments.length);
+  return [...map.entries()].map(([identity, group]) => ({ identity, ...group })).sort((a, b) => b.comments.length - a.comments.length);
 });
 const visibleGroups = computed(() => groups.value.slice((page.value - 1) * pageSize, page.value * pageSize));
 watch(() => props.comments, () => { page.value = 1; });
@@ -27,7 +30,7 @@ function formatTime(value: string | null) { return value ? new Date(value).toLoc
     </div>
     <NEmpty v-if="!groups.length" description="本场暂无已采集评论" class="py-60px" />
     <NGrid v-else :x-gap="14" :y-gap="14" cols="1 m:2 xl:3" responsive="screen">
-      <NGi v-for="group in visibleGroups" :key="group.user">
+      <NGi v-for="group in visibleGroups" :key="group.identity">
         <NCard size="small" class="comment-card h-full" :bordered="true">
           <template #header>
             <div class="flex min-w-0 items-center gap-10px"><NAvatar round :size="34">{{ group.user.slice(0, 1) }}</NAvatar><div class="min-w-0"><div class="truncate font-600">{{ group.user }}</div><div class="text-12px text-gray-400">{{ group.comments.length }} 条评论</div></div></div>

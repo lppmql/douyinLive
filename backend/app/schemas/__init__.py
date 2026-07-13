@@ -175,6 +175,8 @@ class LiveSessionDetailResponse(BaseModel):
 class CommentBase(BaseModel):
     session_id: int
     user_nickname: Optional[str] = None
+    user_sec_uid: Optional[str] = None
+    webcast_uid: Optional[str] = None
     comment_content: Optional[str] = None
     comment_time: Optional[datetime] = None
     is_high_intent: int = 0
