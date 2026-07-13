@@ -243,7 +243,7 @@ class SchedulerManager:
                 if stream_url:
                     from app.models.live_sessions import LiveSession
 
-                    session = db.query(LiveSession).get(session_id)
+                    session = db.get(LiveSession, session_id)
                     if session:
                         session.stream_url = stream_url[:2000]
                         db.commit()

@@ -35,16 +35,22 @@ const wsUrl = computed(() => {
   return selectedSessionId.value ? `${wsBase}/ws/transcript/${selectedSessionId.value}` : '';
 });
 
-const { status, data: wsData, open, close } = useWebSocket(wsUrl, {
+const {
+  status,
+  data: wsData,
+  open,
+  close
+} = useWebSocket(wsUrl, {
   autoReconnect: { retries: 5, delay: 3000 },
-  heartbeat: { message: 'ping', interval: 30000 },
+  heartbeat: { message: 'ping', interval: 30000 }
 });
 
 const wsConnected = computed(() => status.value === 'OPEN');
 
 // 监听 WebSocket 消息
-watch(wsData, (msg) => {
+watch(wsData, msg => {
   if (!msg) return;
+  if (msg === 'pong') return;
   try {
     const result = JSON.parse(msg as string);
     if (result.text) {
@@ -56,11 +62,13 @@ watch(wsData, (msg) => {
         text_content: result.text,
         segment_type: 'asr_realtime',
         asr_status: result.is_final ? 'completed' : 'processing',
-        ai_score: null,
+        ai_score: null
       };
       segments.value.push(seg);
     }
-  } catch { /* ignore */ }
+  } catch {
+    // 服务端心跳或非转写事件无需展示给用户。
+  }
 });
 
 /* ---------- 方法 ---------- */
@@ -77,14 +85,18 @@ async function loadSessions() {
         };
       });
     }
-  } catch { /* ignore */ }
+  } catch {
+    message.error('直播场次加载失败');
+  }
 }
 
 async function loadTaskSummary() {
   try {
     const res = await fetchTranscriptTaskStatus();
     if (res.data) taskSummary.value = res.data;
-  } catch { /* 页面仍可使用单场转写 */ }
+  } catch {
+    message.warning('转写任务统计暂时不可用');
+  }
 }
 
 async function queueAnchorBatch() {
@@ -108,7 +120,7 @@ async function selectSession(sessionId: number) {
   try {
     const [segRes, textRes] = await Promise.all([
       fetchTranscriptSegments(sessionId),
-      fetchTranscriptFullText(sessionId).catch(() => ({ data: null })),
+      fetchTranscriptFullText(sessionId).catch(() => ({ data: null }))
     ]);
     segments.value = segRes.data || [];
     fullText.value = (textRes.data as any)?.full_text || '';
@@ -120,9 +132,8 @@ async function selectSession(sessionId: number) {
 }
 
 async function copyFullText() {
-  const text = fullText.value || segments.value.map(s =>
-    `[${s.segment_start.toFixed(1)}s] ${s.text_content}`
-  ).join('\n');
+  const text =
+    fullText.value || segments.value.map(s => `[${s.segment_start.toFixed(1)}s] ${s.text_content}`).join('\n');
   try {
     await navigator.clipboard.writeText(text);
     message.success($t('page.transcripts.copySuccess'));
@@ -151,7 +162,7 @@ async function startTranscription() {
 }
 
 async function runAiPipeline() {
-    if (!selectedSessionId.value) return;
+  if (!selectedSessionId.value) return;
   try {
     const res = await runTranscriptAiPipeline(selectedSessionId.value);
     const saved = (res.data?.transcript_saved ?? 0) + (res.data?.analysis_saved ?? 0);
@@ -179,7 +190,7 @@ function getStatusLabel(taskStatus: string): string {
     pending: $t('page.transcripts.statusPending'),
     processing: $t('page.transcripts.statusProcessing'),
     completed: $t('page.transcripts.statusCompleted'),
-    failed: $t('page.transcripts.statusFailed'),
+    failed: $t('page.transcripts.statusFailed')
   };
   return map[taskStatus] || taskStatus;
 }
@@ -195,34 +206,33 @@ onUnmounted(() => {
 });
 
 // 当选中 session 变化时打开 WebSocket
-watch(selectedSessionId, (newId) => {
+watch(selectedSessionId, newId => {
   if (newId) {
     close();
     // 重新打开（useWebSocket 的 url 变化后自动重连）
     setTimeout(() => open(), 100);
   }
 });
-
 </script>
 
 <template>
   <div>
     <!-- 选择场次 + 连接状态 -->
     <NCard :bordered="false" class="card-wrapper mb-16px">
-      <NSpace justify="space-between" align="center">
-        <NSpace :size="16" align="center">
+      <div class="flex flex-wrap items-center justify-between gap-12px">
+        <NSpace :size="12" align="center" wrap>
           <SvgIcon icon="mdi:chat-text" class="text-22px" />
           <span class="text-16px font-bold">{{ $t('page.transcripts.title') }}</span>
           <NSelect
             v-model:value="selectedSessionId"
             :placeholder="$t('page.transcripts.selectSession')"
             :options="sessions.map(s => ({ label: s.title, value: s.id }))"
-            style="width: 420px"
+            class="w-420px lt-sm:w-[calc(100vw-80px)]"
             size="small"
             @update:value="selectSession"
           />
         </NSpace>
-        <NSpace :size="12">
+        <NSpace :size="8" wrap>
           <NTag type="info" round size="small">排队 {{ taskSummary.queued }}</NTag>
           <NTag type="warning" round size="small">处理中 {{ taskSummary.processing }}</NTag>
           <NTag type="success" round size="small">完成 {{ taskSummary.completed }}</NTag>
@@ -242,20 +252,16 @@ watch(selectedSessionId, (newId) => {
           <NButton size="small" type="primary" secondary :loading="batchLoading" @click="queueAnchorBatch">
             各主播增量转写
           </NButton>
-          <NButton size="small" :disabled="!selectedSessionId" @click="runAiPipeline">
-            AI 分析并入库
-          </NButton>
+          <NButton size="small" :disabled="!selectedSessionId" @click="runAiPipeline">AI 分析并入库</NButton>
         </NSpace>
-      </NSpace>
+      </div>
     </NCard>
 
     <NGrid :x-gap="16" :y-gap="16" cols="1 m:3" responsive="screen">
       <!-- 分段列表 -->
-      <NGi span="2">
+      <NGi span="1 m:2">
         <NCard :bordered="false" class="card-wrapper" :title="$t('page.transcripts.title')">
-          <div v-if="!selectedSessionId" class="py-40px text-center text-gray-400">
-            {{ $t('page.transcripts.selectSession') }}
-          </div>
+          <NEmpty v-if="!selectedSessionId" class="py-40px" :description="$t('page.transcripts.selectSession')" />
           <NSpin v-else :show="loading">
             <NSpace vertical :size="12">
               <div
@@ -292,9 +298,7 @@ watch(selectedSessionId, (newId) => {
                 </span>
               </div>
 
-              <div v-if="!loading && segments.length === 0" class="text-center py-40px text-gray-400">
-                {{ $t('common.noData') }}
-              </div>
+              <NEmpty v-if="!loading && segments.length === 0" class="py-40px" :description="$t('common.noData')" />
             </NSpace>
           </NSpin>
         </NCard>
@@ -303,9 +307,7 @@ watch(selectedSessionId, (newId) => {
       <!-- 时间轴 -->
       <NGi span="1">
         <NCard :bordered="false" class="card-wrapper" :title="$t('page.transcripts.timeline')">
-          <div v-if="segments.length === 0" class="py-40px text-center text-gray-400">
-            {{ $t('common.noData') }}
-          </div>
+          <NEmpty v-if="segments.length === 0" class="py-40px" :description="$t('common.noData')" />
           <div v-for="item in segments.slice().reverse().slice(0, 30)" :key="item.id" class="mb-12px">
             <div class="flex items-start gap-8px">
               <div class="flex-shrink-0 w-45px text-12px text-gray-400 font-mono">
@@ -316,7 +318,7 @@ watch(selectedSessionId, (newId) => {
                 <div class="mt-2px">
                   <NProgress
                     type="line"
-                    :percentage="Math.min(item.segment_end - item.segment_start, 30) / 30 * 100"
+                    :percentage="(Math.min(item.segment_end - item.segment_start, 30) / 30) * 100"
                     :height="3"
                     :border-radius="2"
                     indicator-placement="inside"

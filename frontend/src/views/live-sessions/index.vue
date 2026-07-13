@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, h, onMounted } from 'vue';
+import { h, reactive, ref } from 'vue';
 import { NTag, NButton, NAvatar, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
-import { fetchLiveSessionData, fetchLiveSessions } from '@/service/api/douyin';
+import { fetchLiveSessionData, fetchLiveSessionPage } from '@/service/api/douyin';
+import { defaultTransform, useNaivePaginatedTable } from '@/hooks/common/table';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
 
 defineOptions({
@@ -11,29 +12,25 @@ defineOptions({
 
 const message = useMessage();
 
-const loading = ref(true);
-const sessions = ref<Api.Douyin.LiveSession[]>([]);
-
-async function loadSessions() {
-  loading.value = true;
-  try {
-    const res = await fetchLiveSessions();
-    if (res.data) {
-      sessions.value = res.data;
-    }
-  } catch {
-    message.error('加载直播场次失败');
-  } finally {
-    loading.value = false;
-  }
-}
+const searchForm = reactive({
+  anchorName: '',
+  liveStatus: null as string | null,
+  detailStatus: null as string | null
+});
+const searchParams = reactive({
+  current: 1,
+  size: 20,
+  anchor_name: undefined as string | undefined,
+  live_status: undefined as string | undefined,
+  detail_status: undefined as string | undefined
+});
 
 /* ---------- 状态标签映射 ---------- */
 const statusMap: Record<string, { type: 'success' | 'warning' | 'info' | 'default'; labelKey: string }> = {
   live: { type: 'success', labelKey: 'page.live-sessions.statusLive' },
   scheduled: { type: 'info', labelKey: 'page.live-sessions.statusScheduled' },
   ended: { type: 'default', labelKey: 'page.live-sessions.statusEnded' },
-  finished: { type: 'default', labelKey: 'page.live-sessions.statusEnded' },
+  finished: { type: 'default', labelKey: 'page.live-sessions.statusEnded' }
 };
 
 function fmtPercent(val: number): string {
@@ -109,20 +106,67 @@ const metricColumns = [
     title: '采集时间',
     key: 'metric_time',
     width: 120,
-    render(row: Api.Douyin.LiveMetric) { return fmtDateTime(row.metric_time); }
+    render(row: Api.Douyin.LiveMetric) {
+      return fmtDateTime(row.metric_time);
+    }
   },
-  { title: '在线', key: 'online_count', width: 70, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.online_count) },
-  { title: '曝光', key: 'exposure_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.exposure_count) },
+  {
+    title: '在线',
+    key: 'online_count',
+    width: 70,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.online_count)
+  },
+  {
+    title: '曝光',
+    key: 'exposure_count',
+    width: 80,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.exposure_count)
+  },
   { title: '进入', key: 'enter_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.enter_count) },
   { title: '点赞', key: 'like_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.like_count) },
-  { title: '评论', key: 'comment_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.comment_count) },
-  { title: '关注', key: 'follow_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.follow_count) },
+  {
+    title: '评论',
+    key: 'comment_count',
+    width: 80,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.comment_count)
+  },
+  {
+    title: '关注',
+    key: 'follow_count',
+    width: 80,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.follow_count)
+  },
   { title: '线索', key: 'clue_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.clue_count) },
-  { title: '风车', key: 'windmill_click_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.windmill_click_count) },
-  { title: '卡片', key: 'card_click_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.card_click_count) },
-  { title: '企微', key: 'wechat_add_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.wechat_add_count) },
-  { title: '表单数', key: 'form_submit_count', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.form_submit_count) },
-  { title: '表单人', key: 'form_submit_users', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.form_submit_users) },
+  {
+    title: '风车',
+    key: 'windmill_click_count',
+    width: 80,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.windmill_click_count)
+  },
+  {
+    title: '卡片',
+    key: 'card_click_count',
+    width: 80,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.card_click_count)
+  },
+  {
+    title: '企微',
+    key: 'wechat_add_count',
+    width: 80,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.wechat_add_count)
+  },
+  {
+    title: '表单数',
+    key: 'form_submit_count',
+    width: 80,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.form_submit_count)
+  },
+  {
+    title: '表单人',
+    key: 'form_submit_users',
+    width: 80,
+    render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.form_submit_users)
+  },
   { title: '消耗', key: 'cost_amount', width: 80, render: (row: Api.Douyin.LiveMetric) => fmtNumber(row.cost_amount) }
 ];
 
@@ -131,163 +175,253 @@ const commentColumns = [
     title: '时间',
     key: 'comment_time',
     width: 115,
-    render(row: Api.Douyin.LiveComment) { return fmtDateTime(row.comment_time); }
+    render(row: Api.Douyin.LiveComment) {
+      return fmtDateTime(row.comment_time);
+    }
   },
   { title: '用户', key: 'user_nickname', width: 105, ellipsis: { tooltip: true } },
   { title: '评论内容', key: 'comment_content', ellipsis: { tooltip: true } }
 ];
 
 /* ---------- 表格列 ---------- */
-const columns = [
-  {
-    title: () => $t('page.live-sessions.anchorName'),
-    key: 'anchor_name',
-    width: 220,
-    render(row: Api.Douyin.LiveSession) {
-      return h('div', { class: 'flex items-center gap-8px min-w-0' }, [
-        h(NAvatar, {
-          round: true,
-          size: 34,
-          src: row.anchor_avatar_url || undefined,
-          fallbackSrc: row.anchor_avatar_url || undefined
-        }),
-        h('div', { class: 'min-w-0' }, [
-          h('div', { class: 'truncate font-600' }, row.anchor_name || '-'),
-          h('div', { class: 'truncate text-12px text-gray-400' }, row.douyin_id || row.anchor_nickname || '-')
-        ])
-      ]);
+function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
+  return [
+    {
+      title: () => $t('page.live-sessions.anchorName'),
+      key: 'anchor_name',
+      width: 220,
+      render(row: Api.Douyin.LiveSession) {
+        return h('div', { class: 'flex items-center gap-8px min-w-0' }, [
+          h(NAvatar, {
+            round: true,
+            size: 34,
+            src: row.anchor_avatar_url || undefined,
+            fallbackSrc: row.anchor_avatar_url || undefined
+          }),
+          h('div', { class: 'min-w-0' }, [
+            h('div', { class: 'truncate font-600' }, row.anchor_name || '-'),
+            h('div', { class: 'truncate text-12px text-gray-400' }, row.douyin_id || row.anchor_nickname || '-')
+          ])
+        ]);
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.sessionTitle'),
+      key: 'session_title',
+      width: 140,
+      ellipsis: { tooltip: true },
+      render(row: Api.Douyin.LiveSession) {
+        return row.session_title || '-';
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.sessionStatus'),
+      key: 'live_status',
+      width: 80,
+      render(row: Api.Douyin.LiveSession) {
+        const info = statusMap[row.live_status] || {
+          type: 'default' as const,
+          labelKey: 'page.live-sessions.statusEnded' as const
+        };
+        return h(
+          NTag,
+          { type: info.type as any, size: 'small', round: true },
+          { default: () => $t(info.labelKey as any) }
+        );
+      }
+    },
+    {
+      title: '详情采集',
+      key: 'detail_collection_status',
+      width: 105,
+      render(row: Api.Douyin.LiveSession) {
+        return renderDetailStatus(row);
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.startTime'),
+      key: 'live_start_time',
+      width: 110,
+      render(row: Api.Douyin.LiveSession) {
+        return fmtDateTime(row.live_start_time);
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.endTime'),
+      key: 'live_end_time',
+      width: 110,
+      render(row: Api.Douyin.LiveSession) {
+        return fmtDateTime(row.live_end_time);
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.duration'),
+      key: 'live_duration_seconds',
+      width: 80,
+      render(row: Api.Douyin.LiveSession) {
+        return fmtSeconds(row.live_duration_seconds);
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.onlineUsers'),
+      key: 'peak_online_count',
+      width: 90,
+      render(row: Api.Douyin.LiveSession) {
+        return row.peak_online_count || 0;
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.newFollowers'),
+      key: 'new_followers',
+      width: 90,
+      render(row: Api.Douyin.LiveSession) {
+        return row.new_followers || 0;
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.commentsCount'),
+      key: 'comments_count',
+      width: 80,
+      render(row: Api.Douyin.LiveSession) {
+        return row.comments_count || 0;
+      }
+    },
+    {
+      title: () => $t('page.live-sessions.leads'),
+      key: 'leads_count',
+      width: 80,
+      render(row: Api.Douyin.LiveSession) {
+        return row.leads_count || 0;
+      }
+    },
+    {
+      title: () => $t('common.action'),
+      key: 'actions',
+      width: 80,
+      render(row: Api.Douyin.LiveSession) {
+        return h(
+          NButton,
+          { text: true, type: 'primary', size: 'tiny', onClick: () => openDetail(row) },
+          { default: () => $t('page.live-sessions.detail') }
+        );
+      }
     }
-  },
-  {
-    title: () => $t('page.live-sessions.sessionTitle'),
-    key: 'session_title',
-    width: 140,
-    ellipsis: { tooltip: true },
-    render(row: Api.Douyin.LiveSession) {
-      return row.session_title || '-';
-    }
-  },
-  {
-    title: () => $t('page.live-sessions.sessionStatus'),
-    key: 'live_status',
-    width: 80,
-    render(row: Api.Douyin.LiveSession) {
-      const info = statusMap[row.live_status] || { type: 'default' as const, labelKey: 'page.live-sessions.statusEnded' as const };
-      return h(NTag, { type: info.type as any, size: 'small', round: true }, { default: () => $t(info.labelKey as any) });
-    }
-  },
-  {
-    title: '详情采集',
-    key: 'detail_collection_status',
-    width: 105,
-    render(row: Api.Douyin.LiveSession) { return renderDetailStatus(row); }
-  },
-  {
-    title: () => $t('page.live-sessions.startTime'),
-    key: 'live_start_time',
-    width: 110,
-    render(row: Api.Douyin.LiveSession) { return fmtDateTime(row.live_start_time); }
-  },
-  {
-    title: () => $t('page.live-sessions.endTime'),
-    key: 'live_end_time',
-    width: 110,
-    render(row: Api.Douyin.LiveSession) { return fmtDateTime(row.live_end_time); }
-  },
-  {
-    title: () => $t('page.live-sessions.duration'),
-    key: 'live_duration_seconds',
-    width: 80,
-    render(row: Api.Douyin.LiveSession) { return fmtSeconds(row.live_duration_seconds); }
-  },
-  {
-    title: () => $t('page.live-sessions.onlineUsers'),
-    key: 'peak_online_count',
-    width: 90,
-    sortable: true,
-    render(row: Api.Douyin.LiveSession) { return row.peak_online_count || 0; }
-  },
-  {
-    title: () => $t('page.live-sessions.newFollowers'),
-    key: 'new_followers',
-    width: 90,
-    render(row: Api.Douyin.LiveSession) { return row.new_followers || 0; }
-  },
-  {
-    title: () => $t('page.live-sessions.commentsCount'),
-    key: 'comments_count',
-    width: 80,
-    render(row: Api.Douyin.LiveSession) { return row.comments_count || 0; }
-  },
-  {
-    title: () => $t('page.live-sessions.leads'),
-    key: 'leads_count',
-    width: 80,
-    sortable: true,
-    render(row: Api.Douyin.LiveSession) { return row.leads_count || 0; }
-  },
-  {
-    title: () => $t('common.action'),
-    key: 'actions',
-    width: 80,
-    render(row: Api.Douyin.LiveSession) {
-      return h(
-        NButton,
-        { text: true, type: 'primary', size: 'tiny', onClick: () => openDetail(row) },
-        { default: () => $t('page.live-sessions.detail') }
-      );
-    }
-  }
-];
+  ];
+}
 
-onMounted(() => {
-  loadSessions();
+const {
+  loading,
+  data: sessions,
+  columns,
+  columnChecks,
+  mobilePagination,
+  scrollX,
+  getData,
+  getDataByPage
+} = useNaivePaginatedTable({
+  api: () => fetchLiveSessionPage(searchParams),
+  transform: response => defaultTransform(response),
+  onPaginationParamsChange: ({ page, pageSize }) => {
+    searchParams.current = page || 1;
+    searchParams.size = pageSize || 20;
+  },
+  defaultPageSize: 20,
+  paginationProps: { pageSizes: [10, 20, 50, 100] },
+  columns: createColumns
 });
+
+async function handleSearch() {
+  searchParams.anchor_name = searchForm.anchorName.trim() || undefined;
+  searchParams.live_status = searchForm.liveStatus || undefined;
+  searchParams.detail_status = searchForm.detailStatus || undefined;
+  await getDataByPage(1);
+}
+
+async function handleReset() {
+  searchForm.anchorName = '';
+  searchForm.liveStatus = null;
+  searchForm.detailStatus = null;
+  searchParams.anchor_name = undefined;
+  searchParams.live_status = undefined;
+  searchParams.detail_status = undefined;
+  await getDataByPage(1);
+}
 </script>
 
 <template>
   <NSpace vertical :size="16">
     <NCard :bordered="false" class="card-wrapper">
       <template #header>
-        <NSpace justify="space-between" align="center">
-          <NSpace>
+        <div class="flex flex-wrap items-center justify-between gap-12px">
+          <NSpace align="center">
             <SvgIcon icon="mdi:video-vintage" class="text-22px" />
             <span class="text-16px font-bold">{{ $t('page.live-sessions.title') }}</span>
           </NSpace>
-          <NButton size="small" secondary @click="loadSessions">
-            <template #icon>
-              <SvgIcon icon="mdi:refresh" />
-            </template>
-            {{ $t('page.live-sessions.refresh') }}
-          </NButton>
-        </NSpace>
+          <NTag type="info" round :bordered="false">共 {{ mobilePagination.itemCount || 0 }} 场</NTag>
+        </div>
       </template>
 
-      <div v-if="loading" class="flex justify-center py-40px">
-        <NSpin :stroke-width="12" :size="24" />
-        <span class="ml-12px text-gray-400">{{ $t('page.live-sessions.loading') }}</span>
+      <div class="mb-16px flex flex-wrap items-center justify-between gap-12px">
+        <NSpace wrap>
+          <NInput
+            v-model:value="searchForm.anchorName"
+            clearable
+            placeholder="搜索主播昵称"
+            class="w-180px lt-sm:w-150px"
+            @keyup.enter="handleSearch"
+          />
+          <NSelect
+            v-model:value="searchForm.liveStatus"
+            clearable
+            placeholder="直播状态"
+            class="w-140px"
+            :options="[
+              { label: '直播中', value: 'live' },
+              { label: '已结束', value: 'finished' },
+              { label: '待直播', value: 'scheduled' }
+            ]"
+          />
+          <NSelect
+            v-model:value="searchForm.detailStatus"
+            clearable
+            placeholder="详情状态"
+            class="w-140px"
+            :options="[
+              { label: '详情完整', value: 'complete' },
+              { label: '待采集', value: 'pending' },
+              { label: '待重试', value: 'retryable' },
+              { label: '不可回放', value: 'unavailable' }
+            ]"
+          />
+          <NButton type="primary" @click="handleSearch">查询</NButton>
+          <NButton @click="handleReset">重置</NButton>
+        </NSpace>
+        <TableHeaderOperation
+          v-model:columns="columnChecks"
+          :loading="loading"
+          :show-crud-actions="false"
+          @refresh="getData"
+        />
       </div>
 
-      <div v-else>
-        <TableHeaderOperation
-          :loading="loading"
-          @refresh="loadSessions"
-        />
-        <NDataTable
-          :columns="columns"
-          :data="sessions"
-          :bordered="false"
-          :single-line="false"
-          size="small"
-          striped
-          :empty-text="$t('page.live-sessions.noData')"
-          class="mt-12px"
-        />
-      </div>
+      <NDataTable
+        :loading="loading"
+        :columns="columns"
+        :data="sessions"
+        :pagination="mobilePagination"
+        :scroll-x="scrollX"
+        :row-key="row => row.id"
+        :bordered="false"
+        :single-line="false"
+        :empty-text="$t('page.live-sessions.noData')"
+        remote
+        size="small"
+        striped
+      />
     </NCard>
 
     <!-- 详情抽屉 -->
-    <NDrawer v-model:show="showDrawer" :width="720" placement="right">
+    <NDrawer v-model:show="showDrawer" width="min(720px, 94vw)" placement="right">
       <NDrawerContent
         :title="`${$t('page.live-sessions.detailTitle')} - ${currentSession?.anchor_name || ''}`"
         closable
@@ -299,11 +433,7 @@ onMounted(() => {
               <NDescriptions :column="2" size="small" bordered>
                 <NDescriptionsItem :label="$t('page.live-sessions.anchorName')">
                   <div class="flex items-center gap-12px">
-                    <NAvatar
-                      round
-                      :size="48"
-                      :src="currentSession.anchor_avatar_url || undefined"
-                    />
+                    <NAvatar round :size="48" :src="currentSession.anchor_avatar_url || undefined" />
                     <div class="min-w-0">
                       <div class="font-600">{{ currentSession.anchor_name || '-' }}</div>
                       <div class="text-12px text-gray-500">昵称：{{ currentSession.anchor_nickname || '-' }}</div>
@@ -321,7 +451,16 @@ onMounted(() => {
                     size="small"
                     round
                   >
-                    {{ $t(((statusMap[currentSession.live_status] || { type: 'default', labelKey: 'page.live-sessions.statusEnded' }).labelKey) as any) }}
+                    {{
+                      $t(
+                        (
+                          statusMap[currentSession.live_status] || {
+                            type: 'default',
+                            labelKey: 'page.live-sessions.statusEnded'
+                          }
+                        ).labelKey as any
+                      )
+                    }}
                   </NTag>
                 </NDescriptionsItem>
                 <NDescriptionsItem label="详情采集状态">
@@ -339,7 +478,9 @@ onMounted(() => {
                     target="_blank"
                     rel="noopener noreferrer"
                     class="text-primary"
-                  >{{ $t('page.live-sessions.dashboardLink') }}</a>
+                  >
+                    {{ $t('page.live-sessions.dashboardLink') }}
+                  </a>
                   <span v-else>-</span>
                 </NDescriptionsItem>
               </NDescriptions>
@@ -426,7 +567,8 @@ onMounted(() => {
                   {{ currentSession.private_message_longterm_count || 0 }}
                 </NDescriptionsItem>
                 <NDescriptionsItem label="小风车点击">
-                  {{ currentSession.mini_windmill_click_count || 0 }} / {{ fmtPercent(currentSession.mini_windmill_click_rate) }}
+                  {{ currentSession.mini_windmill_click_count || 0 }} /
+                  {{ fmtPercent(currentSession.mini_windmill_click_rate) }}
                 </NDescriptionsItem>
                 <NDescriptionsItem label="卡片点击">
                   {{ currentSession.card_click_count || 0 }} / {{ fmtPercent(currentSession.card_click_rate) }}
@@ -477,7 +619,9 @@ onMounted(() => {
                     rel="noopener noreferrer"
                     class="block max-w-580px truncate text-primary"
                     :title="detailData.stream_url"
-                  >{{ detailData.stream_url }}</a>
+                  >
+                    {{ detailData.stream_url }}
+                  </a>
                   <span v-else>本场暂未采集到可用直播流</span>
                 </NDescriptionsItem>
                 <NDescriptionsItem label="已保存流源版本">

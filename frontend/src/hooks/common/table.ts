@@ -67,6 +67,8 @@ export function useNaiveTable<ResponseData, ApiData>(options: UseNaiveTableOptio
 type PaginationParams = Pick<PaginationProps, 'page' | 'pageSize'>;
 
 type UseNaivePaginatedTableOptions<ResponseData, ApiData> = UseNaiveTableOptions<ResponseData, ApiData, true> & {
+  /** default rows per page */
+  defaultPageSize?: number;
   paginationProps?: Omit<PaginationProps, 'page' | 'pageSize' | 'itemCount'>;
   /**
    * whether to show the total count of the table
@@ -89,7 +91,7 @@ export function useNaivePaginatedTable<ResponseData, ApiData>(
 
   const pagination = reactive({
     page: 1,
-    pageSize: 10,
+    pageSize: options.defaultPageSize ?? 10,
     itemCount: 0,
     showSizePicker: true,
     pageSizes: [10, 15, 20, 25, 30],
@@ -135,6 +137,12 @@ export function useNaivePaginatedTable<ResponseData, ApiData>(
     }
   });
 
+  const scrollX = computed(() => {
+    return result.columns.value.reduce((acc, column) => {
+      return acc + Number(column.width ?? column.minWidth ?? 120);
+    }, 0);
+  });
+
   async function getDataByPage(page: number = 1) {
     if (page !== pagination.page) {
       pagination.page = page;
@@ -168,7 +176,8 @@ export function useNaivePaginatedTable<ResponseData, ApiData>(
     ...result,
     getDataByPage,
     pagination,
-    mobilePagination
+    mobilePagination,
+    scrollX
   };
 }
 

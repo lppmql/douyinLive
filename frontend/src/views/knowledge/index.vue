@@ -39,21 +39,20 @@ async function sendQuestion() {
   question.value = '';
   chatting.value = true;
   try {
-    const res = await askKnowledge(q) as unknown as { answer: string };
-    messages.value.push({ role: 'ai', content: res.answer || '暂无回答' });
+    const res = await askKnowledge(q);
+    messages.value.push({ role: 'ai', content: res.data?.answer || '暂无回答' });
   } catch {
     messages.value.push({ role: 'ai', content: '请求失败，请稍后重试' });
   }
   chatting.value = false;
   setTimeout(() => chatEndRef.value?.scrollIntoView({ behavior: 'smooth' }), 100);
 }
-
 </script>
 
 <template>
   <NGrid :x-gap="16" :y-gap="16" cols="1 m:3" responsive="screen">
     <!-- 知识库列表 -->
-    <NGi span="2">
+    <NGi span="1 m:2">
       <NCard :bordered="false" class="card-wrapper">
         <template #header>
           <NSpace>
@@ -61,9 +60,7 @@ async function sendQuestion() {
             <span class="text-16px font-bold">{{ $t('page.knowledge.title') }}</span>
           </NSpace>
         </template>
-        <NAlert type="info" closable>
-          无数据时，可先在场次页面运行 AI 分析后保存到知识库
-        </NAlert>
+        <NAlert type="info" closable>无数据时，可先在场次页面运行 AI 分析后保存到知识库</NAlert>
         <NSpin :show="loading">
           <NEmpty v-if="items.length === 0" class="py-40px" description="知识库为空" />
           <NSpace v-else vertical :size="12">
@@ -83,7 +80,7 @@ async function sendQuestion() {
 
     <!-- AI 聊天窗 -->
     <NGi span="1">
-      <NCard :bordered="false" class="card-wrapper h-full" style="position: sticky; top: 16px">
+      <NCard :bordered="false" class="card-wrapper h-full m:sticky m:top-16px">
         <template #header>
           <NSpace>
             <SvgIcon icon="mdi:chat-question" class="text-18px" />
@@ -107,7 +104,13 @@ async function sendQuestion() {
             <NTag :type="msg.role === 'user' ? 'primary' : 'success'" size="small" class="mb-4px">
               {{ msg.role === 'user' ? '我' : 'AI' }}
             </NTag>
-            <div :class="msg.role === 'user' ? 'rounded-8px p-10px inline-block max-w-90% text-left leading-22px text-13px bg-primary-light text-white' : 'rounded-8px p-10px inline-block max-w-90% text-left leading-22px text-13px bg-gray-100 dark:bg-dark-300'">
+            <div
+              :class="
+                msg.role === 'user'
+                  ? 'rounded-8px p-10px inline-block max-w-90% text-left leading-22px text-13px bg-primary-light text-white'
+                  : 'rounded-8px p-10px inline-block max-w-90% text-left leading-22px text-13px bg-gray-100 dark:bg-dark-300'
+              "
+            >
               {{ msg.content }}
             </div>
           </div>

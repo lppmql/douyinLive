@@ -6,11 +6,30 @@ import { backendRequest } from '../request';
 
 const API_PREFIX = '/api/v1';
 
+/* ---------- 仪表盘 ---------- */
+
+export function fetchDashboardSummary() {
+  return backendRequest<Api.Douyin.DashboardSummary>({ url: `${API_PREFIX}/dashboard/summary` });
+}
+
 /* ---------- 直播场次 ---------- */
 
 /** 获取直播场次列表 */
 export function fetchLiveSessions() {
   return backendRequest<Api.Douyin.LiveSession[]>({ url: `${API_PREFIX}/live-sessions/`, params: { limit: 1000 } });
+}
+
+export function fetchLiveSessionPage(params: {
+  current: number;
+  size: number;
+  anchor_name?: string;
+  live_status?: string;
+  detail_status?: string;
+}) {
+  return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.LiveSession>>({
+    url: `${API_PREFIX}/live-sessions/page`,
+    params
+  });
 }
 
 /** 获取直播场次详情 */

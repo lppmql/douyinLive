@@ -740,7 +740,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-full flex-col gap-16px overflow-auto">
+  <div class="min-h-full flex flex-col gap-16px overflow-auto">
     <NSpin :show="loading">
       <NSpace vertical :size="16">
         <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">
@@ -1094,7 +1094,7 @@ onUnmounted(() => {
       </NSpace>
     </NSpin>
 
-    <NDrawer v-model:show="taskDrawerVisible" :width="560" placement="right">
+    <NDrawer v-model:show="taskDrawerVisible" width="min(560px, 94vw)" placement="right">
       <NDrawerContent title="采集任务队列" closable>
         <div class="mb-12px flex justify-end">
           <NTag :type="activeTasks.length ? 'warning' : 'success'" round size="small">

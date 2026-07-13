@@ -5,6 +5,19 @@
  */
 declare namespace Api {
   namespace Douyin {
+    interface DashboardSummary {
+      anchor_count: number;
+      session_count: number;
+      live_session_count: number;
+      detail_complete_count: number;
+      detail_completion_rate: number;
+      total_viewers: number;
+      total_comments: number;
+      total_leads: number;
+      total_ad_cost: number;
+      average_lead_cost: number;
+    }
+
     /* ---------- 直播间 ---------- */
     interface LiveRoom {
       id: number;

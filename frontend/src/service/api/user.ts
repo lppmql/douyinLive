@@ -29,12 +29,31 @@ export function fetchUserList(params: { current: number; size: number; username?
 }
 
 /** 新建用户 */
-export function fetchCreateUser(data: { username: string; password: string; nickname?: string; email?: string; phone?: string; roles?: string[]; status?: string }) {
+export function fetchCreateUser(data: {
+  username: string;
+  password: string;
+  nickname?: string;
+  email?: string;
+  phone?: string;
+  roles?: string[];
+  status?: string;
+}) {
   return backendRequest<UserRecord>({ url: '/api/v1/users/', method: 'post', data });
 }
 
 /** 编辑用户 */
-export function fetchUpdateUser(id: number, data: { username?: string; password?: string; nickname?: string; email?: string; phone?: string; roles?: string[]; status?: string }) {
+export function fetchUpdateUser(
+  id: number,
+  data: {
+    username?: string;
+    password?: string;
+    nickname?: string;
+    email?: string;
+    phone?: string;
+    roles?: string[];
+    status?: string;
+  }
+) {
   return backendRequest<UserRecord>({ url: `/api/v1/users/${id}`, method: 'put', data });
 }
 

@@ -9,9 +9,15 @@ interface Props {
   itemAlign?: NaiveUI.Align;
   disabledDelete?: boolean;
   loading?: boolean;
+  showCrudActions?: boolean;
 }
 
-defineProps<Props>();
+withDefaults(defineProps<Props>(), {
+  itemAlign: 'center',
+  disabledDelete: false,
+  loading: false,
+  showCrudActions: true
+});
 
 interface Emits {
   (e: 'add'): void;
@@ -41,7 +47,7 @@ function refresh() {
 <template>
   <NSpace :align="itemAlign" wrap justify="end" class="lt-sm:w-200px">
     <slot name="prefix"></slot>
-    <slot name="default">
+    <slot v-if="showCrudActions" name="default">
       <NButton size="small" ghost type="primary" @click="add">
         <template #icon>
           <icon-ic-round-plus class="text-icon" />

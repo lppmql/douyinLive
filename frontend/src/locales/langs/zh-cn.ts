@@ -400,7 +400,7 @@ const local: App.I18n.Schema = {
       stepValid: '有效留资',
       minutes: '分钟',
       hours: '时',
-      detail: '详情',
+      detail: '详情'
     },
     transcripts: {
       title: '话术分段列表',
@@ -459,7 +459,7 @@ const local: App.I18n.Schema = {
       chatDesc: '届时您可以在这里向 AI 提问，获取基于知识库的回答'
     }
   },
-    form: {
+  form: {
     required: '不能为空',
     userName: {
       required: '请输入用户名',

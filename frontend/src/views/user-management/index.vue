@@ -1,64 +1,41 @@
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue';
-import { NButton, NTag, NDataTable, NModal, NForm, NFormItem, NInput, NSelect, NSpace, useMessage, useDialog } from 'naive-ui';
+import { h, reactive, ref } from 'vue';
+import {
+  NButton,
+  NTag,
+  NDataTable,
+  NModal,
+  NForm,
+  NFormItem,
+  NInput,
+  NSelect,
+  NSpace,
+  useMessage,
+  useDialog
+} from 'naive-ui';
 import { fetchUserList, fetchCreateUser, fetchUpdateUser, fetchDeleteUser, type UserRecord } from '@/service/api/user';
+import { defaultTransform, useNaivePaginatedTable } from '@/hooks/common/table';
+import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
 
 defineOptions({ name: 'UserManagement' });
 
 const message = useMessage();
 const dialog = useDialog();
 
-/* ---------- 表格状态 ---------- */
-const loading = ref(false);
-const users = ref<UserRecord[]>([]);
-const pagination = reactive({
-  page: 1,
-  pageSize: 20,
-  itemCount: 0,
-  pageSizes: [10, 20, 50, 100],
-  showSizePicker: true,
-  prefix({ itemCount }: { itemCount: number | undefined }) {
-    return `共 ${itemCount ?? 0} 条`;
-  },
-  onChange(page: number) {
-    pagination.page = page;
-    loadUsers();
-  },
-  onUpdatePageSize(pageSize: number) {
-    pagination.pageSize = pageSize;
-    pagination.page = 1;
-    loadUsers();
-  }
-});
-
 /* ---------- 搜索 ---------- */
 const searchUsername = ref('');
-
-function loadUsers() {
-  loading.value = true;
-  fetchUserList({
-    current: pagination.page,
-    size: pagination.pageSize,
-    username: searchUsername.value || undefined
-  }).then(({ data, error }) => {
-    if (!error && data) {
-      users.value = data.records;
-      pagination.itemCount = data.total;
-      pagination.page = data.current;
-    }
-  }).catch(() => {
-    message.error('加载用户列表失败');
-  }).finally(() => {
-    loading.value = false;
-  });
-}
+const searchParams = reactive({ current: 1, size: 20, username: undefined as string | undefined });
 
 /* ---------- 表格列 ---------- */
 function renderRoles(roles: string[]) {
   if (!roles || roles.length === 0) return '-';
   return roles.map(role => {
     const type = role === 'R_SUPER' ? 'primary' : 'default';
-    return h(NTag, { type, size: 'small', round: true }, { default: () => role === 'R_SUPER' ? '超级管理员' : '普通用户' });
+    return h(
+      NTag,
+      { type, size: 'small', round: true },
+      { default: () => (role === 'R_SUPER' ? '超级管理员' : '普通用户') }
+    );
   });
 }
 
@@ -74,35 +51,124 @@ function fmtDateTime(val: string | null): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-const columns = [
-  { title: 'ID', key: 'id', width: 60 },
-  { title: '用户名', key: 'username', width: 100 },
-  { title: '昵称', key: 'nickname', width: 100, render(row: UserRecord) { return row.nickname || '-'; } },
-  { title: '邮箱', key: 'email', width: 160, ellipsis: { tooltip: true }, render(row: UserRecord) { return row.email || '-'; } },
-  { title: '角色', key: 'roles', width: 140, render(row: UserRecord) { return renderRoles(row.roles); } },
-  { title: '状态', key: 'status', width: 80, render(row: UserRecord) { return renderStatus(row.status); } },
-  { title: '最后登录', key: 'last_login_at', width: 150, render(row: UserRecord) { return fmtDateTime(row.last_login_at); } },
-  { title: '创建时间', key: 'created_at', width: 150, render(row: UserRecord) { return fmtDateTime(row.created_at); } },
-  {
-    title: '操作',
-    key: 'actions',
-    width: 140,
-    render(row: UserRecord) {
-      return h(NSpace, { size: 'small' }, {
-        default: () => [
-          h(NButton, { text: true, type: 'primary', size: 'tiny', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(NButton, {
-            text: true,
-            type: 'error',
-            size: 'tiny',
-            disabled: row.id === 1,
-            onClick: () => handleDelete(row)
-          }, { default: () => '删除' })
-        ]
-      });
+function createColumns(): NaiveUI.TableColumn<UserRecord>[] {
+  return [
+    { title: 'ID', key: 'id', width: 60 },
+    { title: '用户名', key: 'username', width: 100 },
+    {
+      title: '昵称',
+      key: 'nickname',
+      width: 100,
+      render(row: UserRecord) {
+        return row.nickname || '-';
+      }
+    },
+    {
+      title: '邮箱',
+      key: 'email',
+      width: 160,
+      ellipsis: { tooltip: true },
+      render(row: UserRecord) {
+        return row.email || '-';
+      }
+    },
+    {
+      title: '角色',
+      key: 'roles',
+      width: 140,
+      render(row: UserRecord) {
+        return renderRoles(row.roles);
+      }
+    },
+    {
+      title: '状态',
+      key: 'status',
+      width: 80,
+      render(row: UserRecord) {
+        return renderStatus(row.status);
+      }
+    },
+    {
+      title: '最后登录',
+      key: 'last_login_at',
+      width: 150,
+      render(row: UserRecord) {
+        return fmtDateTime(row.last_login_at);
+      }
+    },
+    {
+      title: '创建时间',
+      key: 'created_at',
+      width: 150,
+      render(row: UserRecord) {
+        return fmtDateTime(row.created_at);
+      }
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 140,
+      render(row: UserRecord) {
+        return h(
+          NSpace,
+          { size: 'small' },
+          {
+            default: () => [
+              h(
+                NButton,
+                { text: true, type: 'primary', size: 'tiny', onClick: () => openEdit(row) },
+                { default: () => '编辑' }
+              ),
+              h(
+                NButton,
+                {
+                  text: true,
+                  type: 'error',
+                  size: 'tiny',
+                  disabled: row.id === 1,
+                  onClick: () => handleDelete(row)
+                },
+                { default: () => '删除' }
+              )
+            ]
+          }
+        );
+      }
     }
-  }
-];
+  ];
+}
+
+const {
+  loading,
+  data: users,
+  columns,
+  columnChecks,
+  mobilePagination,
+  scrollX,
+  getData,
+  getDataByPage
+} = useNaivePaginatedTable({
+  api: () => fetchUserList(searchParams),
+  transform: response => defaultTransform(response),
+  onPaginationParamsChange: ({ page, pageSize }) => {
+    searchParams.current = page || 1;
+    searchParams.size = pageSize || 20;
+  },
+  defaultPageSize: 20,
+  paginationProps: { pageSizes: [10, 20, 50, 100] },
+  columns: createColumns
+});
+
+async function handleSearch() {
+  searchParams.username = searchUsername.value.trim() || undefined;
+  await getDataByPage(1);
+}
+
+async function handleResetSearch() {
+  searchUsername.value = '';
+  searchParams.username = undefined;
+  await getDataByPage(1);
+}
 
 /* ---------- 新增/编辑对话框 ---------- */
 const modalShow = ref(false);
@@ -172,14 +238,14 @@ async function handleSave() {
       if (!error) {
         message.success('更新成功');
         modalShow.value = false;
-        loadUsers();
+        getData();
       }
     } else {
       const { error } = await fetchCreateUser(formData);
       if (!error) {
         message.success('创建成功');
         modalShow.value = false;
-        loadUsers();
+        getData();
       }
     }
   } catch {
@@ -200,7 +266,7 @@ function handleDelete(row: UserRecord) {
         const { error } = await fetchDeleteUser(row.id);
         if (!error) {
           message.success('删除成功');
-          loadUsers();
+          getData();
         }
       } catch {
         message.error('删除失败');
@@ -208,41 +274,44 @@ function handleDelete(row: UserRecord) {
     }
   });
 }
-
-onMounted(() => {
-  loadUsers();
-});
 </script>
 
 <template>
-  <div class="h-full flex-col overflow-auto p-16px">
-    <!-- 顶部操作栏 -->
-    <div class="mb-16px flex items-center justify-between">
-      <NSpace align="center">
+  <NCard :bordered="false" class="card-wrapper h-full" title="用户管理">
+    <div class="mb-16px flex flex-wrap items-center justify-between gap-12px">
+      <NSpace align="center" wrap>
         <NInput
           v-model:value="searchUsername"
           placeholder="搜索用户名"
           clearable
-          style="width: 200px"
-          @keyup.enter="loadUsers"
+          class="w-200px lt-sm:w-160px"
+          @keyup.enter="handleSearch"
         />
-        <NButton type="primary" @click="loadUsers">搜索</NButton>
+        <NButton type="primary" @click="handleSearch">搜索</NButton>
+        <NButton @click="handleResetSearch">重置</NButton>
       </NSpace>
-      <NButton type="primary" @click="openCreate">新增用户</NButton>
+      <TableHeaderOperation v-model:columns="columnChecks" :loading="loading" @refresh="getData">
+        <template #default>
+          <NButton type="primary" size="small" @click="openCreate">
+            <template #icon><SvgIcon icon="mdi:account-plus-outline" /></template>
+            新增用户
+          </NButton>
+        </template>
+      </TableHeaderOperation>
     </div>
 
-    <!-- 表格 -->
     <NDataTable
       :loading="loading"
       :columns="columns"
       :data="users"
-      :pagination="pagination"
+      :pagination="mobilePagination"
       :row-key="(row: UserRecord) => row.id"
+      :scroll-x="scrollX"
+      remote
       size="small"
       striped
-      bordered
-      :scroll-x="1000"
-      class="flex-1"
+      :bordered="false"
+      class="min-h-0"
     />
 
     <!-- 新增/编辑对话框 -->
@@ -251,7 +320,7 @@ onMounted(() => {
       :title="modalTitle"
       :mask-closable="false"
       preset="card"
-      style="width: 500px"
+      class="w-520px max-w-[calc(100vw-32px)]"
     >
       <NForm label-placement="left" label-width="80px">
         <NFormItem label="用户名" required>
@@ -288,5 +357,5 @@ onMounted(() => {
         </NSpace>
       </template>
     </NModal>
-  </div>
+  </NCard>
 </template>

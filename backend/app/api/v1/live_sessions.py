@@ -31,6 +31,39 @@ def _attach_room_profile(session: LiveSession) -> dict:
     return data
 
 
+@router.get("/page")
+def page_sessions(
+    current: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    anchor_name: str | None = Query(None),
+    live_status: str | None = Query(None),
+    detail_status: str | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    """按 SoybeanAdmin 分页结构返回全部直播场次。"""
+    query = db.query(LiveSession)
+    if anchor_name:
+        query = query.filter(LiveSession.anchor_name.like(f"%{anchor_name.strip()}%"))
+    if live_status:
+        query = query.filter(LiveSession.live_status == live_status)
+    if detail_status:
+        query = query.filter(LiveSession.detail_collection_status == detail_status)
+
+    total = query.count()
+    sessions = (
+        query.order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .offset((current - 1) * size)
+        .limit(size)
+        .all()
+    )
+    return {
+        "records": [LiveSessionResponse(**_attach_room_profile(session)) for session in sessions],
+        "total": total,
+        "current": current,
+        "size": size,
+    }
+
+
 @router.get("/", response_model=list[LiveSessionResponse])
 def list_sessions(
     room_id: int | None = Query(None, description="按直播间筛选"),
@@ -53,7 +86,7 @@ def get_session_details(
     db: Session = Depends(get_db),
 ):
     """获取单场直播的大屏趋势、已采集评论和可用流地址。"""
-    session = db.query(LiveSession).get(session_id)
+    session = db.get(LiveSession, session_id)
     if not session:
         raise HTTPException(404, "直播场次不存在")
 
@@ -90,7 +123,7 @@ def get_session_details(
 @router.get("/{session_id}", response_model=LiveSessionResponse)
 def get_session(session_id: int, db: Session = Depends(get_db)):
     """获取单个直播场次"""
-    s = db.query(LiveSession).get(session_id)
+    s = db.get(LiveSession, session_id)
     if not s:
         raise HTTPException(404, "直播场次不存在")
     return LiveSessionResponse(**_attach_room_profile(s))
@@ -109,7 +142,7 @@ def create_session(data: LiveSessionCreate, db: Session = Depends(get_db)):
 @router.put("/{session_id}", response_model=LiveSessionResponse)
 def update_session(session_id: int, data: LiveSessionUpdate, db: Session = Depends(get_db)):
     """更新直播场次"""
-    s = db.query(LiveSession).get(session_id)
+    s = db.get(LiveSession, session_id)
     if not s:
         raise HTTPException(404, "直播场次不存在")
     for key, val in data.model_dump(exclude_unset=True).items():
@@ -122,7 +155,7 @@ def update_session(session_id: int, data: LiveSessionUpdate, db: Session = Depen
 @router.delete("/{session_id}")
 def delete_session(session_id: int, db: Session = Depends(get_db)):
     """删除直播场次"""
-    s = db.query(LiveSession).get(session_id)
+    s = db.get(LiveSession, session_id)
     if not s:
         raise HTTPException(404, "直播场次不存在")
     db.delete(s)

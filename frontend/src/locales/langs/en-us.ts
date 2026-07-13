@@ -375,7 +375,7 @@ const local: App.I18n.Schema = {
       stepValid: 'Valid Lead',
       minutes: 'min',
       hours: 'h',
-      detail: 'Detail',
+      detail: 'Detail'
     },
     transcripts: {
       title: 'Transcript Segments',

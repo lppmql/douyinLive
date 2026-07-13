@@ -28,7 +28,7 @@ def list_knowledge(
 
 @router.get("/{kb_id}", response_model=KnowledgeBaseResponse)
 def get_knowledge(kb_id: int, db: Session = Depends(get_db)):
-    k = db.query(KnowledgeBase).get(kb_id)
+    k = db.get(KnowledgeBase, kb_id)
     if not k:
         raise HTTPException(404, "知识条目不存在")
     return k
@@ -45,7 +45,7 @@ def create_knowledge(data: KnowledgeBaseCreate, db: Session = Depends(get_db)):
 
 @router.delete("/{kb_id}")
 def delete_knowledge(kb_id: int, db: Session = Depends(get_db)):
-    k = db.query(KnowledgeBase).get(kb_id)
+    k = db.get(KnowledgeBase, kb_id)
     if not k:
         raise HTTPException(404, "知识条目不存在")
     db.delete(k)

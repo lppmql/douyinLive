@@ -9,7 +9,10 @@ defineOptions({ name: 'Analysis' });
 const message = useMessage();
 
 /* ---------- 场次选择 ---------- */
-interface SessionOption { id: number; label: string }
+interface SessionOption {
+  id: number;
+  label: string;
+}
 
 const sessions = ref<SessionOption[]>([]);
 const selectedSession = ref<number | null>(null);
@@ -23,7 +26,9 @@ onMounted(async () => {
       label: s.session_title ? `#${s.id} ${s.session_title}` : `#${s.id}`
     }));
     if (sessions.value.length) selectedSession.value = sessions.value[0].id;
-  } catch { /* ignore */ }
+  } catch {
+    message.error('直播场次加载失败');
+  }
 });
 
 /* ---------- 评分结果 ---------- */
@@ -57,7 +62,9 @@ async function runOptimize() {
     const res = await optimizeSession(selectedSession.value);
     const data = (res as unknown as { data: { result: { suggestions?: string[]; summary?: string } } }).data;
     optimizeResult.value = data.result;
-  } catch { /* ignore */ }
+  } catch {
+    message.error('优化建议生成失败');
+  }
   loadingOptimize.value = false;
 }
 </script>
@@ -74,12 +81,8 @@ async function runOptimize() {
           style="width: 280px"
           clearable
         />
-        <NButton type="primary" :loading="loadingScore" @click="runScore">
-          话术评分
-        </NButton>
-        <NButton :loading="loadingOptimize" @click="runOptimize">
-          优化建议
-        </NButton>
+        <NButton type="primary" :loading="loadingScore" @click="runScore">话术评分</NButton>
+        <NButton :loading="loadingOptimize" @click="runOptimize">优化建议</NButton>
       </NSpace>
     </NCard>
 
@@ -88,29 +91,29 @@ async function runOptimize() {
       <NGi>
         <NCard :bordered="false" class="card-wrapper" size="small">
           <div class="text-13px text-gray-500 mb-8px">{{ $t('page.analysis.completeness') }}</div>
-          <div class="text-32px font-bold" style="color:#667eea">{{ scoreResult.completeness_score }}</div>
-          <NProgress type="line" :percentage="scoreResult.completeness_score * 10" :height="6" color="#667eea" />
+          <div class="text-32px font-bold text-primary">{{ scoreResult.completeness_score }}</div>
+          <NProgress type="line" :percentage="scoreResult.completeness_score * 10" :height="6" />
         </NCard>
       </NGi>
       <NGi>
         <NCard :bordered="false" class="card-wrapper" size="small">
           <div class="text-13px text-gray-500 mb-8px">{{ $t('page.analysis.interactivity') }}</div>
-          <div class="text-32px font-bold" style="color:#f093fb">{{ scoreResult.interactivity_score }}</div>
-          <NProgress type="line" :percentage="scoreResult.interactivity_score * 10" :height="6" color="#f093fb" />
+          <div class="text-32px font-bold text-success">{{ scoreResult.interactivity_score }}</div>
+          <NProgress type="line" status="success" :percentage="scoreResult.interactivity_score * 10" :height="6" />
         </NCard>
       </NGi>
       <NGi>
         <NCard :bordered="false" class="card-wrapper" size="small">
           <div class="text-13px text-gray-500 mb-8px">{{ $t('page.analysis.leadGuidance') }}</div>
-          <div class="text-32px font-bold" style="color:#4facfe">{{ scoreResult.lead_guidance_score }}</div>
-          <NProgress type="line" :percentage="scoreResult.lead_guidance_score * 10" :height="6" color="#4facfe" />
+          <div class="text-32px font-bold text-warning">{{ scoreResult.lead_guidance_score }}</div>
+          <NProgress type="line" status="warning" :percentage="scoreResult.lead_guidance_score * 10" :height="6" />
         </NCard>
       </NGi>
       <NGi>
         <NCard :bordered="false" class="card-wrapper" size="small">
           <div class="text-13px text-gray-500 mb-8px">{{ $t('page.analysis.overall') }}</div>
-          <div class="text-32px font-bold" style="color:#43e97b">{{ scoreResult.total_score }}</div>
-          <NProgress type="line" :percentage="scoreResult.total_score * 10" :height="6" color="#43e97b" />
+          <div class="text-32px font-bold text-error">{{ scoreResult.total_score }}</div>
+          <NProgress type="line" status="error" :percentage="scoreResult.total_score * 10" :height="6" />
         </NCard>
       </NGi>
     </NGrid>
