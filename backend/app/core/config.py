@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     ASR_MAX_QUEUED: int = 5
     ASR_TASK_TIMEOUT_SECONDS: int = 600
     ASR_NO_AUDIO_TIMEOUT_SECONDS: int = 30
+    ASR_ALLOW_MOCK: bool = False
 
     # Playwright / 采集
     PLAYWRIGHT_HEADLESS: bool = True

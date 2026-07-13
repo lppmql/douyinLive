@@ -23,6 +23,7 @@ from app.models.asr_tasks import AsrTask
 from app.models.transcript_segments import TranscriptSegment
 from app.models.transcript_full_texts import TranscriptFullText
 from app.models.stream_sources import StreamSource
+from app.models.live_sessions import LiveSession
 from app.services.asr.m3u8_pipe import M3u8Pipe
 from app.services.asr.funasr_client import FunasrClient
 from app.services.asr.websocket_manager import ws_manager
@@ -101,6 +102,23 @@ class AsrWorker:
                 task.started_at = datetime.utcnow()
                 db.commit()
 
+                session = db.get(LiveSession, task.session_id)
+                session_duration = session.live_duration_seconds if session else 0
+                task_timeout = max(
+                    settings.ASR_TASK_TIMEOUT_SECONDS,
+                    int((session_duration or 0) * 1.5) + 120,
+                )
+
+                # 失败任务可能已经写入部分片段。重试前清掉本场 ASR 产物，避免重复话术。
+                db.query(TranscriptSegment).filter(
+                    TranscriptSegment.session_id == task.session_id,
+                    TranscriptSegment.segment_type.in_(["asr_realtime", "asr_offline"]),
+                ).delete(synchronize_session=False)
+                db.query(TranscriptFullText).filter(
+                    TranscriptFullText.session_id == task.session_id
+                ).delete(synchronize_session=False)
+                db.commit()
+
                 # 获取流源
                 stream = None
                 if task.stream_id:
@@ -113,12 +131,17 @@ class AsrWorker:
                 pipe = M3u8Pipe(m3u8_url, headers)
                 client = FunasrClient()
 
-                if not await client.connect():
-                    logger.info(f"任务 {task_id}: 使用 Mock ASR 模式")
+                connected = await client.connect()
+                if not connected and not settings.ASR_ALLOW_MOCK:
+                    raise RuntimeError(
+                        f"真实 FunASR 服务不可用: {client.ws_url}；未写入模拟话术"
+                    )
+                if not connected:
+                    logger.warning("任务 %s: 开发环境显式使用 Mock ASR 模式", task_id)
 
                 segment_count = await asyncio.wait_for(
                     self._consume_transcription(db, task, client, pipe),
-                    timeout=settings.ASR_TASK_TIMEOUT_SECONDS,
+                    timeout=task_timeout,
                 )
                 if segment_count == 0:
                     raise RuntimeError("未识别到有效语音片段，直播流可能已过期或没有音频")
@@ -150,13 +173,14 @@ class AsrWorker:
                 logger.info(f"任务 {task_id} 完成: {segment_count} 个片段")
 
             except asyncio.TimeoutError:
-                message = f"转写超过 {settings.ASR_TASK_TIMEOUT_SECONDS} 秒，可能是直播流已过期"
+                message = f"转写超过 {task_timeout} 秒，可能是直播流已过期或识别服务繁忙"
                 logger.warning("任务 %s 超时: %s", task_id, message)
                 if db:
                     task = db.query(AsrTask).get(task_id)
                     if task:
                         task.status = "failed"
                         task.error_message = message
+                        task.completed_at = datetime.utcnow()
                         db.commit()
             except Exception as e:
                 logger.error(f"任务 {task_id} 失败: {e}")
@@ -165,6 +189,7 @@ class AsrWorker:
                     if task:
                         task.status = "failed"
                         task.error_message = str(e)[:200]
+                        task.completed_at = datetime.utcnow()
                         db.commit()
             finally:
                 if pipe:

@@ -45,7 +45,7 @@ services:
     working_dir: /workspace/FunASR/runtime
     entrypoint: ["/bin/bash", "-lc"]
     command:
-      - "bash run_server_2pass.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --hotword /workspace/models/hotwords.txt; sleep infinity"
+      - "bash run_server_2pass.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --lm-dir '' --hotword /workspace/models/hotwords.txt; while pgrep -f '/funasr-wss-server-2pass' >/dev/null; do sleep 5; done; exit 1"
     profiles:
       - funasr
 
@@ -64,4 +64,3 @@ services:
         condition: service_started
     profiles:
       - dataease
-

@@ -76,7 +76,7 @@ class M3u8Pipe:
             while True:
                 try:
                     frame = await asyncio.wait_for(
-                        self._process.stdout.read(PCM_FRAME_SIZE),
+                        self._process.stdout.readexactly(PCM_FRAME_SIZE),
                         timeout=settings.ASR_NO_AUDIO_TIMEOUT_SECONDS,
                     )
                 except asyncio.TimeoutError:
@@ -85,19 +85,23 @@ class M3u8Pipe:
                         settings.ASR_NO_AUDIO_TIMEOUT_SECONDS,
                     )
                     break
-                if not frame:
-                    break
-                # 不足一帧的丢弃
-                if len(frame) < PCM_FRAME_SIZE:
+                except asyncio.IncompleteReadError as exc:
+                    # FFmpeg 正常结束时可能剩下不足 60ms 的尾帧，尾帧不送 ASR。
+                    if exc.partial:
+                        logger.debug("忽略不足一帧的 PCM 尾数据: %s 字节", len(exc.partial))
                     break
                 yield frame
 
+            # 必须先等/停掉 ffmpeg，再读取 stderr。直播 m3u8 进程通常不会主动退出，
+            # 反过来读取会一直等待 EOF，导致“无音频超时”形同虚设。
+            await self._cleanup()
             stderr = await self._process.stderr.read()
             if stderr:
                 logger.warning(f"ffmpeg stderr: {stderr.decode(errors='ignore')[:200]}")
 
         except asyncio.CancelledError:
             logger.info("ffmpeg pipe 被取消")
+            raise
         finally:
             await self._cleanup()
 
@@ -105,8 +109,13 @@ class M3u8Pipe:
         """清理 ffmpeg 进程"""
         if self._process and self._process.returncode is None:
             try:
-                self._process.kill()
-                await self._process.wait()
+                self._process.terminate()
+                try:
+                    await asyncio.wait_for(self._process.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    logger.warning("ffmpeg 未在 3 秒内退出，执行强制终止")
+                    self._process.kill()
+                    await self._process.wait()
             except ProcessLookupError:
                 pass
         logger.info("ffmpeg pipe 已关闭")
