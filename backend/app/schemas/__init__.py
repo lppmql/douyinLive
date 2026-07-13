@@ -159,6 +159,9 @@ class LiveAudienceProfileResponse(BaseModel):
     ratio: float = 0
     count: int = 0
 
+    class Config:
+        from_attributes = True
+
 
 class LiveSessionDetailResponse(BaseModel):
     """直播场次详情页需要的完整采集结果。"""

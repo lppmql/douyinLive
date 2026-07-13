@@ -133,6 +133,27 @@ async def collect_all(
                     "is_live": False,
                     "error": f"采集超过 {settings.ROOM_COLLECTION_TIMEOUT_SECONDS} 秒",
                 }
+
+            # 登录检查和正式打开页面之间仍可能发生浏览器句柄失效，自动恢复一次即可。
+            if _is_context_closed_message(result.get("error")):
+                logger.warning("采集上下文已关闭，正在从已保存登录态恢复并重试: room_id=%s", room.room_id_str)
+                browser_manager.invalidate_logged_in_context(context)
+                context, recovered, recovery_message = await browser_manager.get_logged_in_context()
+                if recovered and context:
+                    try:
+                        result = await asyncio.wait_for(
+                            _collect_room_data(db, context, room, task_id=task_id),
+                            timeout=settings.ROOM_COLLECTION_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        result = {
+                            "room_id": room.room_id_str or str(room.id),
+                            "anchor_name": room.anchor_name or "",
+                            "is_live": False,
+                            "error": f"恢复后采集仍超过 {settings.ROOM_COLLECTION_TIMEOUT_SECONDS} 秒",
+                        }
+                else:
+                    result["error"] = recovery_message or "浏览器上下文恢复失败，请重新扫码登录"
             results.append(result)
             report(
                 "room_collection",
@@ -221,6 +242,16 @@ async def collect_all(
     finally:
         # 注意：不关闭 context！它被 browser_manager 持久化了
         pass
+
+
+def _is_context_closed_message(value: Any) -> bool:
+    """识别采集结果中的 Playwright 浏览器句柄关闭错误。"""
+    text = str(value or "").lower()
+    return any(marker in text for marker in (
+        "target page, context or browser has been closed",
+        "browsercontext.new_page",
+        "browser.new_context",
+    ))
 
 
 def _prune_unmapped_sessions(db: Session, room: LiveRoom) -> int:

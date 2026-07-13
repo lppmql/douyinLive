@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from app.services.collector.browser import BrowserManager
 from app.services.collector.monitor import CluerichLiveDetector, LiveStatusResult
+from app.services.collector.manual_collect import _is_context_closed_message
 
 
 class FakePage:
@@ -14,6 +15,14 @@ class FakePage:
 
     async def close(self):
         self.closed = True
+
+
+class ContextClosedMessageTest(unittest.TestCase):
+    def test_recognizes_context_closed_collection_result(self):
+        self.assertTrue(_is_context_closed_message(
+            "BrowserContext.new_page: Target page, context or browser has been closed"
+        ))
+        self.assertFalse(_is_context_closed_message("登录已过期，请重新扫码"))
 
 
 class ClosedContext:
