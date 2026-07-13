@@ -167,21 +167,21 @@ function formatTime(seconds: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-function getStatusType(status: string): 'success' | 'warning' | 'error' | 'info' {
-  if (status === 'completed') return 'success';
-  if (status === 'processing') return 'warning';
-  if (status === 'failed') return 'error';
+function getStatusType(taskStatus: string): 'success' | 'warning' | 'error' | 'info' {
+  if (taskStatus === 'completed') return 'success';
+  if (taskStatus === 'processing') return 'warning';
+  if (taskStatus === 'failed') return 'error';
   return 'info';
 }
 
-function getStatusLabel(status: string): string {
+function getStatusLabel(taskStatus: string): string {
   const map: Record<string, string> = {
     pending: $t('page.transcripts.statusPending'),
     processing: $t('page.transcripts.statusProcessing'),
     completed: $t('page.transcripts.statusCompleted'),
     failed: $t('page.transcripts.statusFailed'),
   };
-  return map[status] || status;
+  return map[taskStatus] || taskStatus;
 }
 
 /* ---------- 生命周期 ---------- */
@@ -236,13 +236,13 @@ watch(selectedSessionId, (newId) => {
             </template>
             {{ $t('page.transcripts.copyFullText') }}
           </NButton>
-          <NButton size="small" type="primary" @click="startTranscription" :disabled="!selectedSessionId">
+          <NButton size="small" type="primary" :disabled="!selectedSessionId" @click="startTranscription">
             开始转写
           </NButton>
           <NButton size="small" type="primary" secondary :loading="batchLoading" @click="queueAnchorBatch">
             各主播增量转写
           </NButton>
-          <NButton size="small" @click="runAiPipeline" :disabled="!selectedSessionId">
+          <NButton size="small" :disabled="!selectedSessionId" @click="runAiPipeline">
             AI 分析并入库
           </NButton>
         </NSpace>

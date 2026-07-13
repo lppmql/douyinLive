@@ -141,8 +141,11 @@ async function runOptimize() {
     <NCard v-if="optimizeResult" :bordered="false" class="card-wrapper">
       <template #header><span class="text-15px font-bold">优化建议</span></template>
       <NSpace vertical :size="12">
-        <div v-for="(item, index) in optimizeResult.suggestions" :key="index"
-          class="flex items-start gap-12px rounded-8px bg-gray-50 dark:bg-dark-300 p-12px">
+        <div
+          v-for="(item, index) in optimizeResult.suggestions"
+          :key="index"
+          class="flex items-start gap-12px rounded-8px bg-gray-50 dark:bg-dark-300 p-12px"
+        >
           <NBadge :value="index + 1" />
           <span class="text-14px leading-22px">{{ item }}</span>
         </div>

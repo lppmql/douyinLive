@@ -536,11 +536,14 @@ onUnmounted(() => {
         </div>
 
         <!-- 状态提示 -->
-        <p class="text-14px mb-8px text-center" :class="{
-          'text-green-500': loginStatus === 'success',
-          'text-red-500': loginStatus === 'failed' || loginStatus === 'timeout',
-          'text-gray-500': loginStatus === 'pending' || loginStatus === 'scanning'
-        }">
+        <p
+          class="text-14px mb-8px text-center"
+          :class="{
+            'text-green-500': loginStatus === 'success',
+            'text-red-500': loginStatus === 'failed' || loginStatus === 'timeout',
+            'text-gray-500': loginStatus === 'pending' || loginStatus === 'scanning'
+          }"
+        >
           {{ loginMessage || $t('page.collector.scanQrCode') }}
         </p>
 

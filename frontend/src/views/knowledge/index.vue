@@ -1,30 +1,30 @@
 <script setup lang="ts">
-import { ref, h, onMounted } from 'vue';
+import { ref, onMounted } from 'vue';
 import { NTag, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
-import { fetchPrompts, askKnowledge, saveToKnowledgeBase } from '@/service/api/douyin';
+import { askKnowledge, fetchKnowledgeItems } from '@/service/api/douyin';
 
 defineOptions({ name: 'Knowledge' });
 
 const message = useMessage();
 
 /* ---------- 知识库列表 ---------- */
-interface KbItem {
-  id: number;
-  title: string;
-  category: string;
-  typeColor: 'success' | 'warning' | 'info';
-  summary: string;
-  source: string;
-  time: string;
-}
-
-const items = ref<KbItem[]>([]);
+const items = ref<Api.Douyin.KnowledgeItem[]>([]);
 const loading = ref(false);
 
-onMounted(async () => {
-  // try { const res = await fetchPrompts(); console.log(res); } catch {}
-});
+async function loadItems() {
+  loading.value = true;
+  try {
+    const res = await fetchKnowledgeItems();
+    items.value = res.data || [];
+  } catch {
+    message.error('知识库加载失败');
+  } finally {
+    loading.value = false;
+  }
+}
+
+onMounted(loadItems);
 
 /* ---------- 聊天 ---------- */
 const question = ref('');
@@ -48,13 +48,6 @@ async function sendQuestion() {
   setTimeout(() => chatEndRef.value?.scrollIntoView({ behavior: 'smooth' }), 100);
 }
 
-/* ---------- 保存到知识库 ---------- */
-async function handleSave() {
-  try {
-    const res = await saveToKnowledgeBase(0) as unknown as { analysis_saved: number; transcript_saved: number };
-    message.success(`已保存 ${res.analysis_saved + res.transcript_saved} 条`);
-  } catch { message.error('保存失败'); }
-}
 </script>
 
 <template>
@@ -71,7 +64,20 @@ async function handleSave() {
         <NAlert type="info" closable>
           无数据时，可先在场次页面运行 AI 分析后保存到知识库
         </NAlert>
-        <NEmpty v-if="items.length === 0" class="py-40px" description="知识库为空" />
+        <NSpin :show="loading">
+          <NEmpty v-if="items.length === 0" class="py-40px" description="知识库为空" />
+          <NSpace v-else vertical :size="12">
+            <NCard v-for="item in items" :key="item.id" size="small">
+              <NSpace justify="space-between" align="center">
+                <strong>{{ item.title || `知识条目 #${item.id}` }}</strong>
+                <NTag size="small" type="info">{{ item.category || '未分类' }}</NTag>
+              </NSpace>
+              <p class="mt-8px whitespace-pre-wrap text-13px leading-22px text-gray-600">
+                {{ item.content || '暂无内容' }}
+              </p>
+            </NCard>
+          </NSpace>
+        </NSpin>
       </NCard>
     </NGi>
 
@@ -86,14 +92,18 @@ async function handleSave() {
         </template>
 
         <!-- 消息列表 -->
-        <div class="h-400px overflow-y-auto mb-12px px-4px" ref="chatEndRef">
+        <div ref="chatEndRef" class="h-400px overflow-y-auto mb-12px px-4px">
           <div v-if="messages.length === 0" class="flex flex-col items-center justify-center py-40px text-center">
             <SvgIcon icon="mdi:robot-outline" class="text-64px text-gray-300 dark:text-gray-600 mb-16px" />
             <p class="text-14px text-gray-500 mb-8px">{{ $t('page.knowledge.chatPlaceholder') }}</p>
             <p class="text-12px text-gray-400">{{ $t('page.knowledge.chatDesc') }}</p>
           </div>
-          <div v-for="(msg, i) in messages" :key="i"
-            :class="['mb-12px', msg.role === 'user' ? 'text-right' : 'text-left']">
+          <div
+            v-for="(msg, i) in messages"
+            :key="i"
+            class="mb-12px"
+            :class="msg.role === 'user' ? 'text-right' : 'text-left'"
+          >
             <NTag :type="msg.role === 'user' ? 'primary' : 'success'" size="small" class="mb-4px">
               {{ msg.role === 'user' ? '我' : 'AI' }}
             </NTag>
@@ -105,8 +115,13 @@ async function handleSave() {
 
         <!-- 输入框 -->
         <NSpace>
-          <NInput v-model:value="question" type="text" placeholder="输入问题..." :disabled="chatting"
-            @keyup.enter="sendQuestion" />
+          <NInput
+            v-model:value="question"
+            type="text"
+            placeholder="输入问题..."
+            :disabled="chatting"
+            @keyup.enter="sendQuestion"
+          />
           <NButton type="primary" :loading="chatting" @click="sendQuestion">发送</NButton>
         </NSpace>
       </NCard>

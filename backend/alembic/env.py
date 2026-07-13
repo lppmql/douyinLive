@@ -21,6 +21,10 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 from app.models import Base
+
+# Alembic 只有在模型模块被导入后，才能看到对应的表。业务接口可能会延迟
+# 导入这些模型，因此这里显式加载，避免 autogenerate 误判现有表需要删除。
+from app.models import de_tables, high_intent_users, prompt_templates  # noqa: F401, E402
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,

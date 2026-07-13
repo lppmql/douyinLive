@@ -231,11 +231,11 @@ declare namespace Api {
     /* ---------- 知识库 ---------- */
     interface KnowledgeItem {
       id: number;
-      title: string;
-      category: string;
-      summary: string;
-      source: string;
-      time: string;
+      title: string | null;
+      category: string | null;
+      content: string | null;
+      source_type: string | null;
+      created_at: string;
     }
 
     /* ---------- 一键采集 ---------- */

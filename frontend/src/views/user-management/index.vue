@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { h, onMounted, reactive, ref } from 'vue';
 import { NButton, NTag, NDataTable, NModal, NForm, NFormItem, NInput, NSelect, NSpace, useMessage, useDialog } from 'naive-ui';
-import { $t } from '@/locales';
-import { fetchUserList, fetchCreateUser, fetchUpdateUser, fetchDeleteUser, type UserRecord, type UserPageResult } from '@/service/api/user';
+import { fetchUserList, fetchCreateUser, fetchUpdateUser, fetchDeleteUser, type UserRecord } from '@/service/api/user';
 
 defineOptions({ name: 'UserManagement' });
 

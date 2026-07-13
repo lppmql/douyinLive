@@ -21,7 +21,7 @@ class LiveSession(Base, TimestampMixin):
     anchor_avatar_url = Column(String(500), nullable=True, comment="本场主播头像")
     douyin_id = Column(String(100), nullable=True, comment="本场主播抖音号")
     douyin_uid = Column(String(100), nullable=True, comment="本场主播抖音UID")
-    detail_collection_status = Column(String(20), default="pending", comment="详情采集状态: pending/complete/retryable/unavailable")
+    detail_collection_status = Column(String(20), default="pending", comment="详情采集状态")
     detail_collection_error = Column(String(500), nullable=True, comment="详情采集最近错误")
 
     # 时间
