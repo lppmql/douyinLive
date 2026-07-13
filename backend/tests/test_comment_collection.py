@@ -1,11 +1,23 @@
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.services.collector.manual_collect import _comment_identity, _fetch_all_session_comments
+from app.services.collector.manual_collect import (
+    _comment_belongs_to_session,
+    _comment_identity,
+    _fetch_all_session_comments,
+)
 
 
 class CommentCollectionTest(unittest.IsolatedAsyncioTestCase):
+    def test_rejects_comment_outside_live_session(self):
+        start = datetime(2026, 7, 13, 18, 0)
+        session = SimpleNamespace(live_start_time=start, live_end_time=start + timedelta(hours=1))
+        self.assertTrue(_comment_belongs_to_session(start + timedelta(minutes=30), session))
+        self.assertFalse(_comment_belongs_to_session(start - timedelta(hours=1), session))
+        self.assertFalse(_comment_belongs_to_session(start + timedelta(hours=2), session))
+
     def test_identity_keeps_same_content_from_different_users(self):
         when = datetime(2026, 7, 13, 20, 0, 0)
         first = _comment_identity("用户甲", "多少钱", when, "sec-a")

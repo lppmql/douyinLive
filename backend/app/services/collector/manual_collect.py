@@ -14,7 +14,7 @@ from typing import Any, Callable, Optional
 import re
 from urllib.parse import urlencode, urlparse, parse_qs
 from urllib.request import Request, urlopen
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from playwright.async_api import BrowserContext
 
@@ -94,6 +94,17 @@ async def collect_all(
             "message": "没有配置房间，请先在直播间管理添加 room_id",
             "results": [],
         }
+
+    repaired_sessions, removed_comments = _repair_session_comment_integrity(db)
+    if repaired_sessions or removed_comments:
+        report(
+            "data_repair",
+            9,
+            repaired_sessions,
+            repaired_sessions,
+            f"已合并 {repaired_sessions} 条重复场次、清理 {removed_comments} 条串场评论",
+            {"merged_session_count": repaired_sessions, "removed_comment_count": removed_comments},
+        )
 
     # 3. 获取持久化登录上下文（优先复用，自动验证 Cookie）
     report("login_check", 10, 0, len(rooms), "正在验证 Cookie 与浏览器指纹")
@@ -352,7 +363,7 @@ async def _collect_room_data(
 
         # 3. 创建或更新场次记录
         now = datetime.utcnow()
-        session = _get_or_create_session(db, room, session_title, is_live, now)
+        session = _get_or_create_session(db, room, room_id, session_title, is_live, now)
         _apply_room_profile(room, room_profile, anchor_name)
         if is_live and session.live_status != "live":
             session.live_status = "live"
@@ -1894,31 +1905,29 @@ async def _scrape_stream_url(context: BrowserContext, room_id: str) -> Optional[
 
 
 def _get_or_create_session(
-    db: Session, room: LiveRoom, session_title: str, is_live: bool, now: datetime
+    db: Session,
+    room: LiveRoom,
+    platform_room_id: str,
+    session_title: str,
+    is_live: bool,
+    now: datetime,
 ) -> LiveSession:
-    """根据页面数据获取或创建场次"""
-    # 找最新的活跃场次
+    """严格按平台 roomId 获取场次，禁止把入口评论写入数据库最新场次。"""
+    dashboard_url = f"{LIVE_SCREEN_URL}?room_id={platform_room_id}&fullscreen=0"
     session = (
         db.query(LiveSession)
         .filter(
             LiveSession.room_id == room.id,
-            LiveSession.live_status.in_(["live", "scheduled"]),
+            LiveSession.dashboard_url == dashboard_url,
         )
-        .order_by(LiveSession.live_start_time.desc())
+        .order_by(LiveSession.id.asc())
         .first()
     )
 
     if not session:
-        session = (
-            db.query(LiveSession)
-            .filter(LiveSession.room_id == room.id)
-            .order_by(LiveSession.live_start_time.desc())
-            .first()
-        )
-
-    if not session:
         session = LiveSession(
             room_id=room.id,
+            dashboard_url=dashboard_url,
             session_title=session_title,
             live_status="live" if is_live else "scheduled",
             live_start_time=now if is_live else None,
@@ -1987,6 +1996,91 @@ def _save_metrics(db: Session, session_id: int, metrics: list) -> int:
     if count:
         db.commit()
     return count
+
+
+def _repair_session_comment_integrity(db: Session) -> tuple[int, int]:
+    """合并相同平台 roomId 的重复场次，并清理直播时间区间外的串场评论。"""
+    duplicate_urls = [
+        row[0]
+        for row in (
+            db.query(LiveSession.dashboard_url)
+            .filter(LiveSession.dashboard_url.isnot(None))
+            .group_by(LiveSession.dashboard_url)
+            .having(func.count(LiveSession.id) > 1)
+            .all()
+        )
+    ]
+    merged_count = 0
+    generic_child_tables = (
+        "high_intent_users", "analysis_reports", "leads", "asr_tasks",
+        "transcript_full_texts", "transcript_segments", "knowledge_base", "scraper_tasks",
+    )
+
+    for dashboard_url in duplicate_urls:
+        sessions = db.query(LiveSession).filter(LiveSession.dashboard_url == dashboard_url).all()
+
+        def score(item: LiveSession) -> tuple[int, int]:
+            asset_count = sum((
+                db.query(Comment).filter(Comment.session_id == item.id).count(),
+                db.query(LiveMetric).filter(LiveMetric.session_id == item.id).count(),
+                db.query(LiveAudienceProfile).filter(LiveAudienceProfile.session_id == item.id).count(),
+                db.query(StreamSource).filter(StreamSource.session_id == item.id).count(),
+            ))
+            summary_count = sum(bool(getattr(item, field, None)) for field in (
+                "total_viewers", "peak_online_count", "comments_count", "interaction_count", "stream_url",
+            ))
+            return asset_count + summary_count * 10, item.id
+
+        canonical = max(sessions, key=score)
+        duplicate_ids = [item.id for item in sessions if item.id != canonical.id]
+        if not duplicate_ids:
+            continue
+
+        # 先迁移全部强外键子记录，再去重，最后才能安全删除父场次。
+        for model in (Comment, LiveMetric, LiveAudienceProfile, StreamSource):
+            db.query(model).filter(model.session_id.in_(duplicate_ids)).update(
+                {model.session_id: canonical.id}, synchronize_session=False
+            )
+        for table_name in generic_child_tables:
+            db.execute(
+                text(f"UPDATE `{table_name}` SET session_id = :canonical WHERE session_id IN ({','.join(map(str, duplicate_ids))})"),
+                {"canonical": canonical.id},
+            )
+        db.flush()
+
+        seen_comments = set()
+        for row in db.query(Comment).filter(Comment.session_id == canonical.id).order_by(Comment.id):
+            identity = _comment_identity(row.user_nickname, row.comment_content or "", row.comment_time, row.user_sec_uid)
+            if identity in seen_comments:
+                db.delete(row)
+            else:
+                seen_comments.add(identity)
+        for model, identity_getter in (
+            (LiveMetric, lambda row: row.metric_time),
+            (LiveAudienceProfile, lambda row: (row.dimension_type, row.dimension_name)),
+        ):
+            seen = set()
+            for row in db.query(model).filter(model.session_id == canonical.id).order_by(model.id):
+                identity = identity_getter(row)
+                if identity in seen:
+                    db.delete(row)
+                else:
+                    seen.add(identity)
+        db.flush()
+        db.query(LiveSession).filter(LiveSession.id.in_(duplicate_ids)).delete(synchronize_session=False)
+        merged_count += len(duplicate_ids)
+        db.flush()
+        canonical.comments_count = db.query(Comment).filter(Comment.session_id == canonical.id).count()
+
+    db.flush()
+    invalid_comments = []
+    for comment, session in db.query(Comment, LiveSession).join(LiveSession, LiveSession.id == Comment.session_id):
+        if not _comment_belongs_to_session(comment.comment_time, session):
+            invalid_comments.append(comment)
+    for comment in invalid_comments:
+        db.delete(comment)
+    db.commit()
+    return merged_count, len(invalid_comments)
 
 
 def _save_trend_metrics(db: Session, session_id: int, trend_rows: list[dict]) -> int:
@@ -2066,6 +2160,7 @@ def _save_stream_source(db: Session, session_id: int, stream_url: str) -> None:
 
 def _save_comments(db: Session, session_id: int, comments: list) -> int:
     """保存评论数据"""
+    session = db.get(LiveSession, session_id)
     existing_pairs = {
         _comment_identity(row.user_nickname, row.comment_content or "", row.comment_time, row.user_sec_uid)
         for row in db.query(Comment).filter(Comment.session_id == session_id).all()
@@ -2076,6 +2171,15 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
         content = c.get("comment_content", "").strip()
         comment_time = c.get("comment_time")
         if not content:
+            continue
+        if session and not _comment_belongs_to_session(comment_time, session):
+            logger.warning(
+                "拒绝串场评论: session_id=%s comment_time=%s live_range=%s~%s",
+                session_id,
+                comment_time,
+                session.live_start_time,
+                session.live_end_time,
+            )
             continue
 
         nickname = c.get("user_nickname", "未知")
@@ -2103,6 +2207,7 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
 def _replace_session_comments(db: Session, session_id: int, comments: list) -> int:
     """用平台完整评论快照替换旧的 DOM 残缺结果，并继承人工分析字段。"""
     old_rows = db.query(Comment).filter(Comment.session_id == session_id).all()
+    session = db.get(LiveSession, session_id)
     annotations = {}
     for row in old_rows:
         key = ((row.user_nickname or "").strip(), (row.comment_content or "").strip())
@@ -2114,6 +2219,8 @@ def _replace_session_comments(db: Session, session_id: int, comments: list) -> i
         nickname = str(item.get("user_nickname") or "未知").strip()
         content = str(item.get("comment_content") or "").strip()
         comment_time = item.get("comment_time")
+        if session and not _comment_belongs_to_session(comment_time, session):
+            continue
         identity = _comment_identity(nickname, content, comment_time, item.get("user_sec_uid"))
         if not content or identity in seen:
             continue
@@ -2132,6 +2239,18 @@ def _replace_session_comments(db: Session, session_id: int, comments: list) -> i
         ))
     db.commit()
     return len(seen)
+
+
+def _comment_belongs_to_session(comment_time: Optional[datetime], session: LiveSession) -> bool:
+    """评论时间必须落在本场直播区间内，边界放宽两分钟兼容平台时间误差。"""
+    if not comment_time or not session.live_start_time:
+        return True
+    tolerance = timedelta(minutes=2)
+    if comment_time < session.live_start_time - tolerance:
+        return False
+    if session.live_end_time and comment_time > session.live_end_time + tolerance:
+        return False
+    return True
 
 
 def _parse_comment_time(value) -> Optional[datetime]:
