@@ -59,6 +59,8 @@ class ScraperTaskResponse(ScraperTaskBase):
     progress_total: int = 0
     progress_stage: Optional[str] = None
     progress_message: Optional[str] = None
+    collected_anchor_count: int = 0
+    collected_session_count: int = 0
     created_at: datetime
 
     class Config:

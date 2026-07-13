@@ -169,6 +169,8 @@ declare namespace Api {
       progress_total: number;
       progress_stage: string | null;
       progress_message: string | null;
+      collected_anchor_count: number;
+      collected_session_count: number;
       created_at: string;
     }
 

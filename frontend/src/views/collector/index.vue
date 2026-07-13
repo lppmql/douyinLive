@@ -684,11 +684,18 @@ const taskColumns = [
   {
     title: '进度',
     key: 'progress_percent',
-    width: 170,
+    width: 210,
     render(row: Api.Douyin.CollectorTask) {
       return h('div', { class: 'flex flex-col gap-4px' }, [
         h('span', { class: 'text-12px' }, `${row.progress_percent || 0}% · ${getStageLabel(row.progress_stage)}`),
-        h('span', { class: 'text-11px text-gray-500' }, row.progress_message || '-')
+        h('span', { class: 'text-11px text-gray-500' }, row.progress_message || '-'),
+        row.task_type === 'collect_all'
+          ? h(
+              'span',
+              { class: 'text-11px text-primary' },
+              `主播 ${row.collected_anchor_count || 0} 位 · 场次 ${row.collected_session_count || 0} 场`
+            )
+          : null
       ]);
     }
   },
@@ -916,6 +923,24 @@ onUnmounted(() => {
                     </span>
                     <span>页面每 5 秒自动更新</span>
                   </div>
+                  <NGrid class="mt-12px" cols="2" :x-gap="12">
+                    <NGi>
+                      <div class="rounded-8px bg-white/70 px-12px py-10px dark:bg-black/15">
+                        <div class="text-12px text-gray-500">已采集主播</div>
+                        <div class="mt-2px text-20px font-600">
+                          {{ currentCollectTask.collected_anchor_count || 0 }} 位
+                        </div>
+                      </div>
+                    </NGi>
+                    <NGi>
+                      <div class="rounded-8px bg-white/70 px-12px py-10px dark:bg-black/15">
+                        <div class="text-12px text-gray-500">已采集场次</div>
+                        <div class="mt-2px text-20px font-600">
+                          {{ currentCollectTask.collected_session_count || 0 }} 场
+                        </div>
+                      </div>
+                    </NGi>
+                  </NGrid>
                 </div>
 
                 <template v-if="collectAllResult">

@@ -325,11 +325,21 @@ async def manual_collect_all(db: Session = Depends(get_db)):
     db.commit()
 
     def update_progress(stage, percent, current, total, message, details=None):
+        details = details or {}
         task.progress_stage = stage
         task.progress_percent = max(0, min(100, int(percent)))
         task.progress_current = max(0, int(current or 0))
         task.progress_total = max(0, int(total or 0))
         task.progress_message = str(message)[:500]
+        anchor_count = details.get("anchor_count", details.get("enterprise_anchor_count"))
+        session_count = details.get(
+            "discovered_session_count",
+            details.get("enterprise_session_discovered_count"),
+        )
+        if anchor_count is not None:
+            task.collected_anchor_count = max(0, int(anchor_count))
+        if session_count is not None:
+            task.collected_session_count = max(0, int(session_count))
         db.add(
             ScraperLog(
                 task_id=task.id,
@@ -341,7 +351,9 @@ async def manual_collect_all(db: Session = Depends(get_db)):
                     "progress_percent": task.progress_percent,
                     "progress_current": task.progress_current,
                     "progress_total": task.progress_total,
-                    "details": details or {},
+                    "collected_anchor_count": task.collected_anchor_count,
+                    "collected_session_count": task.collected_session_count,
+                    "details": details,
                 },
             )
         )

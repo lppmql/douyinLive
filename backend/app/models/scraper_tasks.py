@@ -21,3 +21,5 @@ class ScraperTask(Base, TimestampMixin):
     progress_total = Column(Integer, nullable=False, default=0, comment="预计总数量")
     progress_stage = Column(String(50), nullable=True, comment="当前执行阶段")
     progress_message = Column(String(500), nullable=True, comment="当前进度说明")
+    collected_anchor_count = Column(Integer, nullable=False, default=0, comment="本次已采集主播数")
+    collected_session_count = Column(Integer, nullable=False, default=0, comment="本次已采集直播场次数")
