@@ -38,6 +38,7 @@ HOME_URL = f"{LEADS_BASE}/pc/growth/home"
 HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
 HISTORY_DETAIL_TIMEOUT_SECONDS = 45
 HISTORY_DETAIL_CONCURRENCY = 2
+HISTORY_DETAIL_BATCH_SIZE = 20
 ENTERPRISE_PAGE_SIZE = 100
 ENTERPRISE_MAX_PAGES = 200
 
@@ -1425,16 +1426,33 @@ async def _enrich_history_sessions(
         .all()
     )
 
-    pending_sessions = [session for session in all_sessions if _needs_history_enrichment(session)]
+    metric_session_ids = {row[0] for row in db.query(LiveMetric.session_id).distinct().all()}
+    comment_session_ids = {row[0] for row in db.query(Comment.session_id).distinct().all()}
+    profile_session_ids = {row[0] for row in db.query(LiveAudienceProfile.session_id).distinct().all()}
+    stream_session_ids = {row[0] for row in db.query(StreamSource.session_id).distinct().all()}
+    asset_session_ids = metric_session_ids | comment_session_ids | profile_session_ids | stream_session_ids
+    pending_sessions = [
+        session for session in all_sessions
+        if _needs_history_enrichment(session, session.id in asset_session_ids)
+    ]
+    repaired_false_complete = 0
+    for session in pending_sessions:
+        if session.detail_collection_status == "complete":
+            session.detail_collection_status = "retryable"
+            session.detail_collection_error = "此前未采到有效详情数据，已重新加入补齐队列"
+            repaired_false_complete += 1
+    if repaired_false_complete:
+        db.commit()
+        logger.warning("已修复 %s 场无数据但标记完整的历史场次", repaired_false_complete)
     # 先覆盖从未尝试过的场次，再重试暂时失败的场次，避免 retryable 阻塞全量首轮采集。
     pending_sessions.sort(
         key=lambda session: (
             session.detail_collection_status == "retryable",
-            bool(session.anchor_name),
-            -(session.id or 0),
+            not bool(session.anchor_name),
+            -(session.live_start_time.timestamp() if session.live_start_time else 0),
         )
     )
-    target_sessions = pending_sessions
+    target_sessions = pending_sessions[:HISTORY_DETAIL_BATCH_SIZE]
     enriched = 0
     checked = 0
     failed = 0
@@ -1479,13 +1497,35 @@ async def _enrich_history_sessions(
                 progress_callback(checked, len(target_sessions), enriched, failed)
             continue
 
-        session.detail_collection_status = "complete"
-        session.detail_collection_error = None
         overview = detail.get("overview", {})
         trend_rows = detail.get("trend", [])
         replay_url = detail.get("replay_url")
         comments_data = detail.get("comments", [])
+        profiles = detail.get("profiles", [])
         anchor_profile = detail.get("anchor_profile", {}) or {}
+
+        has_detail_data = bool(
+            (overview.get("metrics", {}) if isinstance(overview, dict) else {})
+            or trend_rows
+            or comments_data
+            or profiles
+            or replay_url
+        )
+        if not has_detail_data:
+            if not session.anchor_name:
+                session.detail_collection_status = "unavailable"
+                session.detail_collection_error = "平台未提供主播映射且详情接口为空，无法安全补齐"
+            else:
+                session.detail_collection_status = "retryable"
+                session.detail_collection_error = "平台详情接口本次返回空数据，将在下次刷新时重试"
+            db.commit()
+            failed += 1
+            if progress_callback:
+                progress_callback(checked, len(target_sessions), enriched, failed)
+            continue
+
+        session.detail_collection_status = "complete"
+        session.detail_collection_error = None
 
         changed = _apply_session_anchor_profile(session, anchor_profile)
         changed = _apply_overview_to_session(session, overview) or changed
@@ -1496,10 +1536,21 @@ async def _enrich_history_sessions(
             _save_stream_source(db, session.id, replay_url)
 
         metrics_count = _save_trend_metrics(db, session.id, trend_rows)
-        comments_count = _save_comments(db, session.id, comments_data)
-        if comments_count:
+        comments_count = (
+            _replace_session_comments(db, session.id, comments_data)
+            if detail.get("comments_authoritative")
+            else _save_comments(db, session.id, comments_data)
+        )
+        if detail.get("comments_authoritative"):
+            session.comments_count = comments_count
+            changed = True
+        elif comments_count:
             session.comments_count = max(session.comments_count or 0, comments_count)
             changed = True
+
+        if profiles:
+            db.query(LiveAudienceProfile).filter(LiveAudienceProfile.session_id == session.id).delete()
+            _save_profiles(db, session.id, profiles)
 
         if changed or metrics_count or comments_count:
             db.commit()
@@ -1518,7 +1569,7 @@ async def _enrich_history_sessions(
     progress = {
         "enriched_count": enriched,
         "checked_count": checked,
-        "remaining_count": 0,
+        "remaining_count": max(0, len(pending_sessions) - checked),
         "batch_size": len(target_sessions),
         "failed_count": failed,
         "concurrency": HISTORY_DETAIL_CONCURRENCY,
@@ -2328,11 +2379,23 @@ def _merge_room_profile(primary: dict, fallback: dict) -> dict:
     return merged
 
 
-def _needs_history_enrichment(session: LiveSession) -> bool:
+def _needs_history_enrichment(session: LiveSession, has_related_assets: bool = False) -> bool:
     """判断历史场次是否还需要继续补齐详情。"""
-    # complete 表示本场详情页已经真实访问并保存结果，即使平台返回 0 评论/0 指标，
-    # 也不能因为“没有数据”而在每次点击采集时无限重复请求。
-    return session.detail_collection_status in (None, "", "pending", "retryable")
+    if session.detail_collection_status in (None, "", "pending", "retryable"):
+        return True
+    if session.detail_collection_status != "complete":
+        return False
+    # 修复旧数据中的“假完整”：没有任何详情资产、核心指标或回放时应继续补齐。
+    has_summary = any((
+        session.total_viewers,
+        session.viewed_count,
+        session.peak_online_count,
+        session.comments_count,
+        session.interaction_count,
+        session.private_message_count,
+        session.new_followers,
+    ))
+    return not (has_related_assets or has_summary or session.stream_url)
 
 
 def _parse_comments_from_live_screen_text(body_text: str, live_start_time: Optional[datetime]) -> list[dict]:

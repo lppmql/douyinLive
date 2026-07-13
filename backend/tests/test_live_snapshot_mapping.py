@@ -2,12 +2,41 @@ import unittest
 from types import SimpleNamespace
 
 from app.services.collector.manual_collect import (
+    _needs_history_enrichment,
     _apply_overview_to_session,
     _parse_watch_profiles,
 )
 
 
 class LiveSnapshotMappingTest(unittest.TestCase):
+    def test_retries_false_complete_session_without_any_detail_data(self):
+        session = SimpleNamespace(
+            detail_collection_status="complete",
+            total_viewers=0,
+            viewed_count=0,
+            peak_online_count=0,
+            comments_count=0,
+            interaction_count=0,
+            private_message_count=0,
+            new_followers=0,
+            stream_url=None,
+        )
+        self.assertTrue(_needs_history_enrichment(session, has_related_assets=False))
+
+    def test_keeps_complete_session_with_minute_metrics(self):
+        session = SimpleNamespace(
+            detail_collection_status="complete",
+            total_viewers=0,
+            viewed_count=0,
+            peak_online_count=0,
+            comments_count=0,
+            interaction_count=0,
+            private_message_count=0,
+            new_followers=0,
+            stream_url=None,
+        )
+        self.assertFalse(_needs_history_enrichment(session, has_related_assets=True))
+
     def test_maps_real_overview_metrics_to_live_session(self):
         session = SimpleNamespace(
             total_viewers=0,

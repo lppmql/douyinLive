@@ -76,6 +76,10 @@ function openDetail(session: Api.Douyin.LiveSession) {
   router.push({ name: 'live-session-detail', params: { id: String(session.id) } });
 }
 
+function displayCollectedNumber(row: Api.Douyin.LiveSession, value: number): number | string {
+  return value || (row.detail_collection_status === 'complete' ? 0 : '-');
+}
+
 /* ---------- 表格列 ---------- */
 function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
   return [
@@ -160,7 +164,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       key: 'peak_online_count',
       width: 90,
       render(row: Api.Douyin.LiveSession) {
-        return row.peak_online_count || 0;
+        return displayCollectedNumber(row, row.peak_online_count);
       }
     },
     {
@@ -168,7 +172,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       key: 'new_followers',
       width: 90,
       render(row: Api.Douyin.LiveSession) {
-        return row.new_followers || 0;
+        return displayCollectedNumber(row, row.new_followers);
       }
     },
     {
@@ -176,7 +180,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       key: 'comments_count',
       width: 80,
       render(row: Api.Douyin.LiveSession) {
-        return row.comments_count || 0;
+        return displayCollectedNumber(row, row.comments_count);
       }
     },
     {
@@ -184,7 +188,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       key: 'leads_count',
       width: 80,
       render(row: Api.Douyin.LiveSession) {
-        return row.leads_count || 0;
+        return displayCollectedNumber(row, row.leads_count);
       }
     },
     {
