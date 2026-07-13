@@ -55,7 +55,7 @@ class CluerichLiveDetector(ILiveStatusDetector):
 
             def on_response(resp):
                 url = resp.url
-                if "/webcast/live/status" in url or "/webcast/stream/" in url:
+                if "/bff/statistic/live-screen/" in url or "/bff/statistic/live-comment/" in url:
                     content_type = resp.headers.get("content-type", "")
                     if "json" in content_type:
                         import json as _json
@@ -70,11 +70,16 @@ class CluerichLiveDetector(ILiveStatusDetector):
                 try:
                     data = await captured["data"].json()
                     info = data.get("data", data.get("result", {}))
+                    if isinstance(info, dict) and "data" in info:
+                        info = info["data"]  # 兼容 {data: {data: ...}}
                     is_live = info.get("live_status") == 1 or info.get("is_live") is True
+                    # 也通过页面文本判断
+                    if not is_live:
+                        pass  # 后续 DOM 降级检测
                     return LiveStatusResult(
                         is_live=is_live,
-                        session_title=info.get("title", info.get("session_title")),
-                        online_count=info.get("online_count"),
+                        session_title=info.get("title") or info.get("session_title") or info.get("room_title"),
+                        online_count=info.get("lp_screen_live_user_realtime") or info.get("online_count"),
                         stream_url=info.get("stream_url"),
                         raw_data=data,
                     )

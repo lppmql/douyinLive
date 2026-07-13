@@ -129,15 +129,22 @@ export const request = createFlatRequest(
 
 export const backendRequest = createFlatRequest(
   {
-    baseURL: otherBaseURL.backend
+    baseURL: otherBaseURL.backend,
+    timeout: 120000 // 采集类请求（浏览器采集）可能超过 10s，设为 120s
   },
   {
     defaultState: {
       errMsgStack: [],
       refreshTokenPromise: null
     } as RequestInstanceState,
-    transform(response: AxiosResponse<App.Service.Response<any>>) {
-      return response.data.data;
+    transform(response: AxiosResponse) {
+      const body = response.data;
+      // 兼容 Soybean Admin 的 {code, data, msg} 包装格式（auth 接口返回此格式）
+      if (body && typeof body === 'object' && 'code' in body && 'data' in body) {
+        return body.data;
+      }
+      // 普通 FastAPI 接口直接返回数据
+      return body;
     },
     async onRequest(config) {
       const { headers } = config;
@@ -147,15 +154,25 @@ export const backendRequest = createFlatRequest(
       return config;
     },
     isBackendSuccess(response) {
-      return String(response.data.code) === import.meta.env.VITE_SERVICE_SUCCESS_CODE;
+      const body = response.data;
+      // 有 {code, data, msg} 包装时检查 code
+      if (body && typeof body === 'object' && 'code' in body) {
+        return String(body.code) === import.meta.env.VITE_SERVICE_SUCCESS_CODE;
+      }
+      // 普通接口信任 HTTP 2xx
+      return true;
     },
-    async onBackendFail(_response) {
-      // 由调用方自行处理
+    async onBackendFail(response) {
+      const body = response.data;
+      if (body && typeof body === 'object' && 'msg' in body) {
+        window.$message?.error(body.msg);
+      }
     },
     onError(error) {
       let message = error.message;
       if (error.code === BACKEND_ERROR_CODE) {
-        message = error.response?.data?.msg || message;
+        // FastAPI 的 422/401 错误在 response.data.detail 中
+        message = error.response?.data?.detail || error.response?.data?.msg || message;
       }
       window.$message?.error(message);
     }

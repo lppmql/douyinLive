@@ -1,4 +1,4 @@
-"""下播处理 — 汇总数据、更新场次记录"""
+"""下播处理 — 汇总数据、更新场次记录、触发 DataEase 同步"""
 from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from app.models.comments import Comment
 from app.models.leads import Lead
 from app.models.stream_sources import StreamSource
 from app.models.scraper_logs import ScraperLog
+from app.services.sync import sync_session
 
 
 async def process_live_end(db: Session, session_id: int):
@@ -18,6 +19,7 @@ async def process_live_end(db: Session, session_id: int):
     1. 聚合 live_metrics 统计
     2. 更新 live_sessions 最终数据
     3. 标记 stream_sources 为过期
+    4. 同步 de_ 大屏表数据
     """
     try:
         session = db.query(LiveSession).get(session_id)
@@ -64,6 +66,13 @@ async def process_live_end(db: Session, session_id: int):
         )
         db.add(log)
         db.commit()
+
+        # 同步 de_ 大屏表
+        try:
+            sync_session(db, session_id)
+        except Exception as sync_err:
+            logger.error(f"DataEase 同步失败 session={session_id}: {sync_err}")
+
         logger.info(f"下播处理完成: session={session_id}")
 
     except Exception as e:

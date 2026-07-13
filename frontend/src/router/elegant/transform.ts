@@ -174,7 +174,8 @@ const routeMap: RouteMap = {
   "knowledge": "/knowledge",
   "live-sessions": "/live-sessions",
   "login": "/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?",
-  "transcripts": "/transcripts"
+  "transcripts": "/transcripts",
+  "user-management": "/user-management"
 };
 
 /**

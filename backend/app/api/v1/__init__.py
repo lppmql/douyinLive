@@ -13,6 +13,11 @@ from app.api.v1.collector import router as collector_router
 from app.api.v1.monitor import router as monitor_router
 from app.api.v1.ws import rest_router as transcript_router
 
+from app.api.v1.prompt_templates import router as prompt_templates_router
+from app.api.v1.ai import router as ai_router
+from app.api.v1.auth import router as auth_router
+from app.api.v1.user_mgmt import router as user_mgmt_router
+
 v1_router = APIRouter(prefix="/api/v1")
 v1_router.include_router(live_rooms_router)
 v1_router.include_router(live_sessions_router)
@@ -25,5 +30,9 @@ v1_router.include_router(knowledge_base_router)
 v1_router.include_router(collector_router)
 v1_router.include_router(monitor_router)
 v1_router.include_router(transcript_router)
+v1_router.include_router(prompt_templates_router)
+v1_router.include_router(ai_router)
+v1_router.include_router(auth_router)
+v1_router.include_router(user_mgmt_router)
 
 __all__ = ["v1_router"]

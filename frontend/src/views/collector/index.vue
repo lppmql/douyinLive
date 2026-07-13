@@ -463,6 +463,8 @@ onUnmounted(() => {
               <div class="text-13px text-gray-500">
                 历史场次同步 {{ collectAllResult.history_synced_count || 0 }} 场；
                 企业主播 {{ collectAllResult.enterprise_anchor_count || 0 }} 个；
+                平台发现场次 {{ collectAllResult.enterprise_session_discovered_count || 0 }} 场；
+                新增场次 {{ collectAllResult.enterprise_session_synced_count || 0 }} 场；
                 主播映射 {{ collectAllResult.anchor_profile_synced_count || 0 }} 条；
                 清理无归属场次 {{ collectAllResult.unmapped_session_pruned_count || 0 }} 场；
                 本次补详情 {{ collectAllResult.history_detail_synced_count || 0 }}/{{ collectAllResult.history_detail_checked_count || 0 }} 场；

@@ -606,6 +606,8 @@ declare namespace App {
           title: string;
           date: string;
           anchorName: string;
+          sessionTitle: string;
+          sessionStatus: string;
           startTime: string;
           endTime: string;
           duration: string;
@@ -615,7 +617,22 @@ declare namespace App {
           leads: string;
           viewCount: string;
           newFollowers: string;
+          commentsCount: string;
+          adCost: string;
+          exposureEnterRate: string;
+          commentRate: string;
+          interactionRate: string;
           detailTitle: string;
+          basicInfo: string;
+          timeInfo: string;
+          coreMetrics: string;
+          dashboardLink: string;
+          refresh: string;
+          loading: string;
+          noData: string;
+          statusLive: string;
+          statusScheduled: string;
+          statusEnded: string;
           trafficSource: string;
           sourceFollow: string;
           sourceRecommend: string;
@@ -627,6 +644,8 @@ declare namespace App {
           stepLead: string;
           stepValid: string;
           minutes: string;
+          hours: string;
+          detail: string;
         };
         transcripts: {
           title: string;

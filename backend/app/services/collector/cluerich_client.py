@@ -25,10 +25,10 @@ class CluerichMetricsCollector(AdaptiveCollector):
 
         # 注册 API 监听模式 — 监听页面加载时的数据接口
         self.api.register_api(
-            pattern="/webcast/stream/",
+            pattern="/bff/statistic/live-screen/",
             handler=lambda data: {
-                "online_count": data.get("data", {}).get("online_count"),
-                "total_viewers": data.get("data", {}).get("total_viewers"),
+                "online_count": (data.get("data", {}) or {}).get("lp_screen_live_user_realtime") or (data.get("data", {}) or {}).get("online_count"),
+                "total_viewers": (data.get("data", {}) or {}).get("accumulate_view_users") or (data.get("data", {}) or {}).get("total_viewers"),
             },
         )
 
@@ -51,8 +51,8 @@ class CluerichCommentCollector(AdaptiveCollector):
 
         # 监听评论数据接口
         self.api.register_api(
-            pattern="/webcast/comment/",
-            handler=lambda data: {"comments": data.get("data", [])},
+            pattern="/bff/statistic/live-comment/",
+            handler=lambda data: {"comments": (data.get("data", {}) or {}).get("list", [])},
         )
 
     async def collect(self, url: str = "") -> dict:

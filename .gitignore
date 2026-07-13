@@ -35,5 +35,8 @@ frontend/dist/
 # Playwright browsers
 ms-playwright/
 
+# 扫码登录状态包含 Cookie、Token 和设备信息，只允许保存在本机
+backend/storage_state/*.json
+
 # DataEase 外部配置
 dataease/

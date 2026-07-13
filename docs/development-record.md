@@ -38,6 +38,32 @@ cd frontend && pnpm dev
 
 ## 各阶段开发记录
 
+### Phase 8 — 用户认证 + Soybean Admin 内置功能 + 用户管理
+
+**目标：** 建立完整的用户认证体系，激活 Soybean Admin 的 7 个内置功能。
+
+**后端改动：**
+- `requirements.txt` — 添加 `pyjwt`、`passlib[bcrypt]`、`bcrypt`
+- `app/core/config.py` — 新增 JWT 配置项（SECRET_KEY、ALGORITHM、过期时间）
+- `app/core/security.py` — JWT 签发/验证 + bcrypt 密码哈希 + `get_current_user` 依赖
+- `app/models/user.py` — User 模型（id, username, password_hash, nickname, email, phone, avatar, roles, status）
+- `app/schemas/auth.py` — 登录/用户信息的 Pydantic Schema
+- `app/api/v1/auth.py` — 认证 API：`POST /login`、`GET /getUserInfo`、`POST /refreshToken`
+- `app/api/v1/user_mgmt.py` — 用户管理 CRUD（分页列表、新建、编辑、删除）
+- Alembic 迁移 `g1d2e3f4a5b6` — 创建 `users` 表 + 插入默认 admin/user
+
+**前端改动：**
+- `service/api/auth.ts` — 从 `request`(Mock) 切换为 `backendRequest`(真实后端)
+- `service/request/index.ts` — `backendRequest` 适配 Soybean Admin 的 `{code, data, msg}` 响应格式
+- `service/api/user.ts` — 用户管理 API 服务
+- `views/user-management/index.vue` — 用户管理页面（NDataTable + 新增/编辑对话框 + 删除确认）
+- `views/dashboard/index.vue` — KPI 卡片改用 CountTo 数字动画组件
+- `views/live-sessions/index.vue` — 表格增加 `TableHeaderOperation` 组件
+- `router/elegant/routes.ts` — 注册用户管理路由（图标 mdi:account-group，order: 8，仅 R_SUPER 可访问）
+- i18n — 添加 `route.user-management` 中英文翻译
+
+**详情：** Soybean Admin 的登录页、Iframe 页面、CountTo、TableHeaderOperation/TableColumnSetting、锁屏功能、403/404/500 页面均为框架内置，本次主要工作是后端提供认证 API + 前端切换为真实后端。
+
 ### Phase 0 — 项目初始化
 - FastAPI 骨架 + Soybean Admin 模板
 - Docker Compose (MySQL + Redis)

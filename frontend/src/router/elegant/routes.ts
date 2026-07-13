@@ -146,5 +146,18 @@ export const generatedRoutes: GeneratedRoute[] = [
       order: 5,
       keepAlive: true
     }
+  },
+  {
+    name: 'user-management',
+    path: '/user-management',
+    component: 'layout.base$view.user-management',
+    meta: {
+      title: 'user-management',
+      i18nKey: 'route.user-management',
+      icon: 'mdi:account-group',
+      order: 8,
+      keepAlive: true,
+      roles: ['R_SUPER']
+    }
   }
 ];

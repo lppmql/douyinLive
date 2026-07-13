@@ -232,7 +232,8 @@ const local: App.I18n.Schema = {
     'live-sessions': '直播场次',
     transcripts: '主播话术',
     analysis: 'AI 分析',
-    knowledge: '知识库'
+    knowledge: '知识库',
+    'user-management': '用户管理'
   },
   page: {
     login: {
@@ -359,7 +360,9 @@ const local: App.I18n.Schema = {
     'live-sessions': {
       title: '直播场次列表',
       date: '日期',
-      anchorName: '主播名',
+      anchorName: '主播',
+      sessionTitle: '场次标题',
+      sessionStatus: '状态',
       startTime: '开播时间',
       endTime: '下播时间',
       duration: '时长',
@@ -369,7 +372,22 @@ const local: App.I18n.Schema = {
       leads: '留资数',
       viewCount: '观看人数',
       newFollowers: '新增粉丝',
+      commentsCount: '评论数',
+      adCost: '广告消耗',
+      exposureEnterRate: '曝光进入率',
+      commentRate: '评论率',
+      interactionRate: '互动率',
       detailTitle: '场次详情',
+      basicInfo: '基本信息',
+      timeInfo: '时间信息',
+      coreMetrics: '核心指标',
+      dashboardLink: '查看大屏',
+      refresh: '刷新',
+      loading: '加载中...',
+      noData: '暂无直播场次，请先采集数据',
+      statusLive: '直播中',
+      statusScheduled: '待开播',
+      statusEnded: '已结束',
       trafficSource: '流量来源',
       sourceFollow: '关注',
       sourceRecommend: '推荐',
@@ -380,7 +398,9 @@ const local: App.I18n.Schema = {
       stepInteraction: '互动',
       stepLead: '留资',
       stepValid: '有效留资',
-      minutes: '分钟'
+      minutes: '分钟',
+      hours: '时',
+      detail: '详情',
     },
     transcripts: {
       title: '话术分段列表',

@@ -1,7 +1,7 @@
 """Phase 3: 采集相关 Pydantic 数据模型"""
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 # ===== 采集账号 =====
@@ -121,11 +121,12 @@ class CollectAllResponse(BaseModel):
     history_synced_count: int = 0
     enterprise_anchor_count: int = 0
     enterprise_session_synced_count: int = 0
+    enterprise_session_discovered_count: int = 0
     anchor_profile_synced_count: int = 0
     unmapped_session_pruned_count: int = 0
     history_detail_synced_count: int = 0
     history_detail_checked_count: int = 0
     history_detail_remaining_count: int = 0
     history_detail_batch_size: int = 0
-    results: list[CollectRoomResult] = []
+    results: list[CollectRoomResult] = Field(default_factory=list)
     message: Optional[str] = None

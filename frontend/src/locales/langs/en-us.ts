@@ -1,6 +1,6 @@
 const local: App.I18n.Schema = {
   system: {
-    title: 'SoybeanAdmin',
+    title: '抖音留资直播分析系统',
     updateTitle: 'System Version Update Notification',
     updateContent: 'A new version of the system has been detected. Do you want to refresh the page immediately?',
     updateConfirm: 'Refresh immediately',
@@ -236,7 +236,8 @@ const local: App.I18n.Schema = {
     'live-sessions': 'Live Sessions',
     transcripts: 'Transcripts',
     analysis: 'AI Analysis',
-    knowledge: 'Knowledge Base'
+    knowledge: 'Knowledge Base',
+    'user-management': 'User Management'
   },
   page: {
     login: {
@@ -335,6 +336,8 @@ const local: App.I18n.Schema = {
       title: 'Live Sessions',
       date: 'Date',
       anchorName: 'Anchor',
+      sessionTitle: 'Session Title',
+      sessionStatus: 'Status',
       startTime: 'Start',
       endTime: 'End',
       duration: 'Duration',
@@ -344,7 +347,22 @@ const local: App.I18n.Schema = {
       leads: 'Leads',
       viewCount: 'View Count',
       newFollowers: 'New Followers',
+      commentsCount: 'Comments',
+      adCost: 'Ad Cost',
+      exposureEnterRate: 'Exposure Enter Rate',
+      commentRate: 'Comment Rate',
+      interactionRate: 'Interaction Rate',
       detailTitle: 'Session Detail',
+      basicInfo: 'Basic Info',
+      timeInfo: 'Time Info',
+      coreMetrics: 'Core Metrics',
+      dashboardLink: 'View Dashboard',
+      refresh: 'Refresh',
+      loading: 'Loading...',
+      noData: 'No sessions yet. Please collect data first.',
+      statusLive: 'Live',
+      statusScheduled: 'Scheduled',
+      statusEnded: 'Ended',
       trafficSource: 'Traffic Source',
       sourceFollow: 'Follow',
       sourceRecommend: 'Recommend',
@@ -355,7 +373,9 @@ const local: App.I18n.Schema = {
       stepInteraction: 'Interaction',
       stepLead: 'Lead',
       stepValid: 'Valid Lead',
-      minutes: 'min'
+      minutes: 'min',
+      hours: 'h',
+      detail: 'Detail',
     },
     transcripts: {
       title: 'Transcript Segments',

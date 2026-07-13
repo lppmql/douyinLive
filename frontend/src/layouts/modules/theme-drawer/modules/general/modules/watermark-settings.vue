@@ -47,7 +47,7 @@ const isWatermarkTextVisible = computed(
         type="text"
         size="small"
         class="w-120px"
-        placeholder="SoybeanAdmin"
+        placeholder="抖音留资直播分析系统"
       />
     </SettingItem>
   </TransitionGroup>

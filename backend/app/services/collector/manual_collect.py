@@ -39,6 +39,8 @@ HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
 HISTORY_DETAIL_BATCH_SIZE = 20
 HISTORY_DETAIL_TIMEOUT_SECONDS = 45
 HISTORY_DETAIL_CONCURRENCY = 2
+ENTERPRISE_PAGE_SIZE = 100
+ENTERPRISE_MAX_PAGES = 200
 
 
 async def collect_all(db: Session) -> dict:
@@ -112,15 +114,13 @@ async def collect_all(db: Session) -> dict:
                 }
             results.append(result)
 
-        # 企业接口能返回主播和场次的稳定映射时，不再反复导入无法归属的旧历史；
-        # 只有企业接口不可用时才使用历史接口兜底。
+        # 历史接口负责保证场次总量完整，企业接口负责补充主播映射。
+        # 两者必须都执行，不能因为企业接口只返回部分主播而漏掉其他场次。
         enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0])
-        history_sync = 0
-        if enterprise_sync["anchor_count"] == 0:
-            history_sync = _sync_history_sessions(db, account, rooms[0])
+        history_sync = _sync_history_sessions(db, account, rooms[0])
+
+        # 未映射只代表当前接口暂时没返回主播关系，不能在采集过程中删除真实场次。
         pruned_unmapped_count = 0
-        if enterprise_sync["anchor_count"] > 0:
-            pruned_unmapped_count = _prune_unmapped_sessions(db, rooms[0])
         history_detail_progress = await _enrich_history_sessions(
             db,
             context,
@@ -139,6 +139,7 @@ async def collect_all(db: Session) -> dict:
             "history_synced_count": history_sync,
             "enterprise_anchor_count": enterprise_sync["anchor_count"],
             "enterprise_session_synced_count": enterprise_sync["session_count"],
+            "enterprise_session_discovered_count": enterprise_sync.get("discovered_session_count", 0),
             "anchor_profile_synced_count": enterprise_sync["profile_count"],
             "unmapped_session_pruned_count": pruned_unmapped_count,
             "history_detail_synced_count": history_detail_progress["enriched_count"],
@@ -377,9 +378,9 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
 
         return {
             "room_id": room_id,
-            "anchor_name": anchor_name,
-            "anchor_nickname": room.anchor_nickname or "",
-            "douyin_id": room.douyin_id or "",
+            "anchor_name": session.anchor_name or anchor_name,
+            "anchor_nickname": session.anchor_nickname or anchor_name,
+            "douyin_id": session.douyin_id or "",
             "is_live": is_live,
             "metrics_count": metrics_count,
             "comments_count": comments_count,
@@ -954,45 +955,59 @@ async def _sync_enterprise_anchor_sessions(
                   ?.split('=').slice(1).join('=') || ''"""
             )
 
-        accounts = await _fetch_enterprise_post(
-            page, "/bff/statistic/live-comment/accounts", {"roomId": root_room_id}, csrf_token["value"]
+        employee_rows, account_self = await _fetch_enterprise_rows(
+            page,
+            "/bff/statistic/live-comment/accounts",
+            {"roomId": root_room_id},
+            csrf_token["value"],
+            row_keys=("employeeList", "employee_list", "records", "list"),
         )
-        if accounts.get("code") == 403 or accounts.get("error_code") == 403:
-            raise RuntimeError("企业主播接口 CSRF 校验失败，请重新扫码登录")
-        data = accounts.get("data", {}) if isinstance(accounts, dict) else {}
-        employees = [data.get("self")] + (data.get("employeeList") or [])
-        employees = [item for item in employees if isinstance(item, dict) and item.get("iesUid")]
-        unique_employees = {str(item["iesUid"]): item for item in employees}
+        employees = ([account_self] if account_self else []) + employee_rows
+        unique_employees = {}
+        for item in employees:
+            if not isinstance(item, dict):
+                continue
+            ies_uid = _first_value(item, "iesUid", "ies_uid", "uid", "id")
+            if ies_uid not in (None, ""):
+                unique_employees[str(ies_uid)] = item
 
+        existing_sessions = {
+            item.dashboard_url: item
+            for item in db.query(LiveSession).filter(LiveSession.room_id == room.id).all()
+            if item.dashboard_url
+        }
         session_count = 0
+        discovered_session_count = 0
         profile_count = 0
         for profile in unique_employees.values():
-            ies_uid = str(profile["iesUid"])
-            room_payload = await _fetch_enterprise_post(
+            ies_uid = str(_first_value(profile, "iesUid", "ies_uid", "uid", "id"))
+            rows, _ = await _fetch_enterprise_rows(
                 page,
                 "/bff/statistic/live-comment/room-lists",
                 {"iesUid": ies_uid},
                 csrf_token["value"],
+                row_keys=("roomLists", "roomList", "room_lists", "records", "list"),
             )
-            rows = ((room_payload.get("data") or {}).get("roomLists") or []) if isinstance(room_payload, dict) else []
+            unique_rows = {}
             for item in rows:
-                child_room_id = str(item.get("roomId") or "").strip()
+                child_room_id = str(_first_value(item, "roomId", "room_id", "id") or "").strip()
                 if not child_room_id:
                     continue
+                unique_rows[child_room_id] = item
+
+            discovered_session_count += len(unique_rows)
+            for child_room_id, item in unique_rows.items():
                 dashboard_url = f"{LIVE_SCREEN_URL}?room_id={child_room_id}&fullscreen=0"
-                session = (
-                    db.query(LiveSession)
-                    .filter(LiveSession.room_id == room.id, LiveSession.dashboard_url == dashboard_url)
-                    .first()
-                )
+                session = existing_sessions.get(dashboard_url)
                 if session is None:
                     session = LiveSession(room_id=room.id, dashboard_url=dashboard_url)
                     db.add(session)
+                    existing_sessions[dashboard_url] = session
                     session_count += 1
 
                 changed = _apply_enterprise_profile_to_session(session, profile)
-                start_time = _parse_epoch_dt(item.get("liveStartTime"))
-                end_time = _parse_epoch_dt(item.get("liveEndTime"))
+                start_time = _parse_epoch_dt(_first_value(item, "liveStartTime", "live_start_time", "startTime", "start_time"))
+                end_time = _parse_epoch_dt(_first_value(item, "liveEndTime", "live_end_time", "endTime", "end_time"))
                 if start_time and session.live_start_time != start_time:
                     session.live_start_time = start_time
                     changed = True
@@ -1004,13 +1019,16 @@ async def _sync_enterprise_anchor_sessions(
                     if session.live_duration_seconds != duration_seconds:
                         session.live_duration_seconds = duration_seconds
                         changed = True
-                if item.get("title") and session.session_title != item["title"]:
-                    session.session_title = str(item["title"])[:200]
+                title = _first_value(item, "title", "roomTitle", "room_title", "sessionTitle")
+                if title and session.session_title != title:
+                    session.session_title = str(title)[:200]
                     changed = True
-                if item.get("streamUrl") and session.stream_url != item["streamUrl"]:
-                    session.stream_url = str(item["streamUrl"])[:2000]
+                stream_url = _first_value(item, "streamUrl", "stream_url", "replayUrl", "replay_url")
+                if stream_url and session.stream_url != stream_url:
+                    session.stream_url = str(stream_url)[:2000]
                     changed = True
-                session.live_status = "ended" if end_time else ("live" if item.get("liveStatus") == "1" else session.live_status or "finished")
+                live_status = _first_value(item, "liveStatus", "live_status", "status")
+                session.live_status = "ended" if end_time else ("live" if str(live_status) == "1" else session.live_status or "finished")
                 if changed:
                     profile_count += 1
 
@@ -1018,10 +1036,11 @@ async def _sync_enterprise_anchor_sessions(
         db.add(
             ScraperLog(
                 level="info",
-                message=f"企业主播映射同步完成: 主播={len(unique_employees)}, 新场次={session_count}, 更新={profile_count}",
+                message=f"企业主播映射同步完成: 主播={len(unique_employees)}, 发现场次={discovered_session_count}, 新场次={session_count}, 更新={profile_count}",
                 raw_json={
                     "anchor_count": len(unique_employees),
                     "session_count": session_count,
+                    "discovered_session_count": discovered_session_count,
                     "profile_count": profile_count,
                     "room_id": root_room_id,
                 },
@@ -1029,14 +1048,16 @@ async def _sync_enterprise_anchor_sessions(
         )
         db.commit()
         logger.info(
-            "企业主播映射同步完成: anchors=%s, new_sessions=%s, profiles_updated=%s",
+            "企业主播映射同步完成: anchors=%s, discovered_sessions=%s, new_sessions=%s, profiles_updated=%s",
             len(unique_employees),
+            discovered_session_count,
             session_count,
             profile_count,
         )
         return {
             "anchor_count": len(unique_employees),
             "session_count": session_count,
+            "discovered_session_count": discovered_session_count,
             "profile_count": profile_count,
         }
     except Exception as exc:
@@ -1069,14 +1090,83 @@ async def _fetch_enterprise_post(page, path: str, payload: dict, csrf_token: str
     return result if isinstance(result, dict) else {}
 
 
+async def _fetch_enterprise_rows(
+    page,
+    path: str,
+    payload: dict,
+    csrf_token: str,
+    row_keys: tuple[str, ...],
+) -> tuple[list[dict], Optional[dict]]:
+    """分页读取企业接口，并兼容不同版本的列表字段。"""
+    rows: list[dict] = []
+    seen: set[str] = set()
+    self_profile = None
+
+    for page_no in range(1, ENTERPRISE_MAX_PAGES + 1):
+        page_payload = {
+            **payload,
+            "pageNum": page_no,
+            "pageNo": page_no,
+            "page": page_no,
+            "pageSize": ENTERPRISE_PAGE_SIZE,
+            "limit": ENTERPRISE_PAGE_SIZE,
+        }
+        response = await _fetch_enterprise_post(page, path, page_payload, csrf_token)
+        if response.get("code") == 403 or response.get("error_code") == 403:
+            raise RuntimeError("企业主播接口 CSRF 校验失败，请重新扫码登录")
+
+        data = response.get("data", {}) if isinstance(response, dict) else {}
+        if not isinstance(data, dict):
+            data = {}
+        if self_profile is None and isinstance(data.get("self"), dict):
+            self_profile = data["self"]
+
+        page_rows = []
+        for key in row_keys:
+            value = data.get(key)
+            if isinstance(value, list):
+                page_rows = [item for item in value if isinstance(item, dict)]
+                break
+
+        added = 0
+        for item in page_rows:
+            identity = json.dumps(item, ensure_ascii=False, sort_keys=True, default=str)
+            if identity not in seen:
+                seen.add(identity)
+                rows.append(item)
+                added += 1
+
+        total = _safe_int(_first_value(data, "total", "totalCount", "total_count", "count"))
+        has_more = _first_value(data, "hasMore", "has_more")
+        if not page_rows or added == 0:
+            break
+        if total is not None and len(rows) >= total:
+            break
+        if has_more is False:
+            break
+
+    if len(rows) >= ENTERPRISE_PAGE_SIZE * ENTERPRISE_MAX_PAGES:
+        logger.warning("企业接口达到最大分页限制: path=%s rows=%s", path, len(rows))
+    return rows, self_profile
+
+
+def _first_value(data: dict, *keys: str):
+    """返回第一个存在且非空的兼容字段值。"""
+    for key in keys:
+        value = data.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def _apply_enterprise_profile_to_session(session: LiveSession, profile: dict) -> bool:
     """把员工主播接口的稳定资料写入场次。"""
     values = {
-        "anchor_name": profile.get("iesName"),
-        "anchor_nickname": profile.get("iesName"),
-        "anchor_avatar_url": profile.get("avatarUrl"),
-        "douyin_id": profile.get("iesUniqId"),
-        "douyin_uid": str(profile.get("iesUid")) if profile.get("iesUid") else None,
+        "anchor_name": _first_value(profile, "iesName", "ies_name", "nickname", "name"),
+        "anchor_nickname": _first_value(profile, "iesName", "ies_name", "nickname", "name"),
+        "anchor_avatar_url": _first_value(profile, "avatarUrl", "avatar_url", "avatar"),
+        "douyin_id": _first_value(profile, "iesUniqId", "iesId", "ies_id", "douyinId", "douyin_id"),
+        "douyin_uid": _first_value(profile, "iesUid", "ies_uid", "uid", "id"),
     }
     return _apply_session_anchor_profile(session, values)
 
@@ -1263,8 +1353,17 @@ async def _scrape_history_session_detail(
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(6)
         try:
-            await page.get_by_text("评论", exact=True).click(timeout=5000)
-            await asyncio.sleep(3)
+            clicked = await page.evaluate(
+                """() => {
+                  const node = [...document.querySelectorAll('*')]
+                    .find(item => item.children.length === 0 && item.textContent?.trim() === '评论');
+                  if (!node) return false;
+                  node.click();
+                  return true;
+                }"""
+            )
+            if clicked:
+                await asyncio.sleep(3)
         except Exception:
             pass
 
