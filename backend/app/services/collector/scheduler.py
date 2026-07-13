@@ -30,6 +30,7 @@ class SchedulerManager:
             cls._instance._running = False
             cls._instance._session_jobs: dict[int, dict[str, str]] = {}
             cls._instance._collector_factory = None
+            cls._instance._last_error = None
         return cls._instance
 
     def set_collector_factory(self, factory):
@@ -62,6 +63,7 @@ class SchedulerManager:
 
         self._scheduler.start()
         self._running = True
+        self._last_error = None
         logger.info("SchedulerManager 已启动")
 
     async def stop(self):
@@ -127,10 +129,15 @@ class SchedulerManager:
         """获取所有活跃的 session_id 列表"""
         return list(self._session_jobs.keys())
 
+    @property
+    def last_error(self) -> Optional[str]:
+        return self._last_error
+
     async def _monitor_check(self):
         """开播检测任务"""
         from app.core.database import SessionLocal
         from app.models.live_rooms import LiveRoom
+        from app.models.live_sessions import LiveSession
         from app.services.collector.monitor import MockLiveDetector, CluerichLiveDetector
 
         db = SessionLocal()
@@ -141,16 +148,30 @@ class SchedulerManager:
                 detector = CluerichLiveDetector()
 
             rooms = db.query(LiveRoom).filter(LiveRoom.status == True).all()
+            self._last_error = None
             for room in rooms:
                 room_id_for_url = room.room_id_str or str(room.id)
                 dashboard_url = f"https://leads.cluerich.com/pc/analysis/live-screen?room_id={room_id_for_url}" if not settings.MONITOR_MOCK_MODE else ""
                 result = await detector.detect(dashboard_url)
 
-                if result.is_live and room.id not in self.get_active_sessions():
+                detection_error = (result.raw_data or {}).get("error")
+                if detection_error:
+                    self._last_error = str(detection_error)[:500]
+                    logger.error("直播监控检测失败 room=%s: %s", room.id, self._last_error)
+                    continue
+                active_session = db.query(LiveSession).filter(
+                    LiveSession.room_id == room.id,
+                    LiveSession.live_status == "live",
+                ).order_by(LiveSession.id.desc()).first()
+
+                if result.is_live and not active_session:
                     await self._on_live_start(db, room, result)
-                elif not result.is_live and room.id in self.get_active_sessions():
+                elif result.is_live and active_session and active_session.id not in self._session_jobs:
+                    self.add_session_jobs(active_session.id, active_session.dashboard_url or dashboard_url)
+                elif not result.is_live and active_session:
                     await self._on_live_end(db, room)
         except Exception as e:
+            self._last_error = str(e)[:500]
             logger.error(f"monitor_check 异常: {e}")
         finally:
             db.close()
@@ -201,7 +222,9 @@ class SchedulerManager:
             db.commit()
             db.refresh(task)
 
-            context = await browser_manager.create_context()
+            context, is_valid, message = await browser_manager.get_logged_in_context()
+            if not is_valid or not context:
+                raise RuntimeError(message or "采集账号登录状态不可用")
             from app.services.collector.live_collector import (
                 MetricsCollector, CommentCollector, ProfileCollector,
             )

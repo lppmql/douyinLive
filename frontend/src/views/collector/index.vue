@@ -994,6 +994,9 @@ onUnmounted(() => {
                     <div class="mt-4px text-12px text-gray-500">
                       活跃场次 {{ monitorStatus?.active_session_count || 0 }} 场
                     </div>
+                    <div v-if="monitorStatus?.last_error" class="mt-4px text-12px text-error">
+                      最近错误：{{ monitorStatus.last_error }}
+                    </div>
                   </div>
                   <NBadge :type="monitorStatus?.running ? 'success' : 'default'" dot />
                 </div>

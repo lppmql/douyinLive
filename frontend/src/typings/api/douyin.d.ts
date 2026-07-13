@@ -209,6 +209,7 @@ declare namespace Api {
       mock_mode: boolean;
       active_session_count: number;
       active_sessions: number[];
+      last_error: string | null;
     }
 
     interface MonitorAction {

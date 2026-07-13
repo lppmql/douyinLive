@@ -10,6 +10,7 @@ class MonitorStatusResponse(BaseModel):
     mock_mode: bool = False
     active_session_count: int = 0
     active_sessions: list[int] = []
+    last_error: Optional[str] = None
 
 
 class MonitorRoomItem(BaseModel):

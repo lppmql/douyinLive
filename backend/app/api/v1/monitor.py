@@ -13,6 +13,7 @@ from app.schemas.monitor import (
 )
 from app.services.collector.scheduler import scheduler_manager
 from app.services.collector.monitor import MockLiveDetector
+from app.services.collector.browser import browser_manager
 
 router = APIRouter(prefix="/monitor", tags=["直播监控"])
 
@@ -26,6 +27,7 @@ def get_monitor_status():
         mock_mode=settings.MONITOR_MOCK_MODE,
         active_session_count=len(scheduler_manager.get_active_sessions()),
         active_sessions=scheduler_manager.get_active_sessions(),
+        last_error=scheduler_manager.last_error,
     )
 
 
@@ -39,6 +41,10 @@ async def start_monitor(db: Session = Depends(get_db)):
     ).first()
     if running_collect:
         raise HTTPException(409, f"刷新数据采集任务 #{running_collect.id} 正在运行，请等待任务结束")
+    if not settings.MONITOR_MOCK_MODE:
+        context, is_valid, message = await browser_manager.get_logged_in_context()
+        if not is_valid or not context:
+            raise HTTPException(409, message or "采集账号登录状态不可用，请重新扫码")
     await scheduler_manager.start()
     return MonitorActionResponse(success=True, message="监控已启动")
 

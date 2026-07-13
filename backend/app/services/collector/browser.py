@@ -213,6 +213,10 @@ class BrowserManager:
                 logger.warning(f"持久化上下文不可用: {e}")
                 self._logged_in_context = None
 
+                # 浏览器进程断开后旧 Browser 对象也不能继续创建上下文。
+                if self._browser and not self._browser.is_connected():
+                    self._browser = None
+
         # 没有持久化上下文，从 StorageState 文件恢复
         if not self._logged_in_storage_path:
             return None, False, "没有登录账号"
@@ -235,6 +239,11 @@ class BrowserManager:
 
         await context.close()
         return None, False, "登录已过期，请重新扫码登录"
+
+    def invalidate_logged_in_context(self, context: Optional[BrowserContext] = None) -> None:
+        """清除失效登录上下文，保留 Cookie 路径供下一次自动恢复。"""
+        if context is None or self._logged_in_context is context:
+            self._logged_in_context = None
 
     async def check_account_health(self, account: ScraperAccount) -> tuple[bool, str]:
         """使用账号保存的 Cookie 与指纹做隔离的轻量登录态检查。"""
