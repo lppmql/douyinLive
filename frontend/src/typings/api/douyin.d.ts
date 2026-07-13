@@ -194,6 +194,12 @@ declare namespace Api {
       progress_message: string | null;
       collected_anchor_count: number;
       collected_session_count: number;
+      new_session_count: number;
+      mapped_session_count: number;
+      checked_detail_count: number;
+      refreshed_detail_count: number;
+      failed_detail_count: number;
+      remaining_detail_count: number;
       created_at: string;
     }
 

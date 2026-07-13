@@ -56,7 +56,7 @@ const errorLogCount = computed(() => logs.value.filter(item => item.level === 'e
 const hasAvailableAccount = computed(() => loggedInAccountCount.value > 0);
 const activeTasks = computed(() => tasks.value.filter(item => ['pending', 'running'].includes(item.status)));
 const currentCollectTask = computed(() =>
-  tasks.value.find(item => item.task_type === 'collect_all' && item.status === 'running')
+  tasks.value.find(item => item.task_type === 'collect_all')
 );
 
 const getAccountRowKey = (row: Api.Douyin.CollectorAccount) => row.id;
@@ -155,7 +155,15 @@ async function handleCollectAll() {
       message.warning(res.data.message);
     }
   } catch {
-    message.error('刷新数据采集失败');
+    await loadData(true);
+    const latestTask = tasks.value.find(item => item.task_type === 'collect_all');
+    if (latestTask?.status === 'completed') {
+      message.success(`后台采集已完成：同步 ${latestTask.collected_session_count} 场`);
+    } else if (latestTask?.status === 'running') {
+      message.info(`任务 #${latestTask.id} 仍在后台运行，页面将继续自动更新`);
+    } else {
+      message.error(latestTask?.error_message || '刷新数据采集失败');
+    }
   } finally {
     collectAllLoading.value = false;
     await loadData();
@@ -907,13 +915,18 @@ onUnmounted(() => {
                         {{ currentCollectTask.progress_message || '正在执行采集任务' }}
                       </div>
                     </div>
-                    <NTag type="primary" round>任务 #{{ currentCollectTask.id }}</NTag>
+                    <NTag
+                      :type="currentCollectTask.status === 'completed' ? 'success' : currentCollectTask.status === 'failed' ? 'error' : 'primary'"
+                      round
+                    >
+                      任务 #{{ currentCollectTask.id }} · {{ currentCollectTask.status === 'completed' ? '已完成' : currentCollectTask.status === 'failed' ? '失败' : '运行中' }}
+                    </NTag>
                   </div>
                   <NProgress
                     type="line"
                     :percentage="currentCollectTask.progress_percent || 0"
                     indicator-placement="inside"
-                    processing
+                    :processing="currentCollectTask.status === 'running'"
                   />
                   <div class="mt-8px flex justify-between text-12px text-gray-500">
                     <span>
@@ -922,9 +935,9 @@ onUnmounted(() => {
                         / {{ currentCollectTask.progress_total }}
                       </template>
                     </span>
-                    <span>页面每 5 秒自动更新</span>
+                    <span>{{ currentCollectTask.status === 'running' ? '页面每 5 秒自动更新' : formatFullTime(currentCollectTask.completed_at) }}</span>
                   </div>
-                  <NGrid class="mt-12px" cols="2" :x-gap="12">
+                  <NGrid class="mt-12px" cols="2 s:4 l:8" responsive="screen" :x-gap="10" :y-gap="10">
                     <NGi>
                       <div class="rounded-8px bg-white/70 px-12px py-10px dark:bg-black/15">
                         <div class="text-12px text-gray-500">已采集主播</div>
@@ -933,12 +946,18 @@ onUnmounted(() => {
                         </div>
                       </div>
                     </NGi>
-                    <NGi>
-                      <div class="rounded-8px bg-white/70 px-12px py-10px dark:bg-black/15">
-                        <div class="text-12px text-gray-500">已采集场次</div>
-                        <div class="mt-2px text-20px font-600">
-                          {{ currentCollectTask.collected_session_count || 0 }} 场
-                        </div>
+                    <NGi v-for="item in [
+                      { label: '已发现场次', value: currentCollectTask.collected_session_count },
+                      { label: '新增场次', value: currentCollectTask.new_session_count },
+                      { label: '主播映射', value: currentCollectTask.mapped_session_count },
+                      { label: '已检查详情', value: currentCollectTask.checked_detail_count },
+                      { label: '已补齐详情', value: currentCollectTask.refreshed_detail_count },
+                      { label: '详情失败', value: currentCollectTask.failed_detail_count },
+                      { label: '剩余待补', value: currentCollectTask.remaining_detail_count }
+                    ]" :key="item.label">
+                      <div class="rounded-8px bg-white/70 px-10px py-10px dark:bg-black/15">
+                        <div class="text-12px text-gray-500">{{ item.label }}</div>
+                        <div class="mt-2px text-18px font-600">{{ item.value || 0 }} 场</div>
                       </div>
                     </NGi>
                   </NGrid>

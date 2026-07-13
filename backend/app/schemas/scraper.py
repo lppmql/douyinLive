@@ -61,6 +61,12 @@ class ScraperTaskResponse(ScraperTaskBase):
     progress_message: Optional[str] = None
     collected_anchor_count: int = 0
     collected_session_count: int = 0
+    new_session_count: int = 0
+    mapped_session_count: int = 0
+    checked_detail_count: int = 0
+    refreshed_detail_count: int = 0
+    failed_detail_count: int = 0
+    remaining_detail_count: int = 0
     created_at: datetime
 
     class Config:

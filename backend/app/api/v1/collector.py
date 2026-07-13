@@ -340,6 +340,18 @@ async def manual_collect_all(db: Session = Depends(get_db)):
             task.collected_anchor_count = max(0, int(anchor_count))
         if session_count is not None:
             task.collected_session_count = max(0, int(session_count))
+        field_sources = {
+            "new_session_count": ("session_count", "enterprise_session_synced_count"),
+            "mapped_session_count": ("profile_count", "anchor_profile_synced_count"),
+            "checked_detail_count": ("checked_count", "history_detail_checked_count"),
+            "refreshed_detail_count": ("enriched_count", "history_detail_synced_count"),
+            "failed_detail_count": ("failed_count", "history_detail_failed_count"),
+            "remaining_detail_count": ("remaining_count", "history_detail_remaining_count"),
+        }
+        for task_field, source_keys in field_sources.items():
+            value = next((details[key] for key in source_keys if details.get(key) is not None), None)
+            if value is not None:
+                setattr(task, task_field, max(0, int(value)))
         db.add(
             ScraperLog(
                 task_id=task.id,
@@ -353,6 +365,12 @@ async def manual_collect_all(db: Session = Depends(get_db)):
                     "progress_total": task.progress_total,
                     "collected_anchor_count": task.collected_anchor_count,
                     "collected_session_count": task.collected_session_count,
+                    "new_session_count": task.new_session_count,
+                    "mapped_session_count": task.mapped_session_count,
+                    "checked_detail_count": task.checked_detail_count,
+                    "refreshed_detail_count": task.refreshed_detail_count,
+                    "failed_detail_count": task.failed_detail_count,
+                    "remaining_detail_count": task.remaining_detail_count,
                     "details": details,
                 },
             )

@@ -41,6 +41,12 @@ class ScraperAccountResponseTest(unittest.TestCase):
             progress_message="正在同步企业主播",
             collected_anchor_count=8,
             collected_session_count=24,
+            new_session_count=2,
+            mapped_session_count=20,
+            checked_detail_count=10,
+            refreshed_detail_count=8,
+            failed_detail_count=1,
+            remaining_detail_count=1,
             created_at=now,
             updated_at=now,
         )
@@ -53,6 +59,8 @@ class ScraperAccountResponseTest(unittest.TestCase):
         self.assertEqual(payload["progress_stage"], "enterprise_sync")
         self.assertEqual(payload["collected_anchor_count"], 8)
         self.assertEqual(payload["collected_session_count"], 24)
+        self.assertEqual(payload["refreshed_detail_count"], 8)
+        self.assertEqual(payload["failed_detail_count"], 1)
 
 
 if __name__ == "__main__":
