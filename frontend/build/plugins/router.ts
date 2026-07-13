@@ -23,10 +23,6 @@ export function setupElegantRouter() {
         return '/live-sessions/:id';
       }
 
-      if (routeName === 'live-session-ai-analysis') {
-        return '/live-sessions/:id/ai-analysis';
-      }
-
       return routePath;
     },
     onRouteMetaGen(routeName) {
@@ -43,7 +39,7 @@ export function setupElegantRouter() {
         meta.constant = true;
       }
 
-      if (routeName === 'live-session-detail' || routeName === 'live-session-ai-analysis') {
+      if (routeName === 'live-session-detail') {
         meta.hideInMenu = true;
         meta.activeMenu = 'live-sessions';
         meta.multiTab = true;

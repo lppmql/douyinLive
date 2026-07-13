@@ -234,7 +234,6 @@ const local: App.I18n.Schema = {
     dashboard: 'Dashboard',
     collector: 'Collector',
     'live-sessions': 'Live Sessions',
-    'live-session-ai-analysis': 'Live Data AI Analysis',
     'live-session-detail': 'Live Session Detail',
     transcripts: 'Transcripts',
     analysis: 'AI Analysis',

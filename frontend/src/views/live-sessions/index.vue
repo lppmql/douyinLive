@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { h, reactive } from 'vue';
-import { NTag, NButton, NAvatar, NSpace } from 'naive-ui';
+import { NTag, NButton, NAvatar } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { $t } from '@/locales';
 import { fetchLiveSessionPage } from '@/service/api/douyin';
@@ -74,10 +74,6 @@ function renderDetailStatus(row: Api.Douyin.LiveSession) {
 
 function openDetail(session: Api.Douyin.LiveSession) {
   router.push({ name: 'live-session-detail', params: { id: String(session.id) } });
-}
-
-function openAiAnalysis(session: Api.Douyin.LiveSession) {
-  router.push({ name: 'live-session-ai-analysis', params: { id: String(session.id) } });
 }
 
 /* ---------- 表格列 ---------- */
@@ -194,12 +190,9 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
     {
       title: () => $t('common.action'),
       key: 'actions',
-      width: 150,
+      width: 80,
       render(row: Api.Douyin.LiveSession) {
-        return h(NSpace, { size: 12, wrap: false }, () => [
-          h(NButton, { text: true, type: 'primary', size: 'tiny', onClick: () => openDetail(row) }, () => '详情'),
-          h(NButton, { text: true, type: 'success', size: 'tiny', onClick: () => openAiAnalysis(row) }, () => 'AI 分析')
-        ]);
+        return h(NButton, { text: true, type: 'primary', size: 'tiny', onClick: () => openDetail(row) }, () => '详情');
       }
     }
   ];

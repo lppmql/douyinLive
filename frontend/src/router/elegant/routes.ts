@@ -112,19 +112,6 @@ export const generatedRoutes: GeneratedRoute[] = [
     }
   },
   {
-    name: 'live-session-ai-analysis',
-    path: '/live-sessions/:id/ai-analysis',
-    component: 'layout.base$view.live-session-ai-analysis',
-    props: true,
-    meta: {
-      title: 'live-session-ai-analysis',
-      i18nKey: 'route.live-session-ai-analysis',
-      hideInMenu: true,
-      activeMenu: 'live-sessions',
-      multiTab: true
-    }
-  },
-  {
     name: 'live-session-detail',
     path: '/live-sessions/:id',
     component: 'layout.base$view.live-session-detail',

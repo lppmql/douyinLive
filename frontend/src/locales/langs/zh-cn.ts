@@ -230,7 +230,6 @@ const local: App.I18n.Schema = {
     dashboard: '数据大屏',
     collector: '数据采集',
     'live-sessions': '直播场次',
-    'live-session-ai-analysis': '直播数据 AI 分析',
     'live-session-detail': '直播场次详情',
     transcripts: '主播话术',
     analysis: 'AI 分析',

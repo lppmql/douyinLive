@@ -26,7 +26,6 @@ declare module "@elegant-router/types" {
     "home": "/home";
     "iframe-page": "/iframe-page/:url";
     "knowledge": "/knowledge";
-    "live-session-ai-analysis": "/live-sessions/:id/ai-analysis";
     "live-session-detail": "/live-sessions/:id";
     "live-sessions": "/live-sessions";
     "login": "/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?";
@@ -72,7 +71,6 @@ declare module "@elegant-router/types" {
     | "home"
     | "iframe-page"
     | "knowledge"
-    | "live-session-ai-analysis"
     | "live-session-detail"
     | "live-sessions"
     | "login"
@@ -104,7 +102,6 @@ declare module "@elegant-router/types" {
     | "dashboard"
     | "home"
     | "knowledge"
-    | "live-session-ai-analysis"
     | "live-session-detail"
     | "live-sessions"
     | "transcripts"
