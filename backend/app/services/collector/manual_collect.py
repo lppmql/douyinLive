@@ -10,7 +10,7 @@ import asyncio
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 import re
 from urllib.parse import urlencode, urlparse, parse_qs
 from urllib.request import Request, urlopen
@@ -43,11 +43,23 @@ ENTERPRISE_PAGE_SIZE = 100
 ENTERPRISE_MAX_PAGES = 200
 
 
-async def collect_all(db: Session) -> dict:
+ProgressCallback = Callable[[str, int, int, int, str, Optional[dict[str, Any]]], None]
+
+
+async def collect_all(
+    db: Session,
+    task_id: Optional[int] = None,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> dict:
     """
     一键采集所有房间的数据
     先访问大屏页，从页面实际数据中提取场次信息，再入库
     """
+    def report(stage: str, percent: int, current: int, total: int, message: str, details=None):
+        if progress_callback:
+            progress_callback(stage, percent, current, total, message, details)
+
+    report("prepare", 3, 0, 0, "正在查找可用采集账号")
     # 1. 获取已登录账号，设置持久化上下文的 storage path
     account = db.query(ScraperAccount).filter(
         ScraperAccount.login_status == "logged_in"
@@ -73,6 +85,7 @@ async def collect_all(db: Session) -> dict:
         .filter(LiveRoom.status == True, LiveRoom.room_id_str.isnot(None))
         .all()
     )
+    report("prepare", 8, 0, len(rooms), f"已加载 {len(rooms)} 个采集房间")
 
     if not rooms:
         return {
@@ -83,6 +96,7 @@ async def collect_all(db: Session) -> dict:
         }
 
     # 3. 获取持久化登录上下文（优先复用，自动验证 Cookie）
+    report("login_check", 10, 0, len(rooms), "正在验证 Cookie 与浏览器指纹")
     context, is_valid, msg = await browser_manager.get_logged_in_context()
     if not is_valid:
         return {
@@ -94,10 +108,18 @@ async def collect_all(db: Session) -> dict:
 
     try:
         results = []
-        for room in rooms:
+        for index, room in enumerate(rooms, start=1):
+            report(
+                "room_collection",
+                10 + int(index / max(len(rooms), 1) * 25),
+                index - 1,
+                len(rooms),
+                f"正在采集房间 {room.room_id_str}",
+                {"room_id": room.room_id_str, "room_name": room.anchor_name or room.account_name},
+            )
             try:
                 result = await asyncio.wait_for(
-                    _collect_room_data(db, context, room),
+                    _collect_room_data(db, context, room, task_id=task_id),
                     timeout=settings.ROOM_COLLECTION_TIMEOUT_SECONDS,
                 )
             except asyncio.TimeoutError:
@@ -113,14 +135,34 @@ async def collect_all(db: Session) -> dict:
                     "error": f"采集超过 {settings.ROOM_COLLECTION_TIMEOUT_SECONDS} 秒",
                 }
             results.append(result)
+            report(
+                "room_collection",
+                10 + int(index / max(len(rooms), 1) * 25),
+                index,
+                len(rooms),
+                f"房间采集进度 {index}/{len(rooms)}",
+                result,
+            )
 
         # 历史接口负责保证场次总量完整，企业接口负责补充主播映射。
         # 两者必须都执行，不能因为企业接口只返回部分主播而漏掉其他场次。
-        enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0])
+        report("enterprise_sync", 40, 0, 0, "正在同步全部企业主播及所属场次")
+        enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0], task_id=task_id)
+        report(
+            "enterprise_sync",
+            60,
+            enterprise_sync.get("profile_count", 0),
+            enterprise_sync.get("discovered_session_count", 0),
+            f"已发现 {enterprise_sync.get('anchor_count', 0)} 位主播、{enterprise_sync.get('discovered_session_count', 0)} 场直播",
+            enterprise_sync,
+        )
+        report("history_sync", 65, 0, 0, "正在同步账号历史直播场次")
         history_sync = _sync_history_sessions(db, account, rooms[0])
+        report("history_sync", 75, history_sync, history_sync, f"历史场次同步完成，本次新增 {history_sync} 场")
 
         # 未映射只代表当前接口暂时没返回主播关系，不能在采集过程中删除真实场次。
         pruned_unmapped_count = 0
+        report("detail_enrichment", 78, 0, HISTORY_DETAIL_BATCH_SIZE, "正在补齐场次指标、评论和主播资料")
         history_detail_progress = await _enrich_history_sessions(
             db,
             context,
@@ -128,12 +170,21 @@ async def collect_all(db: Session) -> dict:
             rooms[0],
             limit=HISTORY_DETAIL_BATCH_SIZE,
         )
+        report(
+            "detail_enrichment",
+            94,
+            history_detail_progress["checked_count"],
+            history_detail_progress["batch_size"],
+            f"本批补齐 {history_detail_progress['enriched_count']} 场，剩余 {history_detail_progress['remaining_count']} 场",
+            history_detail_progress,
+        )
 
         # 采集完成后刷新持久化 Cookie（延长有效期）
+        report("cookie_refresh", 97, 0, 0, "正在保存最新 Cookie 与浏览器指纹")
         await browser_manager.refresh_logged_in_state()
 
         collected = sum(1 for r in results if r.get("error") is None)
-        return {
+        final_result = {
             "total_rooms": len(rooms),
             "collected_rooms": collected,
             "history_synced_count": history_sync,
@@ -148,6 +199,8 @@ async def collect_all(db: Session) -> dict:
             "history_detail_batch_size": history_detail_progress["batch_size"],
             "results": results,
         }
+        report("completed", 100, collected, len(rooms), "全量采集完成", final_result)
+        return final_result
     finally:
         # 注意：不关闭 context！它被 browser_manager 持久化了
         pass
@@ -203,13 +256,23 @@ def _prune_unmapped_sessions(db: Session, room: LiveRoom) -> int:
     return len(session_ids)
 
 
-async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoom) -> dict:
+async def _collect_room_data(
+    db: Session,
+    context: BrowserContext,
+    room: LiveRoom,
+    task_id: Optional[int] = None,
+) -> dict:
     """采集单个房间的数据 — 以页面实际数据为准"""
     room_id = room.room_id_str
     # NOTE: anchor_name 不提前假设，从页面数据中提取
 
     logger.info(f"开始采集 room_id={room_id}")
-    log_entry = ScraperLog(level="info", message=f"开始采集 room_id={room_id}")
+    log_entry = ScraperLog(
+        task_id=task_id,
+        level="info",
+        message=f"开始采集房间 {room_id}",
+        raw_json={"stage": "room_collection", "event": "room_started", "room_id": room_id},
+    )
     db.add(log_entry)
     db.commit()
 
@@ -370,8 +433,22 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
             f"指标={metrics_count}, 评论={comments_count}, 画像={profiles_count}"
         )
         log_entry = ScraperLog(
+            task_id=task_id,
             level="info",
             message=f"采集完成: {anchor_name}, 指标={metrics_count}, 评论={comments_count}",
+            raw_json={
+                "stage": "room_collection",
+                "event": "room_completed",
+                "room_id": room_id,
+                "session_id": session.id,
+                "anchor_name": session.anchor_name or anchor_name,
+                "douyin_id": session.douyin_id or "",
+                "is_live": is_live,
+                "metrics_count": metrics_count,
+                "comments_count": comments_count,
+                "profiles_count": profiles_count,
+                "stream_saved": bool(stream_url),
+            },
         )
         db.add(log_entry)
         db.commit()
@@ -392,7 +469,18 @@ async def _collect_room_data(db: Session, context: BrowserContext, room: LiveRoo
         import traceback
         tb = traceback.format_exc()
         logger.error(f"采集 room_id={room_id} 失败: {e}\n{tb}")
-        err_log = ScraperLog(level="error", message=f"采集失败 room_id={room_id}: {str(e)}")
+        err_log = ScraperLog(
+            task_id=task_id,
+            level="error",
+            message=f"采集失败 room_id={room_id}: {str(e)}",
+            raw_json={
+                "stage": "room_collection",
+                "event": "room_failed",
+                "room_id": room_id,
+                "error_type": type(e).__name__,
+                "error": str(e)[:2000],
+            },
+        )
         db.add(err_log)
         db.commit()
         return {"room_id": room_id, "error": str(e)}
@@ -924,6 +1012,7 @@ async def _sync_enterprise_anchor_sessions(
     db: Session,
     context: BrowserContext,
     room: LiveRoom,
+    task_id: Optional[int] = None,
 ) -> dict:
     """从企业主账号的员工接口同步主播与场次的真实映射。"""
     page = None
@@ -1043,6 +1132,7 @@ async def _sync_enterprise_anchor_sessions(
         db.commit()
         db.add(
             ScraperLog(
+                task_id=task_id,
                 level="info",
                 message=f"企业主播映射同步完成: 主播={len(unique_employees)}, 发现场次={discovered_session_count}, 新场次={session_count}, 更新={profile_count}",
                 raw_json={

@@ -86,6 +86,19 @@ export function checkCollectorAccountHealth(accountId: number) {
   });
 }
 
+/** 获取 ASR 模型与 Worker 的真实运行状态 */
+export function fetchAsrControlStatus() {
+  return backendRequest<Api.Douyin.AsrControlStatus>({ url: `${API_PREFIX}/collector/asr-control` });
+}
+
+/** 按需启停 ASR，关闭时释放模型内存 */
+export function setAsrControl(enabled: boolean) {
+  return backendRequest<Api.Douyin.AsrControlStatus>({
+    url: `${API_PREFIX}/collector/asr-control/${enabled}`,
+    method: 'POST'
+  });
+}
+
 /* ---------- 话术/ASR ---------- */
 
 /** 获取话术分段列表 */

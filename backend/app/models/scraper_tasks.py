@@ -16,3 +16,8 @@ class ScraperTask(Base, TimestampMixin):
     started_at = Column(DateTime, nullable=True, comment="开始时间")
     completed_at = Column(DateTime, nullable=True, comment="完成时间")
     error_message = Column(Text, nullable=True, comment="错误信息")
+    progress_percent = Column(Integer, nullable=False, default=0, comment="任务进度百分比")
+    progress_current = Column(Integer, nullable=False, default=0, comment="当前完成数量")
+    progress_total = Column(Integer, nullable=False, default=0, comment="预计总数量")
+    progress_stage = Column(String(50), nullable=True, comment="当前执行阶段")
+    progress_message = Column(String(500), nullable=True, comment="当前进度说明")

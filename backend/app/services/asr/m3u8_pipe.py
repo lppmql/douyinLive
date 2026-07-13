@@ -47,6 +47,7 @@ class M3u8Pipe:
             "-protocol_whitelist", "https,http,tcp,tls,crypto,file,pipe",
             "-i", self.m3u8_url,
             "-vn",                     # 不要视频
+            "-threads", "1",           # 限制解码线程，避免与 FunASR 抢占全部 CPU
             "-ac", "1",                # 单声道
             "-ar", str(ASR_SAMPLE_RATE := settings.ASR_SAMPLE_RATE or 16000),  # 16kHz
             "-acodec", "pcm_s16le",    # PCM s16le 编码

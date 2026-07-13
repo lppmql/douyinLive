@@ -164,6 +164,11 @@ declare namespace Api {
       started_at: string | null;
       completed_at: string | null;
       error_message: string | null;
+      progress_percent: number;
+      progress_current: number;
+      progress_total: number;
+      progress_stage: string | null;
+      progress_message: string | null;
       created_at: string;
     }
 
@@ -183,6 +188,15 @@ declare namespace Api {
       valid: boolean;
       login_status: 'logged_in' | 'expired';
       checked_at: string;
+      message: string;
+    }
+
+    interface AsrControlStatus {
+      enabled: boolean;
+      engine_running: boolean;
+      worker_running: boolean;
+      queued_count: number;
+      processing_count: number;
       message: string;
     }
 

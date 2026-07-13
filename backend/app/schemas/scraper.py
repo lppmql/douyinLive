@@ -54,6 +54,11 @@ class ScraperTaskResponse(ScraperTaskBase):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    progress_percent: int = 0
+    progress_current: int = 0
+    progress_total: int = 0
+    progress_stage: Optional[str] = None
+    progress_message: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -105,6 +110,15 @@ class AccountHealthResponse(BaseModel):
     login_status: str
     checked_at: datetime
     message: str
+
+
+class AsrControlResponse(BaseModel):
+    enabled: bool
+    engine_running: bool
+    worker_running: bool
+    queued_count: int = 0
+    processing_count: int = 0
+    message: str = ""
 
 
 # ===== 一键采集结果 =====

@@ -13,6 +13,8 @@ import {
   deleteCollectorAccount,
   checkCollectorAccountHealth,
   fetchCollectorTasks,
+  fetchAsrControlStatus,
+  setAsrControl,
   fetchMonitorStatus,
   startMonitor,
   stopMonitor,
@@ -40,14 +42,22 @@ const accountHighlight = ref(false);
 const logHighlight = ref(false);
 const taskDrawerVisible = ref(false);
 const logLevel = ref('all');
+const logTaskId = ref<number | null>(null);
 const now = ref(Date.now());
 const silentRefreshing = ref(false);
 const accountHealthLoadingId = ref<number | null>(null);
+const logDetailVisible = ref(false);
+const selectedLog = ref<Api.Douyin.CollectorLog | null>(null);
+const asrStatus = ref<Api.Douyin.AsrControlStatus | null>(null);
+const asrControlLoading = ref(false);
 
 const loggedInAccountCount = computed(() => accounts.value.filter(item => item.login_status === 'logged_in').length);
 const errorLogCount = computed(() => logs.value.filter(item => item.level === 'error').length);
 const hasAvailableAccount = computed(() => loggedInAccountCount.value > 0);
 const activeTasks = computed(() => tasks.value.filter(item => ['pending', 'running'].includes(item.status)));
+const currentCollectTask = computed(() =>
+  tasks.value.find(item => item.task_type === 'collect_all' && item.status === 'running')
+);
 
 const getAccountRowKey = (row: Api.Douyin.CollectorAccount) => row.id;
 const getLogRowKey = (row: Api.Douyin.CollectorLog) => row.id;
@@ -161,18 +171,24 @@ async function loadData(silent = false) {
   if (silent) silentRefreshing.value = true;
   else loading.value = true;
   try {
-    const [statusRes, accountsRes, logsRes, tasksRes, monitorRes] = await Promise.all([
+    const [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes] = await Promise.all([
       fetchCollectorStatus(),
       fetchCollectorAccounts(),
-      fetchCollectorLogs({ limit: 50, level: logLevel.value === 'all' ? undefined : logLevel.value }),
+      fetchCollectorLogs({
+        limit: 100,
+        level: logLevel.value === 'all' ? undefined : logLevel.value,
+        taskId: logTaskId.value || undefined
+      }),
       fetchCollectorTasks(),
-      fetchMonitorStatus()
+      fetchMonitorStatus(),
+      fetchAsrControlStatus()
     ]);
     if (statusRes.data != null) collectorStatus.value = statusRes.data;
     if (accountsRes.data != null) accounts.value = accountsRes.data;
     if (logsRes.data != null) logs.value = logsRes.data;
     if (tasksRes.data != null) tasks.value = tasksRes.data;
     if (monitorRes.data != null) monitorStatus.value = monitorRes.data;
+    if (asrRes.data != null) asrStatus.value = asrRes.data;
   } catch {
     if (!silent) message.error('加载采集数据失败');
   } finally {
@@ -181,10 +197,39 @@ async function loadData(silent = false) {
   }
 }
 
+async function handleAsrToggle(enabled: boolean) {
+  asrControlLoading.value = true;
+  try {
+    const res = await setAsrControl(enabled);
+    if (res.data) {
+      asrStatus.value = res.data;
+      message.success(res.data.message);
+    }
+  } catch {
+    message.error(`ASR 话术服务${enabled ? '开启' : '关闭'}失败`);
+    await loadData(true);
+  } finally {
+    asrControlLoading.value = false;
+  }
+}
+
 async function filterLogs(level: string) {
   logLevel.value = level;
   await loadData(true);
   scrollToSection(logSectionRef, logHighlight);
+}
+
+async function viewTaskLogs(taskId: number) {
+  logTaskId.value = taskId;
+  logLevel.value = 'all';
+  taskDrawerVisible.value = false;
+  await loadData(true);
+  scrollToSection(logSectionRef, logHighlight);
+}
+
+async function clearTaskLogFilter() {
+  logTaskId.value = null;
+  await loadData(true);
 }
 
 function scrollToSection(section: typeof accountSectionRef, highlight: typeof accountHighlight) {
@@ -240,6 +285,50 @@ function formatFullTime(value: string | null) {
 function parseBackendTime(value: string) {
   const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
   return new Date(hasTimezone ? value : `${value}Z`).getTime();
+}
+
+function getLogPayload(log: Api.Douyin.CollectorLog): Record<string, unknown> {
+  return log.raw_json && typeof log.raw_json === 'object' && !Array.isArray(log.raw_json)
+    ? (log.raw_json as Record<string, unknown>)
+    : {};
+}
+
+function getStageLabel(stage: unknown) {
+  const labels: Record<string, string> = {
+    prepare: '准备账号',
+    login_check: '验证登录',
+    room_collection: '房间采集',
+    enterprise_sync: '主播同步',
+    history_sync: '历史同步',
+    detail_enrichment: '详情补齐',
+    cookie_refresh: '保存登录态',
+    completed: '采集完成',
+    failed: '采集失败'
+  };
+  return labels[String(stage || '')] || String(stage || '常规日志');
+}
+
+function getLogSummary(log: Api.Douyin.CollectorLog) {
+  const payload = getLogPayload(log);
+  const detailSource = payload.details;
+  const details =
+    detailSource && typeof detailSource === 'object' && !Array.isArray(detailSource)
+      ? (detailSource as Record<string, unknown>)
+      : payload;
+  const parts = [
+    details.anchor_name && `主播 ${details.anchor_name}`,
+    details.room_id && `房间 ${details.room_id}`,
+    details.metrics_count !== undefined && `指标 ${details.metrics_count}`,
+    details.comments_count !== undefined && `评论 ${details.comments_count}`,
+    details.profiles_count !== undefined && `画像 ${details.profiles_count}`,
+    payload.progress_percent !== undefined && `进度 ${payload.progress_percent}%`
+  ].filter(Boolean);
+  return parts.join(' · ') || '-';
+}
+
+function openLogDetail(log: Api.Douyin.CollectorLog) {
+  selectedLog.value = log;
+  logDetailVisible.value = true;
 }
 
 function startDataPolling() {
@@ -507,6 +596,22 @@ const logColumns = [
     }
   },
   {
+    title: '任务',
+    key: 'task_id',
+    width: 90,
+    render(row: Api.Douyin.CollectorLog) {
+      return row.task_id ? `#${row.task_id}` : '-';
+    }
+  },
+  {
+    title: '阶段',
+    key: 'stage',
+    width: 100,
+    render(row: Api.Douyin.CollectorLog) {
+      return getStageLabel(getLogPayload(row).stage);
+    }
+  },
+  {
     title: () => $t('page.collector.logLevel'),
     key: 'level',
     width: 80,
@@ -519,7 +624,28 @@ const logColumns = [
       return h(NTag, { type: typeMap[row.level] || 'info', size: 'small' }, { default: () => row.level.toUpperCase() });
     }
   },
-  { title: () => $t('page.collector.logMessage'), key: 'message', minWidth: 420, ellipsis: { tooltip: true } }
+  { title: () => $t('page.collector.logMessage'), key: 'message', minWidth: 300, ellipsis: { tooltip: true } },
+  {
+    title: '数据摘要',
+    key: 'summary',
+    minWidth: 240,
+    ellipsis: { tooltip: true },
+    render(row: Api.Douyin.CollectorLog) {
+      return getLogSummary(row);
+    }
+  },
+  {
+    title: '详情',
+    key: 'detail',
+    width: 70,
+    render(row: Api.Douyin.CollectorLog) {
+      return h(
+        NButton,
+        { text: true, type: 'primary', size: 'tiny', onClick: () => openLogDetail(row) },
+        { default: () => '查看' }
+      );
+    }
+  }
 ];
 
 const taskColumns = [
@@ -556,6 +682,17 @@ const taskColumns = [
     }
   },
   {
+    title: '进度',
+    key: 'progress_percent',
+    width: 170,
+    render(row: Api.Douyin.CollectorTask) {
+      return h('div', { class: 'flex flex-col gap-4px' }, [
+        h('span', { class: 'text-12px' }, `${row.progress_percent || 0}% · ${getStageLabel(row.progress_stage)}`),
+        h('span', { class: 'text-11px text-gray-500' }, row.progress_message || '-')
+      ]);
+    }
+  },
+  {
     title: '开始时间',
     key: 'started_at',
     width: 180,
@@ -563,7 +700,19 @@ const taskColumns = [
       return formatFullTime(row.started_at);
     }
   },
-  { title: '失败原因', key: 'error_message', minWidth: 220, ellipsis: { tooltip: true } }
+  { title: '失败原因', key: 'error_message', minWidth: 220, ellipsis: { tooltip: true } },
+  {
+    title: '操作',
+    key: 'action',
+    width: 90,
+    render(row: Api.Douyin.CollectorTask) {
+      return h(
+        NButton,
+        { text: true, type: 'primary', size: 'tiny', onClick: () => viewTaskLogs(row.id) },
+        { default: () => '查看日志' }
+      );
+    }
+  }
 ];
 
 /* ---------- 生命周期 ---------- */
@@ -681,6 +830,46 @@ onUnmounted(() => {
                 <NAlert type="info" :show-icon="true" :bordered="false">
                   自动发现账号下全部主播，依次同步直播场次、主播资料、指标、评论和观众画像。采集期间请勿删除当前账号。
                 </NAlert>
+                <div
+                  class="flex flex-wrap items-center justify-between gap-12px rounded-10px bg-gray-100 p-12px dark:bg-white/5"
+                >
+                  <div class="flex items-center gap-12px">
+                    <div
+                      class="size-38px flex-center rounded-10px"
+                      :class="
+                        asrStatus?.enabled
+                          ? 'bg-success-100 text-success dark:bg-success-900/30'
+                          : 'bg-gray-200 text-gray-500 dark:bg-white/10'
+                      "
+                    >
+                      <SvgIcon icon="mdi:waveform" class="text-21px" />
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-8px font-600">
+                        ASR 话术生成
+                        <NTag :type="asrStatus?.enabled ? 'success' : 'default'" round size="small">
+                          {{ asrStatus?.enabled ? '已开启' : '已关闭' }}
+                        </NTag>
+                      </div>
+                      <div class="mt-3px text-12px text-gray-500">
+                        <template v-if="asrStatus?.enabled">
+                          模型与 Worker 正在运行 · 排队 {{ asrStatus.queued_count }} · 处理中
+                          {{ asrStatus.processing_count }}
+                        </template>
+                        <template v-else>按需开启；关闭时不占用 FunASR 模型内存</template>
+                      </div>
+                    </div>
+                  </div>
+                  <NSwitch
+                    :value="Boolean(asrStatus?.enabled)"
+                    :loading="asrControlLoading"
+                    :disabled="Boolean(asrStatus?.processing_count)"
+                    @update:value="handleAsrToggle"
+                  >
+                    <template #checked>开启</template>
+                    <template #unchecked>关闭</template>
+                  </NSwitch>
+                </div>
                 <div class="flex flex-wrap items-center gap-12px">
                   <NTooltip :disabled="!collectDisabledReason">
                     <template #trigger>
@@ -700,6 +889,33 @@ onUnmounted(() => {
                     {{ collectDisabledReason }}
                   </NTooltip>
                   <span class="text-12px text-gray-500">采集完成后自动刷新账号状态与最近日志</span>
+                </div>
+
+                <div v-if="currentCollectTask" class="rounded-10px bg-primary-50 p-16px dark:bg-primary-900/15">
+                  <div class="mb-10px flex flex-wrap items-center justify-between gap-8px">
+                    <div>
+                      <div class="font-600">{{ getStageLabel(currentCollectTask.progress_stage) }}</div>
+                      <div class="mt-4px text-12px text-gray-500">
+                        {{ currentCollectTask.progress_message || '正在执行采集任务' }}
+                      </div>
+                    </div>
+                    <NTag type="primary" round>任务 #{{ currentCollectTask.id }}</NTag>
+                  </div>
+                  <NProgress
+                    type="line"
+                    :percentage="currentCollectTask.progress_percent || 0"
+                    indicator-placement="inside"
+                    processing
+                  />
+                  <div class="mt-8px flex justify-between text-12px text-gray-500">
+                    <span>
+                      已完成 {{ currentCollectTask.progress_current || 0 }}
+                      <template v-if="currentCollectTask.progress_total">
+                        / {{ currentCollectTask.progress_total }}
+                      </template>
+                    </span>
+                    <span>页面每 5 秒自动更新</span>
+                  </div>
                 </div>
 
                 <template v-if="collectAllResult">
@@ -820,6 +1036,9 @@ onUnmounted(() => {
           <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.logTitle')">
             <template #header-extra>
               <NSpace>
+                <NTag v-if="logTaskId" type="primary" closable @close="clearTaskLogFilter">
+                  仅任务 #{{ logTaskId }}
+                </NTag>
                 <NRadioGroup v-model:value="logLevel" size="small" @update:value="filterLogs">
                   <NRadioButton value="all">全部</NRadioButton>
                   <NRadioButton value="info">信息</NRadioButton>
@@ -837,7 +1056,7 @@ onUnmounted(() => {
               :columns="logColumns"
               :data="logs"
               :row-key="getLogRowKey"
-              :scroll-x="720"
+              :scroll-x="1260"
               :bordered="false"
               size="small"
             />
@@ -860,12 +1079,32 @@ onUnmounted(() => {
           :columns="taskColumns"
           :data="tasks"
           :row-key="getTaskRowKey"
-          :scroll-x="720"
+          :scroll-x="920"
           :bordered="false"
           size="small"
         />
       </NDrawerContent>
     </NDrawer>
+
+    <NModal v-model:show="logDetailVisible" preset="card" title="采集日志详情" class="w-720px max-w-[calc(100vw-32px)]">
+      <NDescriptions v-if="selectedLog" :column="2" bordered label-placement="left" size="small">
+        <NDescriptionsItem label="日志 ID">#{{ selectedLog.id }}</NDescriptionsItem>
+        <NDescriptionsItem label="任务 ID">
+          {{ selectedLog.task_id ? `#${selectedLog.task_id}` : '-' }}
+        </NDescriptionsItem>
+        <NDescriptionsItem label="时间">{{ formatFullTime(selectedLog.created_at) }}</NDescriptionsItem>
+        <NDescriptionsItem label="级别">{{ selectedLog.level.toUpperCase() }}</NDescriptionsItem>
+        <NDescriptionsItem label="阶段">{{ getStageLabel(getLogPayload(selectedLog).stage) }}</NDescriptionsItem>
+        <NDescriptionsItem label="数据摘要">{{ getLogSummary(selectedLog) }}</NDescriptionsItem>
+        <NDescriptionsItem label="消息" :span="2">{{ selectedLog.message || '-' }}</NDescriptionsItem>
+      </NDescriptions>
+      <div v-if="selectedLog" class="mt-16px">
+        <div class="mb-8px font-600">结构化数据</div>
+        <pre
+          class="max-h-360px overflow-auto whitespace-pre-wrap rounded-8px bg-gray-100 p-12px text-12px dark:bg-white/5"
+        >{{ JSON.stringify(getLogPayload(selectedLog), null, 2) }}</pre>
+      </div>
+    </NModal>
 
     <!-- 扫码登录弹窗 -->
     <NModal

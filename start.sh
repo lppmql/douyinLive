@@ -28,14 +28,14 @@ clean_port() {
   fi
 }
 
-# 1. 启动 Docker 服务（MySQL + Redis + FunASR）
+# 1. 启动基础 Docker 服务（ASR 默认关闭，由采集页面开关控制）
 echo ""
-echo "[1/5] 启动数据库 MySQL + Redis + FunASR..."
+echo "[1/5] 启动数据库 MySQL + Redis..."
 cd "$ROOT_DIR"
-docker compose --profile funasr up -d 2>/dev/null || docker compose up -d
+docker compose up -d
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
-echo "  ✅ FunASR: localhost:10096 (话术转写引擎)"
+echo "  ⏸️  FunASR 默认关闭，可在数据采集页面开启"
 
 # 2. 启动后端（先清理 8000 端口）
 echo ""
@@ -58,15 +58,11 @@ WORKER_PID=$!
 echo "  ✅ 采集 Worker (PID: $WORKER_PID)"
 echo "     设置 MONITOR_ENABLED=true 启用自动采集"
 
-# 4. 启动 ASR Worker（话术转写，仅在 ASR_WORKER_MODE=true 时有效）
+# 4. ASR Worker 默认不启动，避免 8GB 电脑启动即占用大量内存
 echo ""
-echo "[4/5] 启动 ASR Worker..."
-cd "$BACKEND_DIR"
-source .venv/bin/activate
-python -m workers.asr_worker &
-ASR_PID=$!
-echo "  ✅ ASR Worker (PID: $ASR_PID)"
-echo "     设置 ASR_WORKER_MODE=true 启用话术转写"
+echo "[4/5] ASR 话术服务保持关闭..."
+ASR_PID=""
+echo "  ⏸️  请在数据采集页面按需开启 ASR"
 
 # 5. 启动前端（先清理 9527 端口）
 echo ""

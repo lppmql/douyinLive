@@ -1,4 +1,6 @@
 """Phase 3: 采集状态 & 扫码登录 API"""
+import asyncio
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -19,12 +21,15 @@ from app.schemas.scraper import (
     LoginStartResponse,
     LoginStatusResponse,
     AccountHealthResponse,
+    AsrControlResponse,
     CollectAllResponse,
 )
 from app.services.collector.browser import browser_manager
 from app.services.collector.browser import STORAGE_DIR
 from app.services.collector.manual_collect import collect_all
 from app.services.collector.scheduler import scheduler_manager
+from app.services.asr.control import get_asr_runtime_status, start_asr_runtime, stop_asr_runtime
+from app.models.asr_tasks import AsrTask
 
 router = APIRouter(prefix="/collector", tags=["数据采集"])
 
@@ -143,6 +148,40 @@ async def check_account_health(account_id: int, db: Session = Depends(get_db)):
         checked_at=datetime.utcnow(),
         message=message,
     )
+
+
+def _asr_control_response(db: Session, runtime: dict, message: str = "") -> AsrControlResponse:
+    queued_count = db.query(AsrTask).filter(AsrTask.status == "queued").count()
+    processing_count = db.query(AsrTask).filter(AsrTask.status == "processing").count()
+    return AsrControlResponse(
+        enabled=runtime["enabled"],
+        engine_running=runtime["engine_running"],
+        worker_running=runtime["worker_running"],
+        queued_count=queued_count,
+        processing_count=processing_count,
+        message=message,
+    )
+
+
+@router.get("/asr-control", response_model=AsrControlResponse)
+async def get_asr_control(db: Session = Depends(get_db)):
+    """获取本地 ASR 模型与 Worker 的真实运行状态。"""
+    runtime = await asyncio.to_thread(get_asr_runtime_status)
+    return _asr_control_response(db, runtime)
+
+
+@router.post("/asr-control/{enabled}", response_model=AsrControlResponse)
+async def set_asr_control(enabled: bool, db: Session = Depends(get_db)):
+    """按需启停 ASR，关闭时释放 FunASR 模型占用的内存。"""
+    processing_count = db.query(AsrTask).filter(AsrTask.status == "processing").count()
+    if not enabled and processing_count:
+        raise HTTPException(409, f"当前有 {processing_count} 个话术任务正在生成，请等待完成后再关闭 ASR")
+    try:
+        runtime = await asyncio.to_thread(start_asr_runtime if enabled else stop_asr_runtime)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise HTTPException(500, f"ASR 服务{'启动' if enabled else '停止'}失败: {str(exc)}") from exc
+    message = "ASR 话术服务已开启" if runtime["enabled"] else "ASR 话术服务已关闭，模型内存已释放"
+    return _asr_control_response(db, runtime, message)
 
 
 # ===== 扫码登录 =====
@@ -284,16 +323,58 @@ async def manual_collect_all(db: Session = Depends(get_db)):
     )
     db.add(task)
     db.commit()
+
+    def update_progress(stage, percent, current, total, message, details=None):
+        task.progress_stage = stage
+        task.progress_percent = max(0, min(100, int(percent)))
+        task.progress_current = max(0, int(current or 0))
+        task.progress_total = max(0, int(total or 0))
+        task.progress_message = str(message)[:500]
+        db.add(
+            ScraperLog(
+                task_id=task.id,
+                level="info",
+                message=message,
+                raw_json={
+                    "stage": stage,
+                    "event": "progress",
+                    "progress_percent": task.progress_percent,
+                    "progress_current": task.progress_current,
+                    "progress_total": task.progress_total,
+                    "details": details or {},
+                },
+            )
+        )
+        db.commit()
+
     try:
-        result = await collect_all(db)
+        result = await collect_all(db, task_id=task.id, progress_callback=update_progress)
         task.status = "completed" if result.get("collected_rooms", 0) else "failed"
         if task.status == "failed":
             task.error_message = result.get("message") or "未采集到房间数据"
+            task.progress_message = task.error_message
         return result
     except Exception as exc:
         task.status = "failed"
         task.error_message = str(exc)[:2000]
+        task.progress_stage = "failed"
+        task.progress_message = "采集任务执行失败"
+        db.add(
+            ScraperLog(
+                task_id=task.id,
+                level="error",
+                message=f"全量采集任务失败: {str(exc)}",
+                raw_json={
+                    "stage": "failed",
+                    "event": "task_failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:2000],
+                },
+            )
+        )
         raise
     finally:
         task.completed_at = datetime.utcnow()
+        if task.status == "completed":
+            task.progress_percent = 100
         db.commit()

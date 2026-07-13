@@ -38,6 +38,9 @@ services:
     container_name: douyin_live_funasr
     restart: unless-stopped
     privileged: true
+    # 8GB Mac 上限制识别容器资源，避免话术生成期间占满整机。
+    cpus: 2.0
+    mem_limit: 1800m
     ports:
       - "10096:10095"
     volumes:
@@ -53,6 +56,8 @@ services:
     image: registry.cn-qingdao.aliyuncs.com/dataease/dataease:v2.10.25
     container_name: douyin_live_dataease
     restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 1200m
     ports:
       - "8100:8100"
     volumes:
