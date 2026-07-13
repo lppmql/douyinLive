@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, h, onMounted, onUnmounted } from 'vue';
-import { NTag, NButton, useMessage, useDialog } from 'naive-ui';
+import { computed, h, onMounted, onUnmounted, ref } from 'vue';
+import { NButton, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
 import {
   fetchCollectorStatus,
@@ -32,6 +32,14 @@ const collectorStatus = ref<Api.Douyin.CollectorStatus | null>(null);
 const accounts = ref<Api.Douyin.CollectorAccount[]>([]);
 const logs = ref<Api.Douyin.CollectorLog[]>([]);
 
+const loggedInAccountCount = computed(() => accounts.value.filter(item => item.login_status === 'logged_in').length);
+const errorLogCount = computed(() => logs.value.filter(item => item.level === 'error').length);
+const hasAvailableAccount = computed(() => loggedInAccountCount.value > 0);
+
+const getAccountRowKey = (row: Api.Douyin.CollectorAccount) => row.id;
+const getLogRowKey = (row: Api.Douyin.CollectorLog) => row.id;
+const getCollectResultRowKey = (row: Api.Douyin.CollectRoomResult) => row.room_id;
+
 type LoginState = 'idle' | 'pending' | 'scanning' | 'success' | 'failed' | 'timeout' | 'not_found';
 
 /* ---------- 扫码登录 ---------- */
@@ -61,8 +69,11 @@ async function handleStartMonitor() {
     const res = await startMonitor();
     if (res.data?.success) message.success(res.data.message);
     await loadMonitorStatus();
-  } catch { message.error('启动监控失败'); }
-  finally { monitorLoading.value = false; }
+  } catch {
+    message.error('启动监控失败');
+  } finally {
+    monitorLoading.value = false;
+  }
 }
 
 async function handleStopMonitor() {
@@ -71,8 +82,11 @@ async function handleStopMonitor() {
     const res = await stopMonitor();
     if (res.data?.success) message.success(res.data.message);
     await loadMonitorStatus();
-  } catch { message.error('停止监控失败'); }
-  finally { monitorLoading.value = false; }
+  } catch {
+    message.error('停止监控失败');
+  } finally {
+    monitorLoading.value = false;
+  }
 }
 
 async function handleTriggerLive() {
@@ -109,6 +123,7 @@ async function handleCollectAll() {
     message.error('一键采集失败');
   } finally {
     collectAllLoading.value = false;
+    await loadData();
   }
 }
 
@@ -134,6 +149,9 @@ async function loadData() {
 /* ---------- 扫码登录流程 ---------- */
 async function handleStartLogin() {
   try {
+    qrImage.value = '';
+    loginMessage.value = '';
+    stopLoginPoll();
     const res = await startCollectorLogin();
     if (!res.data) return;
     loginTaskId.value = res.data.task_id;
@@ -148,6 +166,9 @@ async function handleStartLogin() {
 
 async function handleReLogin(accountId: number) {
   try {
+    qrImage.value = '';
+    loginMessage.value = '';
+    stopLoginPoll();
     const res = await reCollectorLogin(accountId);
     if (!res.data) return;
     loginTaskId.value = res.data.task_id;
@@ -231,6 +252,10 @@ function stopLoginPoll() {
 function closeQRModal() {
   showQRModal.value = false;
   stopLoginPoll();
+  qrImage.value = '';
+  loginTaskId.value = null;
+  loginStatus.value = 'idle';
+  loginMessage.value = '';
 }
 
 /* ---------- 表格列 ---------- */
@@ -276,43 +301,60 @@ const accountColumns = [
       const btns: ReturnType<typeof h>[] = [];
       if (row.login_status === 'expired') {
         btns.push(
-          h(NButton, {
-            text: true,
-            type: 'warning',
-            size: 'tiny',
-            onClick: () => handleReLogin(row.id)
-          }, { default: () => $t('page.collector.reLogin') })
+          h(
+            NButton,
+            {
+              text: true,
+              type: 'warning',
+              size: 'tiny',
+              onClick: () => handleReLogin(row.id)
+            },
+            { default: () => $t('page.collector.reLogin') }
+          )
         );
       }
       btns.push(
-        h(NButton, {
-          text: true,
-          type: 'error',
-          size: 'tiny',
-          onClick: () => handleDeleteAccount(row.id)
-        }, { default: () => $t('page.collector.deleteAccount') })
+        h(
+          NButton,
+          {
+            text: true,
+            type: 'error',
+            size: 'tiny',
+            onClick: () => handleDeleteAccount(row.id)
+          },
+          { default: () => $t('page.collector.deleteAccount') }
+        )
       );
-      return btns;
+      return h(NSpace, { size: 12, wrap: false }, { default: () => btns });
     }
   }
 ];
 
 const collectResultColumns = [
-  { title: '主播', key: 'anchor_name', width: 100 },
-  { title: '直播', key: 'is_live', width: 60, render(row: { is_live: boolean }) { return row.is_live ? h(NTag, { type: 'success', size: 'small' }, { default: () => '直播中' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '未开播' }); } },
+  { title: '主播', key: 'anchor_name', minWidth: 140, ellipsis: { tooltip: true } },
+  {
+    title: '直播',
+    key: 'is_live',
+    width: 60,
+    render(row: { is_live: boolean }) {
+      return row.is_live
+        ? h(NTag, { type: 'success', size: 'small' }, { default: () => '直播中' })
+        : h(NTag, { type: 'default', size: 'small' }, { default: () => '未开播' });
+    }
+  },
   { title: '指标数', key: 'metrics_count', width: 80 },
   { title: '评论数', key: 'comments_count', width: 80 },
   { title: '画像数', key: 'profiles_count', width: 80 },
   {
     title: '状态',
     key: 'error',
-    width: 200,
+    minWidth: 160,
     render(row: { error: string | null }) {
       return row.error
         ? h(NTag, { type: 'error', size: 'small' }, { default: () => row.error })
         : h(NTag, { type: 'success', size: 'small' }, { default: () => '成功' });
     }
-  },
+  }
 ];
 
 const logColumns = [
@@ -323,12 +365,14 @@ const logColumns = [
     width: 80,
     render(row: { level: string }) {
       const typeMap: Record<string, 'success' | 'warning' | 'error' | 'info'> = {
-        info: 'info', warn: 'warning', error: 'error'
+        info: 'info',
+        warn: 'warning',
+        error: 'error'
       };
       return h(NTag, { type: typeMap[row.level] || 'info', size: 'small' }, { default: () => row.level.toUpperCase() });
     }
   },
-  { title: () => $t('page.collector.logMessage'), key: 'message' }
+  { title: () => $t('page.collector.logMessage'), key: 'message', minWidth: 420, ellipsis: { tooltip: true } }
 ];
 
 /* ---------- 生命周期 ---------- */
@@ -343,223 +387,266 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div>
-    <!-- 加载状态 -->
-    <div v-if="loading" class="flex justify-center py-40px">
-      <NSpin :stroke-width="12" :size="24" />
-      <span class="ml-12px text-gray-400">{{ $t('page.collector.loading') }}</span>
-    </div>
-
-    <NSpace v-else vertical :size="16">
-      <!-- 采集器状态 -->
-      <NCard :bordered="false" class="card-wrapper">
-        <template #header>
-          <NSpace>
-            <SvgIcon icon="mdi:cloud-upload" class="text-22px" />
-            <span class="text-16px font-bold">{{ $t('page.collector.statusTitle') }}</span>
-          </NSpace>
-        </template>
-        <NSpace align="center" :size="24">
-          <NTag
-            :type="collectorStatus?.connected ? 'success' : 'error'"
-            round
-            size="large"
-          >
-            {{ collectorStatus?.connected ? $t('page.collector.connected') : $t('page.collector.disconnected') }}
-          </NTag>
-          <span class="text-13px text-gray-500">
-            {{ $t('page.collector.activeTasks') }}：{{ collectorStatus?.active_task_count || 0 }}
-          </span>
-        </NSpace>
-      </NCard>
-
-      <!-- 监控控制 -->
-      <NCard :bordered="false" class="card-wrapper">
-        <template #header>
-          <NSpace>
-            <SvgIcon icon="mdi:radar" class="text-22px" />
-            <span class="text-16px font-bold">直播监控</span>
-          </NSpace>
-        </template>
-        <NSpace vertical :size="12">
-          <NSpace align="center" :size="16">
-            <NTag :type="monitorStatus?.running ? 'success' : 'default'" round>
-              {{ monitorStatus?.running ? '运行中' : '已停止' }}
-            </NTag>
-            <span class="text-13px text-gray-500">
-              活跃场次：{{ monitorStatus?.active_session_count || 0 }}
-            </span>
-            <span v-if="monitorStatus?.mock_mode" class="text-13px text-warning">
-              🧪 Mock 模式
-            </span>
-          </NSpace>
-          <NSpace :size="12">
-            <NButton
-              size="small"
-              :type="monitorStatus?.running ? 'warning' : 'primary'"
-              :loading="monitorLoading"
-              @click="monitorStatus?.running ? handleStopMonitor() : handleStartMonitor()"
-            >
-              {{ monitorStatus?.running ? '停止监控' : '启动监控' }}
-            </NButton>
-            <NButton
-              v-if="monitorStatus?.mock_mode"
-              size="small"
-              type="success"
-              @click="handleTriggerLive"
-            >
-              模拟开播
-            </NButton>
-            <NButton
-              v-if="monitorStatus?.mock_mode"
-              size="small"
-              type="error"
-              @click="handleTriggerEnd"
-            >
-              模拟下播
-            </NButton>
-          </NSpace>
-        </NSpace>
-      </NCard>
-
-      <!-- 一键采集 -->
-      <NCard :bordered="false" class="card-wrapper">
-        <template #header>
-          <NSpace>
-            <SvgIcon icon="mdi:cloud-download" class="text-22px" />
-            <span class="text-16px font-bold">一键采集</span>
-          </NSpace>
-        </template>
-        <NSpace vertical :size="12">
-          <p class="text-13px text-gray-500">
-            使用已登录的账号 Cookie，自动采集所有主播房间的直播大屏数据。
-          </p>
-          <NSpace :size="12">
-            <NButton
-              type="primary"
-              :loading="collectAllLoading"
-              :disabled="collectAllLoading"
-              @click="handleCollectAll"
-            >
-              <template #icon>
-                <SvgIcon icon="mdi:sync" />
-              </template>
-              {{ collectAllLoading ? '采集中...' : '一键采集全部' }}
-            </NButton>
-          </NSpace>
-
-          <!-- 采集结果 -->
-          <NCard v-if="collectAllResult" size="small" :bordered="true" class="mt-8px">
-            <NSpace vertical :size="8">
-              <NSpace align="center">
-                <span class="text-14px font-bold">采集结果</span>
-                <NTag :type="collectAllResult.collected_rooms > 0 ? 'success' : 'warning'" size="small">
-                  {{ collectAllResult.collected_rooms }}/{{ collectAllResult.total_rooms }} 个房间成功
-                </NTag>
-                <span v-if="collectAllResult.message" class="text-13px text-gray-500">
-                  {{ collectAllResult.message }}
-                </span>
-              </NSpace>
-              <div class="text-13px text-gray-500">
-                历史场次同步 {{ collectAllResult.history_synced_count || 0 }} 场；
-                企业主播 {{ collectAllResult.enterprise_anchor_count || 0 }} 个；
-                平台发现场次 {{ collectAllResult.enterprise_session_discovered_count || 0 }} 场；
-                新增场次 {{ collectAllResult.enterprise_session_synced_count || 0 }} 场；
-                主播映射 {{ collectAllResult.anchor_profile_synced_count || 0 }} 条；
-                清理无归属场次 {{ collectAllResult.unmapped_session_pruned_count || 0 }} 场；
-                本次补详情 {{ collectAllResult.history_detail_synced_count || 0 }}/{{ collectAllResult.history_detail_checked_count || 0 }} 场；
-                剩余待补 {{ collectAllResult.history_detail_remaining_count || 0 }} 场；
-                单次最多补 {{ collectAllResult.history_detail_batch_size || 0 }} 场
+  <div class="min-h-full flex-col gap-16px overflow-auto">
+    <NSpin :show="loading">
+      <NSpace vertical :size="16">
+        <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">
+          <NGi>
+            <NCard :bordered="false" class="card-wrapper h-full" size="small">
+              <div class="flex items-center justify-between gap-12px">
+                <div>
+                  <div class="text-13px text-gray-500">采集服务</div>
+                  <div class="mt-8px text-20px font-600">
+                    {{ collectorStatus?.connected ? '连接正常' : '连接异常' }}
+                  </div>
+                </div>
+                <div class="size-44px flex-center rounded-12px bg-primary-100 text-primary dark:bg-primary-900/30">
+                  <SvgIcon icon="mdi:database-sync-outline" class="text-24px" />
+                </div>
               </div>
-              <NDataTable
-                v-if="collectAllResult.results && collectAllResult.results.length > 0"
-                :columns="collectResultColumns"
-                :data="collectAllResult.results"
-                :bordered="false"
-                :single-line="false"
-                size="small"
-              />
-            </NSpace>
-          </NCard>
-        </NSpace>
-      </NCard>
+              <NTag class="mt-16px" :type="collectorStatus?.connected ? 'success' : 'error'" round size="small">
+                {{ collectorStatus?.connected ? $t('page.collector.connected') : $t('page.collector.disconnected') }}
+              </NTag>
+            </NCard>
+          </NGi>
+          <NGi>
+            <NCard :bordered="false" class="card-wrapper h-full" size="small">
+              <div class="flex items-center justify-between gap-12px">
+                <div>
+                  <div class="text-13px text-gray-500">可用账号</div>
+                  <div class="mt-8px text-20px font-600">{{ loggedInAccountCount }} / {{ accounts.length }}</div>
+                </div>
+                <div class="size-44px flex-center rounded-12px bg-success-100 text-success dark:bg-success-900/30">
+                  <SvgIcon icon="mdi:account-check-outline" class="text-24px" />
+                </div>
+              </div>
+              <div class="mt-16px text-12px text-gray-500">已保存 Cookie 与浏览器指纹</div>
+            </NCard>
+          </NGi>
+          <NGi>
+            <NCard :bordered="false" class="card-wrapper h-full" size="small">
+              <div class="flex items-center justify-between gap-12px">
+                <div>
+                  <div class="text-13px text-gray-500">直播监控</div>
+                  <div class="mt-8px text-20px font-600">{{ monitorStatus?.active_session_count || 0 }} 场</div>
+                </div>
+                <div class="size-44px flex-center rounded-12px bg-warning-100 text-warning dark:bg-warning-900/30">
+                  <SvgIcon icon="mdi:radar" class="text-24px" />
+                </div>
+              </div>
+              <NTag class="mt-16px" :type="monitorStatus?.running ? 'success' : 'default'" round size="small">
+                {{ monitorStatus?.running ? '监控运行中' : '监控已停止' }}
+              </NTag>
+            </NCard>
+          </NGi>
+          <NGi>
+            <NCard :bordered="false" class="card-wrapper h-full" size="small">
+              <div class="flex items-center justify-between gap-12px">
+                <div>
+                  <div class="text-13px text-gray-500">当前任务</div>
+                  <div class="mt-8px text-20px font-600">{{ collectorStatus?.active_task_count || 0 }} 个</div>
+                </div>
+                <div class="size-44px flex-center rounded-12px bg-error-100 text-error dark:bg-error-900/30">
+                  <SvgIcon icon="mdi:progress-clock" class="text-24px" />
+                </div>
+              </div>
+              <div class="mt-16px text-12px text-gray-500">近 50 条日志中 {{ errorLogCount }} 条异常</div>
+            </NCard>
+          </NGi>
+        </NGrid>
 
-      <!-- 账号列表 -->
-      <NCard :bordered="false" class="card-wrapper">
-        <template #header>
-          <NSpace justify="space-between" align="center">
-            <span class="text-15px font-bold">{{ $t('page.collector.accountList') }}</span>
-            <NButton type="primary" size="small" @click="handleStartLogin">
-              <template #icon>
-                <SvgIcon icon="mdi:qrcode-scan" />
+        <NGrid cols="1 l:3" responsive="screen" :x-gap="16" :y-gap="16">
+          <NGi span="1 l:2">
+            <NCard :bordered="false" class="card-wrapper h-full" title="全量数据采集">
+              <template #header-extra>
+                <NTag v-if="collectAllLoading" type="warning" round size="small">任务执行中</NTag>
+                <NTag v-else-if="hasAvailableAccount" type="success" round size="small">账号已就绪</NTag>
+                <NTag v-else type="error" round size="small">请先扫码登录</NTag>
               </template>
-              {{ $t('page.collector.scanLogin') }}
-            </NButton>
-          </NSpace>
-        </template>
-        <NDataTable
-          :columns="accountColumns"
-          :data="accounts"
-          :bordered="false"
-          :single-line="false"
-          size="small"
-          :empty-text="$t('page.collector.noAccount')"
-        />
-      </NCard>
+              <div class="flex flex-col gap-16px">
+                <NAlert type="info" :show-icon="true" :bordered="false">
+                  自动发现账号下全部主播，依次同步直播场次、主播资料、指标、评论和观众画像。采集期间请勿删除当前账号。
+                </NAlert>
+                <div class="flex flex-wrap items-center gap-12px">
+                  <NButton
+                    type="primary"
+                    size="large"
+                    :loading="collectAllLoading"
+                    :disabled="!hasAvailableAccount"
+                    @click="handleCollectAll"
+                  >
+                    <template #icon><SvgIcon icon="mdi:database-arrow-down-outline" /></template>
+                    {{ collectAllLoading ? '正在采集全部数据' : '开始全量采集' }}
+                  </NButton>
+                  <span class="text-12px text-gray-500">采集完成后自动刷新账号状态与最近日志</span>
+                </div>
 
-      <!-- 采集日志 -->
-      <NCard :bordered="false" class="card-wrapper">
-        <template #header>
-          <span class="text-15px font-bold">{{ $t('page.collector.logTitle') }}</span>
-        </template>
-        <NDataTable
-          :columns="logColumns"
-          :data="logs"
-          :bordered="false"
-          :single-line="false"
-          size="small"
-        />
-      </NCard>
-    </NSpace>
+                <template v-if="collectAllResult">
+                  <NDivider class="!my-0" />
+                  <div class="flex flex-wrap items-center gap-8px">
+                    <span class="font-600">最近一次采集结果</span>
+                    <NTag :type="collectAllResult.collected_rooms > 0 ? 'success' : 'warning'" round size="small">
+                      {{ collectAllResult.collected_rooms }}/{{ collectAllResult.total_rooms }} 个房间成功
+                    </NTag>
+                    <span v-if="collectAllResult.message" class="text-12px text-gray-500">
+                      {{ collectAllResult.message }}
+                    </span>
+                  </div>
+                  <NGrid cols="2 s:3 l:6" responsive="screen" :x-gap="12" :y-gap="12">
+                    <NGi><NStatistic label="企业主播" :value="collectAllResult.enterprise_anchor_count || 0" /></NGi>
+                    <NGi>
+                      <NStatistic label="发现场次" :value="collectAllResult.enterprise_session_discovered_count || 0" />
+                    </NGi>
+                    <NGi>
+                      <NStatistic label="新增场次" :value="collectAllResult.enterprise_session_synced_count || 0" />
+                    </NGi>
+                    <NGi>
+                      <NStatistic label="主播映射" :value="collectAllResult.anchor_profile_synced_count || 0" />
+                    </NGi>
+                    <NGi>
+                      <NStatistic label="本次补详情" :value="collectAllResult.history_detail_synced_count || 0" />
+                    </NGi>
+                    <NGi>
+                      <NStatistic label="剩余待补" :value="collectAllResult.history_detail_remaining_count || 0" />
+                    </NGi>
+                  </NGrid>
+                  <NDataTable
+                    v-if="collectAllResult.results?.length"
+                    :columns="collectResultColumns"
+                    :data="collectAllResult.results"
+                    :row-key="getCollectResultRowKey"
+                    :scroll-x="720"
+                    :bordered="false"
+                    size="small"
+                  />
+                </template>
+              </div>
+            </NCard>
+          </NGi>
+
+          <NGi>
+            <NCard :bordered="false" class="card-wrapper h-full" title="实时监控">
+              <template #header-extra>
+                <NTag v-if="monitorStatus?.mock_mode" type="warning" round size="small">Mock 模式</NTag>
+              </template>
+              <div class="flex flex-col gap-16px">
+                <div class="flex items-center justify-between gap-12px rounded-8px bg-gray-100 p-12px dark:bg-white/5">
+                  <div>
+                    <div class="font-600">{{ monitorStatus?.running ? '正在监听开播状态' : '监控服务未启动' }}</div>
+                    <div class="mt-4px text-12px text-gray-500">
+                      活跃场次 {{ monitorStatus?.active_session_count || 0 }} 场
+                    </div>
+                  </div>
+                  <NBadge :type="monitorStatus?.running ? 'success' : 'default'" dot />
+                </div>
+                <NButton
+                  block
+                  :type="monitorStatus?.running ? 'warning' : 'primary'"
+                  :loading="monitorLoading"
+                  @click="monitorStatus?.running ? handleStopMonitor() : handleStartMonitor()"
+                >
+                  <template #icon>
+                    <SvgIcon :icon="monitorStatus?.running ? 'mdi:stop-circle-outline' : 'mdi:play-circle-outline'" />
+                  </template>
+                  {{ monitorStatus?.running ? '停止直播监控' : '启动直播监控' }}
+                </NButton>
+                <NSpace v-if="monitorStatus?.mock_mode" :wrap="false">
+                  <NButton class="flex-1" type="success" secondary @click="handleTriggerLive">模拟开播</NButton>
+                  <NButton class="flex-1" type="error" secondary @click="handleTriggerEnd">模拟下播</NButton>
+                </NSpace>
+              </div>
+            </NCard>
+          </NGi>
+        </NGrid>
+
+        <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.accountList')">
+          <template #header-extra>
+            <NSpace>
+              <NButton size="small" :loading="loading" @click="loadData">
+                <template #icon><SvgIcon icon="mdi:refresh" /></template>
+                {{ $t('common.refresh') }}
+              </NButton>
+              <NButton type="primary" size="small" @click="handleStartLogin">
+                <template #icon><SvgIcon icon="mdi:qrcode-scan" /></template>
+                {{ $t('page.collector.scanLogin') }}
+              </NButton>
+            </NSpace>
+          </template>
+          <NDataTable
+            :loading="loading"
+            :columns="accountColumns"
+            :data="accounts"
+            :row-key="getAccountRowKey"
+            :scroll-x="800"
+            :bordered="false"
+            size="small"
+            :empty-text="$t('page.collector.noAccount')"
+          />
+        </NCard>
+
+        <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.logTitle')">
+          <template #header-extra>
+            <NButton size="small" :loading="loading" @click="loadData">
+              <template #icon><SvgIcon icon="mdi:refresh" /></template>
+              {{ $t('common.refresh') }}
+            </NButton>
+          </template>
+          <NDataTable
+            :loading="loading"
+            :columns="logColumns"
+            :data="logs"
+            :row-key="getLogRowKey"
+            :scroll-x="720"
+            :bordered="false"
+            size="small"
+          />
+        </NCard>
+      </NSpace>
+    </NSpin>
 
     <!-- 扫码登录弹窗 -->
-    <NModal v-model:show="showQRModal" :mask-closable="false" preset="card" style="width: 400px">
+    <NModal
+      v-model:show="showQRModal"
+      :mask-closable="false"
+      preset="card"
+      class="w-420px max-w-[calc(100vw-32px)]"
+      @after-leave="closeQRModal"
+    >
       <template #header>
         {{ $t('page.collector.scanLogin') }}
       </template>
 
-      <div class="flex flex-col items-center py-20px">
-        <!-- QR 码图片 -->
-        <div v-if="qrImage" class="w-240px h-240px bg-white rounded-8px p-8px mb-16px shadow">
-          <img :src="`data:image/png;base64,${qrImage}`" class="w-full h-full" alt="QR Code" />
+      <div class="flex flex-col items-center py-12px">
+        <NSteps class="mb-20px" size="small" :current="loginStatus === 'pending' ? 1 : 2" status="process">
+          <NStep title="生成二维码" />
+          <NStep title="抖音扫码确认" />
+          <NStep title="保存登录状态" />
+        </NSteps>
+        <div v-if="qrImage" class="mb-16px size-240px rounded-12px bg-white p-10px shadow-sm ring-1 ring-gray-200">
+          <img :src="`data:image/png;base64,${qrImage}`" class="size-full" alt="抖音扫码登录二维码" />
         </div>
-        <div v-else class="w-240px h-240px flex items-center justify-center bg-gray-50 dark:bg-dark-300 rounded-8px mb-16px">
+        <div v-else class="mb-16px size-240px flex-center rounded-12px bg-gray-100 dark:bg-white/5">
           <NSpin :size="24" />
         </div>
-
-        <!-- 状态提示 -->
-        <p
-          class="text-14px mb-8px text-center"
-          :class="{
-            'text-green-500': loginStatus === 'success',
-            'text-red-500': loginStatus === 'failed' || loginStatus === 'timeout',
-            'text-gray-500': loginStatus === 'pending' || loginStatus === 'scanning'
-          }"
+        <NAlert
+          class="w-full"
+          :type="loginStatus === 'failed' || loginStatus === 'timeout' ? 'error' : 'info'"
+          :show-icon="true"
         >
           {{ loginMessage || $t('page.collector.scanQrCode') }}
-        </p>
-
-        <!-- 失败/超时提示 -->
-        <div v-if="loginStatus === 'failed' || loginStatus === 'timeout'" class="mt-8px">
-          <NButton type="primary" size="small" @click="handleStartLogin">
-            {{ $t('page.collector.scanLogin') }}
-          </NButton>
-        </div>
+        </NAlert>
       </div>
 
       <template #footer>
-        <NSpace justify="center">
+        <NSpace justify="end">
           <NButton @click="closeQRModal">{{ $t('common.cancel') }}</NButton>
+          <NButton
+            v-if="loginStatus === 'failed' || loginStatus === 'timeout'"
+            type="primary"
+            @click="handleStartLogin"
+          >
+            重新生成二维码
+          </NButton>
         </NSpace>
       </template>
     </NModal>
