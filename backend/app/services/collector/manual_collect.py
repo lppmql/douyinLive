@@ -8,7 +8,6 @@
 """
 import asyncio
 import json
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -119,8 +118,6 @@ async def collect_all(
         }
 
     try:
-        _phase_times = {}
-        _phase_start = time.time()
         results = []
         for index, room in enumerate(rooms, start=1):
             report(
@@ -151,9 +148,8 @@ async def collect_all(
 
             # 登录检查和正式打开页面之间仍可能发生浏览器句柄失效，自动恢复一次即可。
             if _is_context_closed_message(result.get("error")):
-                logger.warning("采集上下文已关闭，正在关闭浏览器并重启后重试: room_id=%s", room.room_id_str)
-                # 关闭整个浏览器（包括 Playwright 连接），get_logged_in_context 会创建全新实例
-                await browser_manager.close()
+                logger.warning("采集上下文已关闭，正在从已保存登录态恢复并重试: room_id=%s", room.room_id_str)
+                browser_manager.invalidate_logged_in_context(context)
                 context, recovered, recovery_message = await browser_manager.get_logged_in_context()
                 if recovered and context:
                     try:
@@ -180,21 +176,10 @@ async def collect_all(
                 result,
             )
 
-        _phase_times["rooms"] = time.time() - _phase_start
-        logger.info("[采集计时] 房间采集完成: %s间 耗时=%.1fs", len(results), _phase_times["rooms"])
-
         # 历史接口负责保证场次总量完整，企业接口负责补充主播映射。
         # 两者必须都执行，不能因为企业接口只返回部分主播而漏掉其他场次。
         report("enterprise_sync", 40, 0, 0, "正在同步全部企业主播及所属场次")
-        _t_enterprise = time.time()
         enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0], task_id=task_id)
-        # 企业主播映射时浏览器上下文可能已断开，检测到后重启浏览器重试一次
-        if enterprise_sync.get("error") and _is_context_closed_message(enterprise_sync.get("error")):
-            logger.warning("企业主播映射同步时浏览器上下文已关闭，正在重启浏览器后重试")
-            await browser_manager.close()
-            context, recovered, msg = await browser_manager.get_logged_in_context()
-            if recovered and context:
-                enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0], task_id=task_id)
         report(
             "enterprise_sync",
             60,
@@ -203,12 +188,7 @@ async def collect_all(
             f"已发现 {enterprise_sync.get('anchor_count', 0)} 位主播、{enterprise_sync.get('discovered_session_count', 0)} 场直播",
             enterprise_sync,
         )
-        _phase_times["enterprise"] = time.time() - _t_enterprise
-        logger.info("[采集计时] 企业映射同步完成: %s位主播 耗时=%.1fs",
-                     enterprise_sync.get("anchor_count", 0), _phase_times["enterprise"])
-
         report("history_sync", 65, 0, 0, "正在同步账号历史直播场次")
-        _t_history = time.time()
         history_sync = _sync_history_sessions(db, account, rooms[0])
         report("history_sync", 75, history_sync, history_sync, f"历史场次同步完成，本次新增 {history_sync} 场")
 
@@ -239,13 +219,6 @@ async def collect_all(
             rooms[0],
             progress_callback=report_detail_progress,
         )
-        _phase_times["details"] = time.time() - _t_history
-        logger.info("[采集计时] 详情补齐完成: 检查=%s 补齐=%s 失败=%s 剩余=%s 耗时=%.1fs",
-                     history_detail_progress.get("checked_count", 0),
-                     history_detail_progress.get("enriched_count", 0),
-                     history_detail_progress.get("failed_count", 0),
-                     history_detail_progress.get("remaining_count", 0),
-                     _phase_times["details"])
         report(
             "detail_enrichment",
             94,
@@ -276,12 +249,6 @@ async def collect_all(
             "history_detail_failed_count": history_detail_progress["failed_count"],
             "results": results,
         }
-        total_time = time.time() - _phase_start
-        logger.info("[采集计时] 📊 总耗时=%.1fs 明细: 房间=%.1fs 企业映射=%.1fs 详情补齐=%.1fs",
-                     total_time,
-                     _phase_times.get("rooms", 0),
-                     _phase_times.get("enterprise", 0),
-                     _phase_times.get("details", 0))
         report("completed", 100, collected, len(rooms), "刷新数据采集完成", final_result)
         return final_result
     finally:
@@ -370,8 +337,6 @@ async def _collect_room_data(
     db.commit()
 
     try:
-        bff_page = None
-        csrf_token = ""
         home_info = await _scrape_home_live_card(context)
 
         # 1. 先访问大屏页，捕获所有 API 数据和页面信息
@@ -411,62 +376,7 @@ async def _collect_room_data(
         metrics_count = _save_metrics(db, session.id, page_data.get("metrics", []))
         profiles_count = _save_profiles(db, session.id, page_data.get("profiles", []))
 
-        # 5. 确定用于 BFF API 的 room_id（优先用各主播的独立 room_id）
-        ies_uid = room_profile.get("douyin_uid") or session_info.get("douyin_uid") or ""
-        api_room_id = room_id
-        if ies_uid:
-            mapped = (
-                db.query(LiveSession)
-                .filter(
-                    LiveSession.room_id == room.id,
-                    LiveSession.douyin_uid == ies_uid,
-                    LiveSession.dashboard_url.isnot(None),
-                )
-                .order_by(LiveSession.live_start_time.desc())
-                .first()
-            )
-            if mapped:
-                mapped_rid = _extract_room_id_from_dashboard_url(mapped.dashboard_url)
-                if mapped_rid and mapped_rid != room_id:
-                    api_room_id = mapped_rid
-                    logger.info("[room_id选择] 使用主播独立 room_id: anchor=%s 企业room_id=%s → 主播room_id=%s (来自企业映射场次 %s)",
-                                anchor_name, room_id, api_room_id, mapped.id)
-                else:
-                    logger.info("[room_id选择] 主播 %s 的映射场次无独立 room_id，继续使用企业 room_id=%s", anchor_name, room_id)
-            else:
-                logger.info("[room_id选择] 主播 %s 尚无企业映射记录（首次运行），使用企业 room_id=%s", anchor_name, room_id)
-        else:
-            logger.info("[room_id选择] 未获取到主播 iesUid，使用企业 room_id=%s", room_id)
-
-        # 6. 打开 BFF 页面获取 CSRF Token，用于后续 API 直接调用
-        bff_page_open_ok = False
-        try:
-            t0 = time.time()
-            bff_page = await context.new_page()
-            await bff_page.goto(
-                f"{COMMENT_URL}?roomId={api_room_id}&fullscreen=0",
-                wait_until="domcontentloaded", timeout=15000,
-            )
-            await asyncio.sleep(2)
-            csrf_token = await bff_page.evaluate(
-                "() => document.cookie.split(';').map(v => v.trim())"
-                ".find(v => /^(feiyu_csrf_token|csrf_token|csrftoken|csrf-token)=/i.test(v))"
-                "?.split('=').slice(1).join('=') || ''"
-            )
-            elapsed = time.time() - t0
-            bff_page_open_ok = bool(csrf_token)
-            if bff_page_open_ok:
-                logger.info("[BFF页面] ✅ 已打开 room_id=%s 耗时=%.1fs CSRF长度=%s", api_room_id, elapsed, len(csrf_token))
-            else:
-                logger.warning("[BFF页面] ⚠️ 页面已打开但未获取到 CSRF Token room_id=%s 耗时=%.1fs，API调用将降级到页面抓取", api_room_id, elapsed)
-        except Exception as exc:
-            elapsed = time.time() - t0 if 't0' in dir() else 0
-            logger.warning("[BFF页面] ❌ 打开失败 room_id=%s 耗时=%.1fs 错误=%s，将使用页面抓取降级", api_room_id, elapsed, exc)
-            if bff_page:
-                await bff_page.close()
-                bff_page = None
-
-        # 7. 用汇总指标更新场次记录
+        # 5. 用汇总指标更新场次记录
         sm = page_data.get("summary_metrics", {})
         if home_info.get("total_viewers") is not None:
             sm["total_viewers"] = home_info["total_viewers"]
@@ -563,89 +473,24 @@ async def _collect_room_data(
         if sm.get("interaction_rate") is not None:
             session.interaction_rate = float(sm["interaction_rate"])
 
-        # 8. 采集评论（优先用 BFF API）
-        t_comments = time.time()
-        comments_data = []
-        comments_source = "页面抓取"
-        try:
-            comments_data = await _scrape_comments(context, api_room_id, ies_uid=ies_uid, bff_page=bff_page, csrf_token=csrf_token)
-            if comments_data:
-                comments_source = "BFF API"
-        except Exception as exc:
-            logger.warning("[评论] BFF API 采集异常，降级到页面抓取: %s", exc)
-            comments_data = await _scrape_comments(context, room_id)
-        comments_time = time.time() - t_comments
-
-        # 如果用了主播独立 room_id，评论应保存到该主播对应的场次，而非企业场次
-        comments_session_id = session.id
-        if api_room_id != room_id and comments_data:
-            anchor_s = (
-                db.query(LiveSession)
-                .filter(
-                    LiveSession.room_id == room.id,
-                    LiveSession.dashboard_url.like(f"%{api_room_id}%"),
-                )
-                .order_by(LiveSession.live_start_time.desc())
-                .first()
-            )
-            if anchor_s:
-                comments_session_id = anchor_s.id
-                logger.info("[评论] 保存到主播独立场次 session_id=%s (原企业场次=%s) anchor=%s room_id=%s",
-                            anchor_s.id, session.id, anchor_name, api_room_id)
-            else:
-                logger.info("[评论] 未找到主播 %s 的独立场次，暂存到企业场次 session_id=%s", anchor_name, session.id)
-        comments_count = _save_comments(db, comments_session_id, comments_data)
-        if comments_count and comments_session_id == session.id:
+        # 6. 采集评论
+        comments_data = await _scrape_comments(context, room_id)
+        comments_count = _save_comments(db, session.id, comments_data)
+        if comments_count:
             session.comments_count = max(session.comments_count or 0, comments_count)
-        logger.info("[评论] %s 采集: room_id=%s 获取=%s条 保存=%s条 耗时=%.1fs 目标场次=%s",
-                    comments_source, api_room_id, len(comments_data), comments_count, comments_time, comments_session_id)
 
-        # 9. 采集流地址（优先用回放 API）
-        t_stream = time.time()
-        stream_url = None
-        stream_source = "页面抓取"
-        try:
-            stream_url = await _scrape_stream_url(context, api_room_id, bff_page=bff_page, csrf_token=csrf_token)
-            if stream_url:
-                stream_source = "BFF API回放"
-        except Exception as exc:
-            logger.warning("[流地址] BFF API 采集异常，降级到页面抓取: %s", exc)
-            stream_url = await _scrape_stream_url(context, room_id)
-        stream_time = time.time() - t_stream
-
+        # 7. 采集流地址
+        stream_url = await _scrape_stream_url(context, room_id)
         if stream_url:
-            # 流地址也保存到正确的场次
-            stream_session_id = session.id
-            if api_room_id != room_id:
-                anchor_s = (
-                    db.query(LiveSession)
-                    .filter(
-                        LiveSession.room_id == room.id,
-                        LiveSession.dashboard_url.like(f"%{api_room_id}%"),
-                    )
-                    .order_by(LiveSession.live_start_time.desc())
-                    .first()
-                )
-                if anchor_s:
-                    stream_session_id = anchor_s.id
-            session_to_update = db.get(LiveSession, stream_session_id) or session
-            session_to_update.stream_url = stream_url[:2000]
-            _save_stream_source(db, stream_session_id, stream_url)
-            logger.info("[流地址] %s 采集成功: room_id=%s 耗时=%.1fs 路径=%s... 目标场次=%s",
-                        stream_source, api_room_id, stream_time, stream_url[:60], stream_session_id)
-        else:
-            logger.warning("[流地址] 未获取到流地址: room_id=%s 来源=%s 耗时=%.1fs", api_room_id, stream_source, stream_time)
+            session.stream_url = stream_url[:2000]
+            _save_stream_source(db, session.id, stream_url)
 
         db.commit()
 
         logger.info(
-            "[房间采集] ✅ 完成 room_id=%s 主播=%s 直播=%s "
-            "指标=%s 评论=%s(%s条原始) 画像=%s 流地址=%s "
-            "场次=%s api_room_id=%s",
-            room_id, anchor_name, is_live,
-            metrics_count, comments_count, len(comments_data) if comments_data else 0, profiles_count,
-            "✅" if stream_url else "❌",
-            session.id, api_room_id,
+            f"采集完成 room_id={room_id}, "
+            f"主播={anchor_name}, 直播={is_live}, "
+            f"指标={metrics_count}, 评论={comments_count}, 画像={profiles_count}"
         )
         log_entry = ScraperLog(
             task_id=task_id,
@@ -683,19 +528,7 @@ async def _collect_room_data(
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
-        err_type = type(e).__name__
-        # 生成可读的报错指引
-        if "Timeout" in err_type or "timeout" in str(e).lower():
-            fix_guide = "页面加载超时，可能是网络慢或页面元素变更，可重试或检查 leas.cluerich.com 是否可达"
-        elif "BrowserContext" in str(e) or "browser" in str(e).lower():
-            fix_guide = "浏览器上下文断开，系统会自动重启浏览器重试"
-        elif "csrf" in str(e).lower() or "403" in str(e):
-            fix_guide = "CSRF 校验失败，Cookie 可能已过期，请重新扫码登录"
-        else:
-            fix_guide = "未知异常，查看详细 traceback 定位问题"
-        logger.error("[采集异常] ❌ room_id=%s 主播=%s 错误类型=%s 错误=%s 指引=%s",
-                     room_id, anchor_name if 'anchor_name' in dir() else '?', err_type, e, fix_guide)
-        logger.debug(tb)
+        logger.error(f"采集 room_id={room_id} 失败: {e}\n{tb}")
         err_log = ScraperLog(
             task_id=task_id,
             level="error",
@@ -704,21 +537,16 @@ async def _collect_room_data(
                 "stage": "room_collection",
                 "event": "room_failed",
                 "room_id": room_id,
-                "error_type": err_type,
+                "error_type": type(e).__name__,
                 "error": str(e)[:2000],
-                "fix_guide": fix_guide,
             },
         )
         db.add(err_log)
         db.commit()
-        logger.warning("[采集异常] 已记录错误日志并返回，room_id=%s 指引=%s", room_id, fix_guide)
-        return {"room_id": room_id, "error": f"[{err_type}] {e}", "fix_guide": fix_guide}
-    finally:
-        if bff_page:
-            try:
-                await bff_page.close()
-            except Exception:
-                pass
+        return {"room_id": room_id, "error": str(e)}
+
+
+# ==================== 页面采集 ====================
 
 
 async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
@@ -735,14 +563,9 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
     }
     """
     url = f"{LIVE_SCREEN_URL}?room_id={room_id}&fullscreen=0"
-    page = None
+    page = await context.new_page()
     captured_api = []
     response_tasks = []
-    try:
-        page = await context.new_page()
-    except Exception:
-        logger.warning("创建大屏页面失败，浏览器上下文可能已断开: room_id=%s", room_id)
-        return {"session_info": {}, "metrics": [], "profiles": [], "is_logged_in": False}
 
     async def on_response(resp):
         try:
@@ -1013,67 +836,12 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
     }
 
 
-async def _scrape_comments(
-    context: BrowserContext, room_id: str,
-    ies_uid: Optional[str] = None,
-    bff_page=None, csrf_token: str = "",
-) -> list:
-    """访问评论页，采集评论数据（优先用 BFF API，失败降级到页面抓取）"""
-    # 如果有 BFF 页面和 CSRF Token，优先用 API
-    api_result_total = None
-    if bff_page and csrf_token and ies_uid:
-        try:
-            t0 = time.time()
-            result = await _fetch_enterprise_post(
-                bff_page,
-                "/bff/statistic/live-comment/comment-list",
-                {"roomId": room_id, "iesUid": ies_uid, "pageNum": 1, "pageSize": 50},
-                csrf_token,
-            )
-            api_time = time.time() - t0
-            data = result.get("data", {}) if isinstance(result, dict) else {}
-            api_result_total = data.get("total") if isinstance(data, dict) else None
-            if isinstance(data, dict):
-                comment_list = data.get("comments") or data.get("list") or []
-                resp_code = result.get("code") or result.get("error_code") or "ok"
-                logger.info("[评论API] room_id=%s iesUid=%s 响应码=%s total=%s 返回列表=%s条 耗时=%.1fs",
-                            room_id, ies_uid, resp_code, api_result_total, len(comment_list) if isinstance(comment_list, list) else 0, api_time)
-                if comment_list and isinstance(comment_list, list):
-                    comments = []
-                    for c in comment_list:
-                        if not isinstance(c, dict):
-                            continue
-                        nickname = c.get("user_nickname") or c.get("nickname") or c.get("nickName") or ""
-                        content = c.get("comment_content") or c.get("content") or ""
-                        if not content:
-                            continue
-                        comments.append({
-                            "user_nickname": nickname,
-                            "comment_content": content,
-                            "comment_time": _parse_comment_time(c.get("comment_time") or c.get("createTime")),
-                        })
-                    if comments:
-                        logger.info("[评论API] ✅ 采集成功 room_id=%s 有效评论=%s条 (原始=%s条 过滤空白=%s条)",
-                                    room_id, len(comments), len(comment_list), len(comment_list) - len(comments))
-                        return comments
-                    else:
-                        logger.warning("[评论API] ⚠️ 接口返回%s条但全部为空内容 room_id=%s", len(comment_list), room_id)
-        except Exception as exc:
-            logger.warning("[评论API] ❌ 请求异常 room_id=%s iesUid=%s 错误=[%s] %s，降级到页面抓取",
-                           room_id, ies_uid, type(exc).__name__, exc)
-
-    # 降级：页面抓取
+async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
+    """访问评论页，采集评论数据"""
     url = f"{COMMENT_URL}?roomId={room_id}&fullscreen=0"
-    page = None
+    page = await context.new_page()
     captured_api = []
     response_tasks = []
-    try:
-        t0 = time.time()
-        page = await context.new_page()
-        logger.info("[评论] 降级到页面抓取: room_id=%s url=%s", room_id, url)
-    except Exception:
-        logger.warning("[评论] ❌ 创建页面失败，浏览器上下文可能已断开: room_id=%s", room_id)
-        return []
 
     async def on_response(resp):
         try:
@@ -1093,10 +861,8 @@ async def _scrape_comments(
         await asyncio.sleep(1)
         if response_tasks:
             await asyncio.gather(*response_tasks, return_exceptions=True)
-        page_time = time.time() - t0
-        logger.info("[评论] 页面抓取完成: room_id=%s 捕获API=%s个耗时=%.1fs", room_id, len(captured_api), page_time)
-    except Exception as exc:
-        logger.warning("[评论] 页面抓取异常 room_id=%s 耗时=%.1fs error=%s", room_id, time.time() - t0 if 't0' in dir() else 0, exc)
+    except Exception:
+        pass
     finally:
         await page.close()
 
@@ -1133,13 +899,8 @@ async def _scrape_comments(
 
 async def _scrape_home_live_card(context: BrowserContext) -> dict:
     """从主页直播卡片提取主播、标题、实时人数等稳定信息。"""
-    page = None
+    page = await context.new_page()
     captured_api = []
-    try:
-        page = await context.new_page()
-    except Exception:
-        logger.warning("创建主页页面失败，浏览器上下文可能已断开")
-        return {}
 
     async def on_response(resp):
         try:
@@ -1444,15 +1205,12 @@ async def _sync_enterprise_anchor_sessions(
             )
         )
         db.commit()
-        # 列出更新的主播清单
-        anchor_lines = ", ".join([f"{p.get('iesName','?')}({len([s for s in unique_employees.values() if str(_first_value(p,'iesUid','ies_uid','uid','id'))==str(_first_value(s,'iesUid','ies_uid','uid','id'))])})" for p in unique_employees.values()][:5])
         logger.info(
-            "[企业映射] ✅ 同步完成 anchors=%s discovered_sessions=%s new_sessions=%s profiles_updated=%s 主播=%s",
+            "企业主播映射同步完成: anchors=%s, discovered_sessions=%s, new_sessions=%s, profiles_updated=%s",
             len(unique_employees),
             discovered_session_count,
             session_count,
             profile_count,
-            anchor_lines,
         )
         return {
             "anchor_count": len(unique_employees),
@@ -1465,9 +1223,6 @@ async def _sync_enterprise_anchor_sessions(
         db.add(ScraperLog(level="error", message=f"企业主播映射同步失败: {str(exc)[:500]}"))
         db.commit()
         logger.warning("企业主播映射同步失败: %s", exc)
-        if _is_context_closed_error(exc):
-            # 浏览器断开导致同步失败，返回 error 标记供外层触发浏览器重启
-            return {"anchor_count": 0, "session_count": 0, "profile_count": 0, "error": str(exc)}
         return {"anchor_count": 0, "session_count": 0, "profile_count": 0}
     finally:
         if page:
@@ -1553,72 +1308,6 @@ async def _fetch_enterprise_rows(
     return rows, self_profile
 
 
-async def _fetch_live_replay(page, room_id: str, csrf_token: str = "") -> Optional[str]:
-    """直接调用回放 API 获取 m3u8 流地址。"""
-    try:
-        result = await page.evaluate(
-            """async ({path, params, csrfToken}) => {
-              const csrf = document.cookie.split(';').map(v => v.trim())
-                .find(v => /^(feiyu_csrf_token|csrf_token|csrftoken|csrf-token)=/i.test(v))?.split('=').slice(1).join('=') || '';
-              const resp = await fetch(path + '?' + new URLSearchParams(params), {
-                credentials: 'include',
-                headers: {'x-csrftoken': csrfToken || decodeURIComponent(csrf)},
-              });
-              return await resp.json();
-            }""",
-            {"path": "/bff/statistic/live-screen/v3/get-live-replay",
-             "params": {"roomId": room_id}, "csrfToken": csrf_token},
-        )
-        data = result.get("data", {}) if isinstance(result, dict) else {}
-        replay_url = data.get("replayUrl") or data.get("replay_url") or None
-        if replay_url:
-            return str(replay_url)
-    except Exception as exc:
-        logger.debug("获取直播回放失败: room_id=%s error=%s", room_id, exc)
-    return None
-
-
-async def _fetch_living_status(page, csrf_token: str = "") -> dict:
-    """直接获取当前直播状态。"""
-    try:
-        result = await page.evaluate(
-            """async ({path, csrfToken}) => {
-              const csrf = document.cookie.split(';').map(v => v.trim())
-                .find(v => /^(feiyu_csrf_token|csrf_token|csrftoken|csrf-token)=/i.test(v))?.split('=').slice(1).join('=') || '';
-              const resp = await fetch(path, {
-                credentials: 'include',
-                headers: {'x-csrftoken': csrfToken || decodeURIComponent(csrf)},
-              });
-              return await resp.json();
-            }""",
-            {"path": "/bff/statistic/live-screen/v3/get-living-status", "csrfToken": csrf_token},
-        )
-        data = result.get("data", {}) if isinstance(result, dict) else {}
-        return data.get("roomInfo", {}) if isinstance(data, dict) else {}
-    except Exception as exc:
-        logger.debug("获取直播状态失败: %s", exc)
-    return {}
-
-
-async def _fetch_clue_detail(
-    page, room_id: str, ies_uid: str, csrf_token: str = "",
-    page_num: int = 1, page_size: int = 50,
-) -> dict:
-    """直接调用线索 API 获取留资数据。"""
-    try:
-        result = await _fetch_enterprise_post(
-            page,
-            "/bff/statistic/live-comment/clue-detail",
-            {"roomId": room_id, "iesUid": ies_uid, "pageNum": page_num, "pageSize": page_size},
-            csrf_token,
-        )
-        data = result.get("data", result) if isinstance(result, dict) else {}
-        return data if isinstance(data, dict) else {}
-    except Exception as exc:
-        logger.debug("获取留资线索失败: room_id=%s error=%s", room_id, exc)
-    return {}
-
-
 def _is_enterprise_live_status(value) -> bool:
     """企业后台当前以 2 表示直播中；兼容旧接口曾使用的 1。"""
     return str(value).strip().lower() in {"1", "2", "live", "living"}
@@ -1630,12 +1319,7 @@ async def discover_enterprise_live_sessions(context: BrowserContext, room: LiveR
     if not root_room_id:
         return []
 
-    page = None
-    try:
-        page = await context.new_page()
-    except Exception:
-        logger.warning("创建企业主播发现页面失败，浏览器上下文可能已断开: room_id=%s", root_room_id)
-        return []
+    page = await context.new_page()
     try:
         await page.goto(
             f"{COMMENT_URL}?roomId={root_room_id}&fullscreen=0",
@@ -1810,19 +1494,7 @@ async def _enrich_history_sessions(
             session.detail_collection_status = "retryable"
             session.detail_collection_error = error
             db.commit()
-            # 生成报错指引
-            err_lower = error.lower()
-            if "超时" in error or "timeout" in err_lower:
-                fix = "该场次大屏页加载较慢，下次采集会自动重试。如持续超时，可手动确认页面是否正常打开"
-            elif "csrf" in err_lower or "403" in error:
-                fix = "CSRF 校验失败，Cookie 可能已过期，需重新扫码登录"
-            elif "browser" in err_lower and "closed" in err_lower:
-                fix = "浏览器上下文断开，系统将在下一轮自动恢复后重试"
-            else:
-                fix = "未知错误，可在前端页面查看该场次大屏页是否正常"
-            logger.warning("[历史补齐] ❌ session_id=%s anchor=%s 场次=%s 错误=[%s] %s 指引=%s",
-                           session.id, session.anchor_name or "?", session.session_title[:20] if session.session_title else "无标题",
-                           type(error).__name__ if hasattr(error, '__name__') else 'Exception', str(error)[:200], fix)
+            logger.warning("历史场次详情采集失败: session_id=%s error=%s", session.id, error)
             if progress_callback:
                 progress_callback(checked, len(target_sessions), enriched, failed)
             continue
@@ -1896,17 +1568,13 @@ async def _enrich_history_sessions(
         enriched += 1
         if progress_callback:
             progress_callback(checked, len(target_sessions), enriched, failed)
-        stream_status = "✅" if session.stream_url else "❌"
-        has_profiles = "✅" if profiles else "❌"
         logger.info(
-            "[历史补齐] ✅ session_id=%s anchor=%s metrics=%s comments=%s profiles=%s stream=%s 场次=%s",
+            "历史场次详情补齐: session_id=%s, anchor=%s, metrics=%s, comments=%s, stream=%s",
             session.id,
             session.anchor_name or "未知主播",
             metrics_count,
             comments_count,
-            has_profiles,
-            stream_status,
-            session.session_title[:30] if session.session_title else "无标题",
+            bool(session.stream_url),
         )
 
     progress = {
@@ -2211,35 +1879,11 @@ async def _reveal_session_anchor(page) -> dict:
         return {}
 
 
-async def _scrape_stream_url(
-    context: BrowserContext, room_id: str,
-    bff_page=None, csrf_token: str = "",
-) -> Optional[str]:
-    """采集 m3u8 流地址（优先用回放 API，失败降级到页面抓取）"""
-    # 如果有 BFF 页面和 CSRF Token，优先用回放 API
-    if bff_page and csrf_token:
-        t0 = time.time()
-        replay_url = await _fetch_live_replay(bff_page, room_id, csrf_token)
-        api_time = time.time() - t0
-        if replay_url:
-            url_ext = replay_url.split('?')[0].split('.')[-1] if '.' in replay_url else '未知格式'
-            logger.info("[流地址] ✅ BFF API回放 采集成功 room_id=%s 格式=%s 耗时=%.1fs 路径=%s...",
-                        room_id, url_ext, api_time, replay_url[:60])
-            return replay_url
-        else:
-            logger.info("[流地址] ⚠️ BFF API回放 未返回地址 room_id=%s 耗时=%.1fs，降级到页面抓取", room_id, api_time)
-
-    # 降级：页面抓取
+async def _scrape_stream_url(context: BrowserContext, room_id: str) -> Optional[str]:
+    """采集 m3u8 流地址"""
     url = f"{LIVE_SCREEN_URL}?room_id={room_id}&fullscreen=0"
-    page = None
+    page = await context.new_page()
     m3u8_urls = []
-    try:
-        t0 = time.time()
-        page = await context.new_page()
-        logger.info("[流地址] 降级到页面抓取: room_id=%s url=%s", room_id, url)
-    except Exception:
-        logger.warning("[流地址] ❌ 创建页面失败，浏览器上下文可能已断开: room_id=%s", room_id)
-        return None
 
     def on_request(req):
         if ".m3u8" in req.url:
@@ -2250,16 +1894,8 @@ async def _scrape_stream_url(
     try:
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(5)
-        page_time = time.time() - t0
-        if m3u8_urls:
-            logger.info("[流地址] ✅ 页面抓取成功 room_id=%s 捕获m3u8=%s个 耗时=%.1fs 路径=%s...",
-                        room_id, len(m3u8_urls), page_time, m3u8_urls[-1][:60])
-            return m3u8_urls[-1]
-        else:
-            logger.warning("[流地址] ⚠️ 页面抓取未发现m3u8请求 room_id=%s 耗时=%.1fs", room_id, page_time)
-            return None
-    except Exception as exc:
-        logger.warning("[流地址] ❌ 页面抓取异常 room_id=%s error=%s", room_id, exc)
+        return m3u8_urls[-1] if m3u8_urls else None
+    except Exception:
         return None
     finally:
         await page.close()
