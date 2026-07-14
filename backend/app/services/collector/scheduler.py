@@ -31,6 +31,7 @@ class SchedulerManager:
             cls._instance._session_jobs: dict[int, dict[str, str]] = {}
             cls._instance._collector_factory = None
             cls._instance._last_error = None
+            cls._instance._paused_for_collection = False
         return cls._instance
 
     def set_collector_factory(self, factory):
@@ -65,15 +66,16 @@ class SchedulerManager:
         self._scheduler.start()
         self._running = True
         self._last_error = None
+        self._paused_for_collection = False
         logger.info("SchedulerManager 已启动")
 
     async def stop(self):
-        """停止调度器并释放登录浏览器，避免停止监控后继续占用内存。"""
+        """仅停止实时监控任务；共享浏览器由应用生命周期统一管理。"""
         if self._scheduler and self._scheduler.running:
             self._scheduler.shutdown(wait=False)
         self._running = False
+        self._paused_for_collection = False
         self._session_jobs.clear()
-        await browser_manager.close()
         logger.info("SchedulerManager 已停止")
 
     @property
@@ -134,6 +136,27 @@ class SchedulerManager:
     def last_error(self) -> Optional[str]:
         return self._last_error
 
+    @property
+    def paused_for_collection(self) -> bool:
+        """全量刷新接管浏览器期间，监控服务保持开启但不重复采集。"""
+        return self._paused_for_collection
+
+    def resume_after_collection(self) -> None:
+        """全量刷新结束后立即唤醒监控，不等待下一个轮询周期。"""
+        self._paused_for_collection = False
+        if not self._running or not self._scheduler or not self._scheduler.running:
+            return
+        job = self._scheduler.get_job("monitor_check")
+        if job:
+            job.modify(next_run_time=datetime.now())
+
+    @staticmethod
+    def _has_running_full_collection(db: Session) -> bool:
+        return db.query(ScraperTask.id).filter(
+            ScraperTask.task_type == "collect_all",
+            ScraperTask.status == "running",
+        ).first() is not None
+
     async def _monitor_check(self):
         """开播检测任务"""
         from app.core.database import SessionLocal
@@ -143,6 +166,13 @@ class SchedulerManager:
 
         db = SessionLocal()
         try:
+            if self._has_running_full_collection(db):
+                if not self._paused_for_collection:
+                    logger.info("刷新数据采集正在运行，实时监控保持开启并暂缓重复浏览器任务")
+                self._paused_for_collection = True
+                self._last_error = None
+                return
+            self._paused_for_collection = False
             rooms = db.query(LiveRoom).filter(LiveRoom.status == True).all()
             self._last_error = None
             for room in rooms:
@@ -263,6 +293,11 @@ class SchedulerManager:
         db = SessionLocal()
         task = None
         try:
+            if self._has_running_full_collection(db):
+                if not self._paused_for_collection:
+                    logger.info("刷新数据采集已接管实时数据，本轮 %s 任务自动跳过", job_type)
+                self._paused_for_collection = True
+                return
             task = ScraperTask(
                 session_id=session_id,
                 task_type=job_type,

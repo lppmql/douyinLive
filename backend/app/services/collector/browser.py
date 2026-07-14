@@ -44,6 +44,13 @@ BROWSER_ARGS = [
     "--headless=new",
     "--no-sandbox",
     "--disable-setuid-sandbox",
+    # 采集只依赖接口与 DOM。关闭图形加速可规避 macOS 无头 Chromium 的
+    # EGL 驱动循环报错及 SIGSEGV，同时减少长期采集的 GPU 资源占用。
+    "--disable-gpu",
+    "--disable-software-rasterizer",
+    "--disable-webgl",
+    "--disable-accelerated-2d-canvas",
+    "--log-level=3",
     "--disable-blink-features=AutomationControlled",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process",
@@ -89,18 +96,26 @@ class BrowserManager:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
+            cls._instance._browser_lock = asyncio.Lock()
+            cls._instance._context_lock = asyncio.Lock()
         return cls._instance
 
     async def ensure_browser(self) -> Browser:
         """获取或创建浏览器实例（固定参数）"""
-        if self._browser is None or not self._browser.is_connected():
-            self._playwright = await async_playwright().start()
-            self._browser = await self._playwright.chromium.launch(
-                headless=True,
-                args=BROWSER_ARGS,
-            )
-            logger.info("浏览器实例已创建")
-        return self._browser
+        async with self._browser_lock:
+            if self._browser is None or not self._browser.is_connected():
+                if self._playwright:
+                    try:
+                        await self._playwright.stop()
+                    except Exception:
+                        pass
+                self._playwright = await async_playwright().start()
+                self._browser = await self._playwright.chromium.launch(
+                    headless=True,
+                    args=BROWSER_ARGS,
+                )
+                logger.info("浏览器实例已创建（图形加速已关闭）")
+            return self._browser
 
     def _make_context_opts(
         self,
@@ -210,6 +225,11 @@ class BrowserManager:
         return context
 
     async def get_logged_in_context(self) -> tuple[Optional[BrowserContext], bool, str]:
+        """串行获取或恢复登录上下文，避免并发请求重复创建和相互覆盖。"""
+        async with self._context_lock:
+            return await self._get_logged_in_context_unlocked()
+
+    async def _get_logged_in_context_unlocked(self) -> tuple[Optional[BrowserContext], bool, str]:
         """
         获取已登录的浏览器上下文（优先使用保持中的登录上下文）
 
@@ -288,6 +308,16 @@ class BrowserManager:
             await context.close()
 
     async def set_logged_in_context(self, context: BrowserContext, storage_path: str, account_id: int):
+        """串行替换登录上下文，避免扫码完成时关闭正在恢复的上下文。"""
+        async with self._context_lock:
+            await self._set_logged_in_context_unlocked(context, storage_path, account_id)
+
+    async def _set_logged_in_context_unlocked(
+        self,
+        context: BrowserContext,
+        storage_path: str,
+        account_id: int,
+    ) -> None:
         """
         设置持久化登录上下文（登录成功后调用）
 
@@ -726,21 +756,23 @@ class BrowserManager:
 
     async def close(self):
         """关闭浏览器（释放所有资源）"""
-        self._logged_in_context = None
-        self._logged_in_account_id = None
-        if self._browser:
-            try:
-                await self._browser.close()
-            except Exception:
-                pass
-            self._browser = None
-        if self._playwright:
-            try:
-                await self._playwright.stop()
-            except Exception:
-                pass
-            self._playwright = None
-        logger.info("浏览器实例已关闭")
+        async with self._context_lock:
+            async with self._browser_lock:
+                self._logged_in_context = None
+                self._logged_in_account_id = None
+                if self._browser:
+                    try:
+                        await self._browser.close()
+                    except Exception:
+                        pass
+                    self._browser = None
+                if self._playwright:
+                    try:
+                        await self._playwright.stop()
+                    except Exception:
+                        pass
+                    self._playwright = None
+                logger.info("浏览器实例已关闭")
 
 
 # 全局单例

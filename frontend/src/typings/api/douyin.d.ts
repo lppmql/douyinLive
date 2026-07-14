@@ -259,6 +259,7 @@ declare namespace Api {
     interface MonitorStatus {
       enabled: boolean;
       running: boolean;
+      paused_for_collection: boolean;
       mock_mode: boolean;
       active_session_count: number;
       active_sessions: number[];

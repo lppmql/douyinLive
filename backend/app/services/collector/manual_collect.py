@@ -44,6 +44,8 @@ HISTORY_DETAIL_CONCURRENCY = 2
 HISTORY_DETAIL_BATCH_SIZE = 20
 ENTERPRISE_PAGE_SIZE = 100
 ENTERPRISE_MAX_PAGES = 200
+CONTEXT_RECOVERY_ATTEMPTS = 2
+COLLECTOR_ERROR_MAX_LENGTH = 500
 
 
 ProgressCallback = Callable[[str, int, int, int, str, Optional[dict[str, Any]]], None]
@@ -149,9 +151,16 @@ async def collect_all(
                     "error": f"采集超过 {settings.ROOM_COLLECTION_TIMEOUT_SECONDS} 秒",
                 }
 
-            # 登录检查和正式打开页面之间仍可能发生浏览器句柄失效，自动恢复一次即可。
-            if _is_context_closed_message(result.get("error")):
-                logger.warning("采集上下文已关闭，正在从已保存登录态恢复并重试: room_id=%s", room.room_id_str)
+            # Chromium 异常退出时从保存的 Cookie 与指纹恢复，最多补偿重试两次。
+            recovery_attempt = 0
+            while _is_context_closed_message(result.get("error")) and recovery_attempt < CONTEXT_RECOVERY_ATTEMPTS:
+                recovery_attempt += 1
+                logger.warning(
+                    "采集浏览器异常退出，正在恢复并重试: room_id=%s attempt=%s/%s",
+                    room.room_id_str,
+                    recovery_attempt,
+                    CONTEXT_RECOVERY_ATTEMPTS,
+                )
                 browser_manager.invalidate_logged_in_context(context)
                 context, recovered, recovery_message = await browser_manager.get_logged_in_context()
                 if recovered and context:
@@ -169,6 +178,33 @@ async def collect_all(
                         }
                 else:
                     result["error"] = recovery_message or "浏览器上下文恢复失败，请重新扫码登录"
+                    break
+
+            if recovery_attempt and not result.get("error"):
+                db.add(
+                    ScraperLog(
+                        task_id=task_id,
+                        level="info",
+                        message=f"浏览器已自动恢复，房间 {room.room_id_str} 重试采集成功",
+                        raw_json={
+                            "stage": "room_collection",
+                            "event": "room_recovered",
+                            "room_id": room.room_id_str,
+                            "recovery_attempts": recovery_attempt,
+                        },
+                    )
+                )
+                db.commit()
+            elif not result.get("failure_logged") and result.get("error") and (
+                result.get("recoverable") or recovery_attempt or "采集超过" in str(result.get("error"))
+            ):
+                _record_room_failure(
+                    db,
+                    task_id,
+                    room.room_id_str or str(room.id),
+                    result["error"],
+                    recovery_attempt,
+                )
             results.append(result)
             report(
                 "room_collection",
@@ -183,6 +219,34 @@ async def collect_all(
         # 两者必须都执行，不能因为企业接口只返回部分主播而漏掉其他场次。
         report("enterprise_sync", 40, 0, 0, "正在同步全部企业主播及所属场次")
         enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0], task_id=task_id)
+        enterprise_recovery_attempt = 0
+        while (
+            _is_context_closed_message(enterprise_sync.get("error"))
+            and enterprise_recovery_attempt < CONTEXT_RECOVERY_ATTEMPTS
+        ):
+            enterprise_recovery_attempt += 1
+            browser_manager.invalidate_logged_in_context(context)
+            context, recovered, recovery_message = await browser_manager.get_logged_in_context()
+            if not recovered or not context:
+                enterprise_sync["error"] = recovery_message or "浏览器上下文恢复失败，请重新扫码登录"
+                break
+            enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0], task_id=task_id)
+        if enterprise_sync.get("error"):
+            compact_error = _sanitize_collector_error(enterprise_sync["error"])
+            db.add(
+                ScraperLog(
+                    task_id=task_id,
+                    level="error",
+                    message=f"企业主播映射最终失败: {compact_error}",
+                    raw_json={
+                        "stage": "enterprise_sync",
+                        "event": "enterprise_sync_failed",
+                        "error": compact_error,
+                        "recovery_attempts": enterprise_recovery_attempt,
+                    },
+                )
+            )
+            db.commit()
         report(
             "enterprise_sync",
             60,
@@ -282,7 +346,46 @@ def _is_context_closed_message(value: Any) -> bool:
         "target page, context or browser has been closed",
         "browsercontext.new_page",
         "browser.new_context",
+        "浏览器进程意外退出",
     ))
+
+
+def _sanitize_collector_error(value: Any, max_length: int = COLLECTOR_ERROR_MAX_LENGTH) -> str:
+    """移除 Playwright 附带的浏览器底层日志，只保留可操作的业务错误。"""
+    raw = str(value or "未知采集错误")
+    compact = re.split(r"\bBrowser logs:\s*", raw, maxsplit=1, flags=re.IGNORECASE)[0]
+    compact = re.sub(r"\s+", " ", compact).strip()
+    if _is_context_closed_message(compact):
+        compact = "浏览器进程意外退出（Target page, context or browser has been closed）"
+    if len(compact) > max_length:
+        compact = f"{compact[:max_length - 1]}…"
+    return compact
+
+
+def _record_room_failure(
+    db: Session,
+    task_id: Optional[int],
+    room_id: str,
+    error: Any,
+    recovery_attempts: int = 0,
+) -> None:
+    """最终失败才写 error；自动恢复过程只记录 warn，避免误报。"""
+    compact_error = _sanitize_collector_error(error)
+    db.add(
+        ScraperLog(
+            task_id=task_id,
+            level="error",
+            message=f"采集失败 room_id={room_id}: {compact_error}",
+            raw_json={
+                "stage": "room_collection",
+                "event": "room_failed",
+                "room_id": room_id,
+                "error": compact_error,
+                "recovery_attempts": recovery_attempts,
+            },
+        )
+    )
+    db.commit()
 
 
 def _prune_unmapped_sessions(db: Session, room: LiveRoom) -> int:
@@ -545,24 +648,34 @@ async def _collect_room_data(
         }
 
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"采集 room_id={room_id} 失败: {e}\n{tb}")
-        err_log = ScraperLog(
-            task_id=task_id,
-            level="error",
-            message=f"采集失败 room_id={room_id}: {str(e)}",
-            raw_json={
-                "stage": "room_collection",
-                "event": "room_failed",
-                "room_id": room_id,
-                "error_type": type(e).__name__,
-                "error": str(e)[:2000],
-            },
-        )
-        db.add(err_log)
-        db.commit()
-        return {"room_id": room_id, "error": str(e)}
+        compact_error = _sanitize_collector_error(e)
+        recoverable = _is_context_closed_message(e)
+        if recoverable:
+            logger.warning("房间采集浏览器中断，等待自动恢复: room_id=%s error=%s", room_id, compact_error)
+            db.add(
+                ScraperLog(
+                    task_id=task_id,
+                    level="warn",
+                    message=f"房间 {room_id} 的浏览器连接中断，正在自动恢复",
+                    raw_json={
+                        "stage": "room_collection",
+                        "event": "room_recovery_pending",
+                        "room_id": room_id,
+                        "error_type": type(e).__name__,
+                        "error": compact_error,
+                    },
+                )
+            )
+            db.commit()
+        else:
+            logger.exception("采集 room_id=%s 失败: %s", room_id, compact_error)
+            _record_room_failure(db, task_id, room_id, compact_error)
+        return {
+            "room_id": room_id,
+            "error": compact_error,
+            "recoverable": recoverable,
+            "failure_logged": not recoverable,
+        }
 
 
 # ==================== 页面采集 ====================
@@ -1239,13 +1352,25 @@ async def _sync_enterprise_anchor_sessions(
         }
     except Exception as exc:
         db.rollback()
-        db.add(ScraperLog(level="error", message=f"企业主播映射同步失败: {str(exc)[:500]}"))
-        db.commit()
-        logger.warning("企业主播映射同步失败: %s", exc)
-        return {"anchor_count": 0, "session_count": 0, "profile_count": 0}
+        compact_error = _sanitize_collector_error(exc)
+        recoverable = _is_context_closed_message(exc)
+        if not recoverable:
+            db.add(ScraperLog(level="error", message=f"企业主播映射同步失败: {compact_error}"))
+            db.commit()
+        logger.warning("企业主播映射同步失败%s: %s", "，等待自动恢复" if recoverable else "", compact_error)
+        return {
+            "anchor_count": 0,
+            "session_count": 0,
+            "discovered_session_count": 0,
+            "profile_count": 0,
+            "error": compact_error,
+        }
     finally:
         if page:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
 
 
 async def _fetch_enterprise_post(page, path: str, payload: dict, csrf_token: str = "") -> dict:
@@ -1489,20 +1614,39 @@ async def _enrich_history_sessions(
     semaphore = asyncio.Semaphore(HISTORY_DETAIL_CONCURRENCY)
 
     async def scrape_one(session: LiveSession):
+        nonlocal current_context
         room_id = _extract_room_id_from_dashboard_url(session.dashboard_url)
         if not room_id:
             return session, None, "缺少场次 room_id"
         async with semaphore:
-            try:
-                detail = await asyncio.wait_for(
-                    _scrape_history_session_detail(current_context, room_id, session),
-                    timeout=HISTORY_DETAIL_TIMEOUT_SECONDS,
-                )
-                return session, detail, None
-            except asyncio.TimeoutError:
-                return session, None, "详情页采集超时，可在下次采集重试"
-            except Exception as exc:
-                return session, None, f"详情页采集失败: {str(exc)[:450]}"
+            for attempt in range(CONTEXT_RECOVERY_ATTEMPTS + 1):
+                try:
+                    detail = await asyncio.wait_for(
+                        _scrape_history_session_detail(current_context, room_id, session),
+                        timeout=HISTORY_DETAIL_TIMEOUT_SECONDS,
+                    )
+                    detail_error = detail.get("error")
+                    if not detail_error:
+                        return session, detail, None
+                    if not _is_context_closed_message(detail_error) or attempt >= CONTEXT_RECOVERY_ATTEMPTS:
+                        return session, None, f"详情页采集失败: {_sanitize_collector_error(detail_error)}"
+                    browser_manager.invalidate_logged_in_context(current_context)
+                    recovered_context, recovered, recovery_message = await browser_manager.get_logged_in_context()
+                    if not recovered or not recovered_context:
+                        return session, None, recovery_message or "浏览器上下文恢复失败，请重新扫码登录"
+                    current_context = recovered_context
+                except asyncio.TimeoutError:
+                    return session, None, "详情页采集超时，可在下次采集重试"
+                except Exception as exc:
+                    compact_error = _sanitize_collector_error(exc)
+                    if not _is_context_closed_message(exc) or attempt >= CONTEXT_RECOVERY_ATTEMPTS:
+                        return session, None, f"详情页采集失败: {compact_error}"
+                    browser_manager.invalidate_logged_in_context(current_context)
+                    recovered_context, recovered, recovery_message = await browser_manager.get_logged_in_context()
+                    if not recovered or not recovered_context:
+                        return session, None, recovery_message or "浏览器上下文恢复失败，请重新扫码登录"
+                    current_context = recovered_context
+            return session, None, "详情页采集失败，自动恢复次数已用完"
 
     detail_tasks = [asyncio.create_task(scrape_one(session)) for session in target_sessions]
     for detail_task in asyncio.as_completed(detail_tasks):
@@ -1734,11 +1878,14 @@ async def _scrape_history_session_detail(
     except Exception as exc:
         return {
             "overview": {}, "trend": [], "replay_url": None, "comments": [],
-            "anchor_profile": {}, "validation_failed": False, "error": str(exc)[:500],
+            "anchor_profile": {}, "validation_failed": False, "error": _sanitize_collector_error(exc),
         }
     finally:
         if page:
-            await page.close()
+            try:
+                await page.close()
+            except Exception:
+                pass
 
 
 async def _fetch_all_session_comments(page, room_id: str) -> tuple[list[dict], bool]:

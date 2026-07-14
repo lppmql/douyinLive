@@ -24,6 +24,7 @@ def get_monitor_status():
     return MonitorStatusResponse(
         enabled=settings.MONITOR_ENABLED,
         running=scheduler_manager.running,
+        paused_for_collection=scheduler_manager.paused_for_collection,
         mock_mode=settings.MONITOR_MOCK_MODE,
         active_session_count=len(scheduler_manager.get_active_sessions()),
         active_sessions=scheduler_manager.get_active_sessions(),
@@ -39,14 +40,15 @@ async def start_monitor(db: Session = Depends(get_db)):
         ScraperTask.task_type == "collect_all",
         ScraperTask.status == "running",
     ).first()
-    if running_collect:
-        raise HTTPException(409, f"刷新数据采集任务 #{running_collect.id} 正在运行，请等待任务结束")
-    if not settings.MONITOR_MOCK_MODE:
+    if not settings.MONITOR_MOCK_MODE and not running_collect:
         context, is_valid, message = await browser_manager.get_logged_in_context()
         if not is_valid or not context:
             raise HTTPException(409, message or "采集账号登录状态不可用，请重新扫码")
     await scheduler_manager.start()
-    return MonitorActionResponse(success=True, message="监控已启动")
+    message = "监控已启动"
+    if running_collect:
+        message = f"监控已启动；刷新任务 #{running_collect.id} 期间由全量采集接管，完成后自动恢复实时轮询"
+    return MonitorActionResponse(success=True, message=message)
 
 
 @router.post("/stop", response_model=MonitorActionResponse)

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 class MonitorStatusResponse(BaseModel):
     enabled: bool = False
     running: bool = False
+    paused_for_collection: bool = False
     mock_mode: bool = False
     active_session_count: int = 0
     active_sessions: list[int] = []

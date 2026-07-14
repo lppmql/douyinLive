@@ -1,12 +1,13 @@
 import unittest
+import asyncio
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.services.collector.browser import BrowserManager
+from app.services.collector.browser import BROWSER_ARGS, BrowserManager
 from app.services.collector.monitor import CluerichLiveDetector, LiveStatusResult
-from app.services.collector.manual_collect import _is_context_closed_message
+from app.services.collector.manual_collect import _is_context_closed_message, _sanitize_collector_error
 
 
 class FakePage:
@@ -23,6 +24,22 @@ class ContextClosedMessageTest(unittest.TestCase):
             "BrowserContext.new_page: Target page, context or browser has been closed"
         ))
         self.assertFalse(_is_context_closed_message("登录已过期，请重新扫码"))
+
+    def test_sanitizes_playwright_browser_logs(self):
+        raw_error = (
+            "BrowserContext.new_page: Target page, context or browser has been closed\n"
+            "Browser logs:\n" + "EGL Driver message (Error) " * 1000
+        )
+
+        compact = _sanitize_collector_error(raw_error)
+
+        self.assertEqual(compact, "浏览器进程意外退出（Target page, context or browser has been closed）")
+        self.assertNotIn("EGL Driver", compact)
+        self.assertLessEqual(len(compact), 500)
+
+    def test_browser_disables_graphics_acceleration(self):
+        self.assertIn("--disable-gpu", BROWSER_ARGS)
+        self.assertIn("--disable-webgl", BROWSER_ARGS)
 
 
 class ClosedContext:
@@ -77,6 +94,24 @@ class RecoveringDetector(CluerichLiveDetector):
 
 
 class MonitorContextRecoveryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_serializes_logged_in_context_recovery(self):
+        manager = BrowserManager()
+        active_calls = 0
+        max_active_calls = 0
+
+        async def fake_get_context():
+            nonlocal active_calls, max_active_calls
+            active_calls += 1
+            max_active_calls = max(max_active_calls, active_calls)
+            await asyncio.sleep(0.01)
+            active_calls -= 1
+            return HealthyContext(), True, "ok"
+
+        with patch.object(manager, "_get_logged_in_context_unlocked", side_effect=fake_get_context):
+            await asyncio.gather(manager.get_logged_in_context(), manager.get_logged_in_context())
+
+        self.assertEqual(max_active_calls, 1)
+
     async def test_login_expiry_requires_two_consecutive_failures(self):
         manager = BrowserManager()
         pages = [

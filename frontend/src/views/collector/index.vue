@@ -56,7 +56,18 @@ const dataEaseStatus = ref<Api.Douyin.DataEaseStatus | null>(null);
 const dataEaseSyncLoading = ref(false);
 
 const loggedInAccountCount = computed(() => accounts.value.filter(item => item.login_status === 'logged_in').length);
-const errorLogCount = computed(() => logs.value.filter(item => item.level === 'error').length);
+const latestSuccessfulCollectTime = computed(() => {
+  const task = tasks.value.find(item => item.task_type === 'collect_all' && item.status === 'completed');
+  const value = task?.completed_at || task?.created_at;
+  return value ? parseBackendTime(value) : 0;
+});
+const errorLogCount = computed(
+  () =>
+    logs.value.filter(
+      item => item.level === 'error' && parseBackendTime(item.created_at) > latestSuccessfulCollectTime.value
+    ).length
+);
+const historicalErrorCount = computed(() => logs.value.filter(item => item.level === 'error').length);
 const hasAvailableAccount = computed(() => loggedInAccountCount.value > 0);
 const activeTasks = computed(() => tasks.value.filter(item => ['pending', 'running'].includes(item.status)));
 const currentCollectTask = computed(() =>
@@ -92,7 +103,6 @@ const collectionRunning = computed(
 );
 const collectDisabledReason = computed(() => {
   if (!hasAvailableAccount.value) return '请先扫码登录可用采集账号';
-  if (monitorStatus.value?.running) return '当前正在直播监控中，请先停止监控再刷新采集数据';
   if (collectionRunning.value) return '已有刷新数据采集任务正在运行，请勿重复提交';
   return '';
 });
@@ -103,10 +113,6 @@ async function loadMonitorStatus() {
 }
 
 async function handleStartMonitor() {
-  if (collectionRunning.value) {
-    message.warning('刷新数据采集正在运行，请等待任务结束后再启动监控');
-    return;
-  }
   monitorLoading.value = true;
   try {
     const res = await startMonitor();
@@ -868,8 +874,16 @@ onUnmounted(() => {
                   <SvgIcon icon="mdi:progress-clock" class="text-24px" />
                 </div>
               </div>
-              <NButton class="mt-12px" text type="error" size="tiny" @click.stop="openErrors">
-                近 50 条日志中 {{ errorLogCount }} 条异常，点击查看
+              <NButton
+                class="mt-12px"
+                text
+                :type="errorLogCount ? 'error' : 'success'"
+                size="tiny"
+                @click.stop="openErrors"
+              >
+                <template v-if="errorLogCount">成功采集后新增 {{ errorLogCount }} 条异常，点击查看</template>
+                <template v-else-if="historicalErrorCount">当前无未恢复异常，点击查看历史</template>
+                <template v-else>当前无采集异常</template>
               </NButton>
             </NCard>
           </NGi>
@@ -885,7 +899,7 @@ onUnmounted(() => {
               </template>
               <div class="flex flex-col gap-16px">
                 <NAlert type="info" :show-icon="true" :bordered="false">
-                  重新发现账号下全部主播和直播场次，并补齐每场直播的主播资料、指标、评论和观众画像。本轮会检查全部待补场次。
+                  重新发现账号下全部主播和直播场次，并补齐每场直播的主播资料、指标、评论和观众画像。可与实时监控同时开启，刷新期间由全量任务接管重复采集，完成后自动恢复监控。
                 </NAlert>
                 <div
                   class="flex flex-wrap items-center justify-between gap-12px rounded-10px bg-gray-100 p-12px dark:bg-white/5"
@@ -1066,12 +1080,25 @@ onUnmounted(() => {
           <NGi>
             <NCard :bordered="false" class="card-wrapper h-full" title="实时监控">
               <template #header-extra>
-                <NTag v-if="monitorStatus?.mock_mode" type="warning" round size="small">Mock 模式</NTag>
+                <NSpace :size="8">
+                  <NTag v-if="monitorStatus?.paused_for_collection" type="warning" round size="small">
+                    刷新采集接管中
+                  </NTag>
+                  <NTag v-if="monitorStatus?.mock_mode" type="warning" round size="small">Mock 模式</NTag>
+                </NSpace>
               </template>
               <div class="flex flex-col gap-16px">
                 <div class="flex items-center justify-between gap-12px rounded-8px bg-gray-100 p-12px dark:bg-white/5">
                   <div>
-                    <div class="font-600">{{ monitorStatus?.running ? '正在监听开播状态' : '监控服务未启动' }}</div>
+                    <div class="font-600">
+                      {{
+                        monitorStatus?.paused_for_collection
+                          ? '监控已开启，当前由刷新采集接管'
+                          : monitorStatus?.running
+                            ? '正在监听开播状态'
+                            : '监控服务未启动'
+                      }}
+                    </div>
                     <div class="mt-4px text-12px text-gray-500">
                       活跃场次 {{ monitorStatus?.active_session_count || 0 }} 场
                     </div>
@@ -1085,7 +1112,6 @@ onUnmounted(() => {
                   block
                   :type="monitorStatus?.running ? 'warning' : 'primary'"
                   :loading="monitorLoading"
-                  :disabled="!monitorStatus?.running && collectionRunning"
                   @click="monitorStatus?.running ? handleStopMonitor() : handleStartMonitor()"
                 >
                   <template #icon>

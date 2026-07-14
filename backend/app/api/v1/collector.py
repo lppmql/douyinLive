@@ -314,8 +314,6 @@ def list_tasks(
 @router.post("/collect-all", response_model=CollectAllResponse)
 async def manual_collect_all(db: Session = Depends(get_db)):
     """刷新全部主播、直播场次及场次详情数据。"""
-    if scheduler_manager.running:
-        raise HTTPException(409, "直播监控运行中，请先停止监控再刷新数据采集")
     existing = db.query(ScraperTask).filter(
         ScraperTask.task_type == "collect_all",
         ScraperTask.status == "running",
@@ -396,20 +394,23 @@ async def manual_collect_all(db: Session = Depends(get_db)):
             task.progress_message = task.error_message
         return result
     except Exception as exc:
+        from app.services.collector.manual_collect import _sanitize_collector_error
+
+        compact_error = _sanitize_collector_error(exc)
         task.status = "failed"
-        task.error_message = str(exc)[:2000]
+        task.error_message = compact_error
         task.progress_stage = "failed"
         task.progress_message = "采集任务执行失败"
         db.add(
             ScraperLog(
                 task_id=task.id,
                 level="error",
-                message=f"刷新数据采集任务失败: {str(exc)}",
+                message=f"刷新数据采集任务失败: {compact_error}",
                 raw_json={
                     "stage": "failed",
                     "event": "task_failed",
                     "error_type": type(exc).__name__,
-                    "error": str(exc)[:2000],
+                    "error": compact_error,
                 },
             )
         )
@@ -419,3 +420,4 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         if task.status == "completed":
             task.progress_percent = 100
         db.commit()
+        scheduler_manager.resume_after_collection()

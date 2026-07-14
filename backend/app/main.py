@@ -13,6 +13,7 @@ from app.core.database import engine, SessionLocal
 from app.models.scraper_tasks import ScraperTask
 from app.api.v1 import v1_router
 from app.services.collector.scheduler import scheduler_manager
+from app.services.collector.browser import browser_manager
 from app.services.asr.control import start_asr_runtime
 from app.api.v1.ws import transcript_ws
 
@@ -81,6 +82,7 @@ async def lifespan(app: FastAPI):
 
     if scheduler_manager.running:
         await scheduler_manager.stop()
+    await browser_manager.close()
     logger.info("🛑 应用关闭")
 
 
