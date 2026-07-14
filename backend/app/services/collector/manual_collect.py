@@ -28,7 +28,10 @@ from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.stream_sources import StreamSource
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_logs import ScraperLog
+from app.services.asr.control import get_asr_runtime_status
+from app.services.asr.queue import queue_auto_transcriptions
 from app.services.collector.browser import browser_manager
+from app.services.sync import sync_pending_complete_sessions
 
 # 抖音企业号后台地址
 LEADS_BASE = "https://leads.cluerich.com"
@@ -232,6 +235,17 @@ async def collect_all(
         report("cookie_refresh", 97, 0, 0, "正在保存最新 Cookie 与浏览器指纹")
         await browser_manager.refresh_logged_in_state()
 
+        report("dataease_sync", 98, 0, 0, "正在增量同步 DataEase 分析宽表")
+        dataease_sync = sync_pending_complete_sessions(db, limit=100)
+
+        report("asr_queue", 99, 0, settings.ASR_MAX_QUEUED, "正在按安全容量补充话术转写队列")
+        asr_runtime = await asyncio.to_thread(get_asr_runtime_status)
+        asr_queue = (
+            queue_auto_transcriptions(db, limit=settings.ASR_MAX_QUEUED)
+            if asr_runtime["enabled"]
+            else {"created_count": 0, "active_count": 0, "capacity": settings.ASR_MAX_QUEUED, "session_ids": []}
+        )
+
         collected = sum(1 for r in results if r.get("error") is None)
         final_result = {
             "total_rooms": len(rooms),
@@ -247,6 +261,11 @@ async def collect_all(
             "history_detail_remaining_count": history_detail_progress["remaining_count"],
             "history_detail_batch_size": history_detail_progress["batch_size"],
             "history_detail_failed_count": history_detail_progress["failed_count"],
+            "dataease_synced_count": dataease_sync["synced_count"],
+            "dataease_failed_count": dataease_sync["failed_count"],
+            "asr_queued_count": asr_queue["created_count"],
+            "asr_active_count": asr_queue["active_count"],
+            "asr_queue_capacity": asr_queue["capacity"],
             "results": results,
         }
         report("completed", 100, collected, len(rooms), "刷新数据采集完成", final_result)
@@ -1805,6 +1824,10 @@ async def collect_live_session_snapshot(
     if replay_url and session.stream_url != replay_url:
         session.stream_url = replay_url[:2000]
         _save_stream_source(db, session.id, replay_url)
+        changed = True
+    if session.detail_collection_status != "complete" or session.detail_collection_error:
+        session.detail_collection_status = "complete"
+        session.detail_collection_error = None
         changed = True
     if changed:
         db.commit()

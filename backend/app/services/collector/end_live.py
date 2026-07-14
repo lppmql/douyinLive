@@ -10,6 +10,8 @@ from app.models.comments import Comment
 from app.models.leads import Lead
 from app.models.stream_sources import StreamSource
 from app.models.scraper_logs import ScraperLog
+from app.services.asr.control import get_asr_runtime_status
+from app.services.asr.queue import queue_auto_transcriptions
 from app.services.sync import sync_session
 
 
@@ -52,7 +54,6 @@ async def process_live_end(db: Session, session_id: int):
             session.peak_online_count = metrics_stats.peak_online
         session.comments_count = comment_count
         session.leads_count = lead_count
-
         # 标记流源为过期
         db.query(StreamSource).filter(
             StreamSource.session_id == session_id,
@@ -73,6 +74,12 @@ async def process_live_end(db: Session, session_id: int):
             sync_session(db, session_id)
         except Exception as sync_err:
             logger.error(f"DataEase 同步失败 session={session_id}: {sync_err}")
+
+        if getattr(session, "detail_collection_status", None) == "complete":
+            runtime = get_asr_runtime_status()
+            if runtime["enabled"]:
+                queued = queue_auto_transcriptions(db, limit=1, session_ids=[session_id])
+                logger.info("下播话术自动排队: session=%s created=%s", session_id, queued["created_count"])
 
         logger.info(f"下播处理完成: session={session_id}")
 

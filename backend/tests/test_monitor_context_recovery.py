@@ -38,6 +38,27 @@ class HealthyContext:
         return self.page
 
 
+class LoginCheckPage(FakePage):
+    def __init__(self, url, body):
+        super().__init__()
+        self.url = url
+        self.body = body
+
+    async def goto(self, *_args, **_kwargs):
+        return None
+
+    async def evaluate(self, _script):
+        return self.body
+
+
+class LoginCheckContext:
+    def __init__(self, pages):
+        self.pages = list(pages)
+
+    async def new_page(self):
+        return self.pages.pop(0)
+
+
 class FakeBrowserManager:
     def __init__(self):
         self.contexts = [ClosedContext(), HealthyContext()]
@@ -56,6 +77,19 @@ class RecoveringDetector(CluerichLiveDetector):
 
 
 class MonitorContextRecoveryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_login_expiry_requires_two_consecutive_failures(self):
+        manager = BrowserManager()
+        pages = [
+            LoginCheckPage("https://leads.cluerich.com/pc/auth/login", "手机登录"),
+            LoginCheckPage("https://leads.cluerich.com/pc/analysis/live-screen", "直播数据"),
+        ]
+
+        with patch("app.services.collector.browser.asyncio.sleep", return_value=None):
+            expired = await manager.check_login_expired(LoginCheckContext(pages))
+
+        self.assertFalse(expired)
+        self.assertTrue(all(page.closed for page in pages))
+
     async def test_recreates_closed_context_and_retries_once(self):
         manager = FakeBrowserManager()
         detector = RecoveringDetector(manager)

@@ -231,6 +231,30 @@ declare namespace Api {
       message: string;
     }
 
+    interface DataEaseStatus {
+      source_session_count: number;
+      synced_session_count: number;
+      pending_session_count: number;
+      outdated_session_count: number;
+      coverage_rate: number;
+      metric_row_count: number;
+      profile_row_count: number;
+      comment_summary_count: number;
+      transcript_summary_count: number;
+      ai_summary_count: number;
+      last_synced_at: string | null;
+    }
+
+    interface DataEaseSyncResult {
+      status: 'ok' | 'partial';
+      selected_count: number;
+      synced_count: number;
+      failed_count: number;
+      removed_stale_row_count: number;
+      errors: Array<{ session_id: number; message: string }>;
+      dataease: DataEaseStatus;
+    }
+
     /* ---------- 监控 ---------- */
     interface MonitorStatus {
       enabled: boolean;
@@ -339,6 +363,11 @@ declare namespace Api {
       history_detail_remaining_count: number;
       history_detail_batch_size: number;
       history_detail_failed_count: number;
+      dataease_synced_count: number;
+      dataease_failed_count: number;
+      asr_queued_count: number;
+      asr_active_count: number;
+      asr_queue_capacity: number;
       results: CollectRoomResult[];
       message: string | null;
     }

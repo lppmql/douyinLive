@@ -1,5 +1,6 @@
 """直播场次 CRUD API"""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -9,6 +10,11 @@ from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
 from app.models.live_audience_profiles import LiveAudienceProfile
+from app.services.collector.video_download import (
+    build_video_download_command,
+    stream_video_as_mp4,
+    video_download_semaphore,
+)
 from app.schemas import (
     LiveMetricDetailResponse,
     LiveSessionCreate,
@@ -125,6 +131,44 @@ def get_session_details(
         profiles=profiles,
         stream_url=latest_stream or session.stream_url,
         stream_source_count=len(stream_sources),
+    )
+
+
+@router.get("/{session_id}/video")
+def download_session_video(session_id: int, db: Session = Depends(get_db)):
+    """把已结束场次的 m3u8 原码流封装为 MP4 流，不执行高开销转码。"""
+    session = db.get(LiveSession, session_id)
+    if not session:
+        raise HTTPException(404, "直播场次不存在")
+    if session.live_status == "live":
+        raise HTTPException(409, "直播仍在进行，请等待下播后再下载完整视频")
+    if video_download_semaphore.locked():
+        raise HTTPException(429, "当前已有视频正在下载，请完成后再试")
+
+    source = (
+        db.query(StreamSource)
+        .filter(StreamSource.session_id == session_id)
+        .order_by((StreamSource.status == "active").desc(), StreamSource.fetched_at.desc(), StreamSource.id.desc())
+        .first()
+    )
+    stream_url = (source.m3u8_url if source else None) or session.stream_url
+    if not stream_url:
+        raise HTTPException(404, "该场次暂无 m3u8 地址，请先刷新采集")
+    headers = dict(source.headers_json or {}) if source else {}
+    try:
+        build_video_download_command(stream_url, headers)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    iterator = stream_video_as_mp4(stream_url, headers)
+
+    filename = f"live-session-{session_id}.mp4"
+    return StreamingResponse(
+        iterator,
+        media_type="video/mp4",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

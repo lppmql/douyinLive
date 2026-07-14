@@ -697,26 +697,32 @@ class BrowserManager:
         }
 
     async def check_login_expired(self, context: BrowserContext) -> bool:
-        """检查登录是否过期（访问大屏页判断）"""
-        page = await context.new_page()
-        try:
-            test_url = f"{LEADS_BASE}/pc/analysis/live-screen?room_id=check"
-            await page.goto(test_url, wait_until="domcontentloaded", timeout=15000)
-            await asyncio.sleep(2)
+        """连续两次访问都显示登录页时才判过期，过滤平台临时跳转。"""
+        test_url = f"{LEADS_BASE}/pc/analysis/live-screen?room_id=check"
+        for attempt in range(2):
+            page = await context.new_page()
+            try:
+                await page.goto(test_url, wait_until="domcontentloaded", timeout=15000)
+                await asyncio.sleep(2)
+                body = await page.evaluate("document.body?.innerText || ''")
+                expired = (
+                    "login" in page.url.lower()
+                    or "/auth/" in page.url
+                    or "手机登录" in body
+                    or "邮箱登录" in body
+                )
+                if not expired:
+                    return False
+                logger.warning("登录态探测疑似过期，正在复核 (attempt=%s)", attempt + 1)
+            except Exception as exc:
+                logger.warning("检查登录状态异常 (attempt=%s): %s", attempt + 1, exc)
+            finally:
+                await page.close()
 
-            if "login" in page.url.lower() or "/auth/" in page.url:
-                return True
+            if attempt == 0:
+                await asyncio.sleep(1)
 
-            body = await page.evaluate("document.body?.innerText || ''")
-            if "手机登录" in body or "邮箱登录" in body:
-                return True
-
-            return False
-        except Exception as e:
-            logger.warning(f"检查登录状态异常: {e}")
-            return True
-        finally:
-            await page.close()
+        return True
 
     async def close(self):
         """关闭浏览器（释放所有资源）"""

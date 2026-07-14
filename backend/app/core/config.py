@@ -43,7 +43,9 @@ class Settings(BaseSettings):
     FUNASR_PORT: int = 10096
     FUNASR_WS_URL: str = "ws://localhost:10096"
     ASR_SAMPLE_RATE: int = 16000
+    ASR_AUTO_START: bool = True
     ASR_MAX_QUEUED: int = 5
+    ASR_ENGINE_READY_TIMEOUT_SECONDS: int = 300
     ASR_TASK_TIMEOUT_SECONDS: int = 600
     ASR_NO_AUDIO_TIMEOUT_SECONDS: int = 30
     ASR_ALLOW_MOCK: bool = False

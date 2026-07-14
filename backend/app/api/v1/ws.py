@@ -9,47 +9,11 @@ from app.models.transcript_full_texts import TranscriptFullText
 from app.models.live_sessions import LiveSession
 from app.models.stream_sources import StreamSource
 from app.models.asr_tasks import AsrTask
+from app.services.asr.queue import queue_session_transcription
 from app.services.asr.websocket_manager import ws_manager
-from datetime import datetime
 
 # REST 路由（注册到 v1_router）
 rest_router = APIRouter(prefix="/transcripts", tags=["话术转写"])
-
-
-def _queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrTask, bool]:
-    """创建单场转写任务；批量和单场接口共用同一套幂等规则。"""
-    stream = (
-        db.query(StreamSource)
-        .filter(StreamSource.session_id == session.id, StreamSource.status == "active")
-        .order_by(StreamSource.fetched_at.desc(), StreamSource.id.desc())
-        .first()
-    )
-    if not stream and session.stream_url:
-        stream = StreamSource(
-            session_id=session.id,
-            m3u8_url=session.stream_url[:2000],
-            headers_json={"Referer": session.dashboard_url or ""},
-            status="active",
-            fetched_at=datetime.utcnow(),
-        )
-        db.add(stream)
-        db.flush()
-    if not stream:
-        raise ValueError("该场次暂无可用直播流，请先重新采集流地址")
-
-    existing = (
-        db.query(AsrTask)
-        .filter(AsrTask.session_id == session.id, AsrTask.status.in_(["queued", "processing", "completed"]))
-        .order_by(AsrTask.created_at.desc())
-        .first()
-    )
-    if existing:
-        return existing, False
-
-    task = AsrTask(session_id=session.id, stream_id=stream.id, status="queued", task_type="offline")
-    db.add(task)
-    db.flush()
-    return task, True
 
 
 @rest_router.post("/{session_id:int}/queue")
@@ -60,7 +24,7 @@ def queue_transcription(session_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "直播场次不存在")
 
     try:
-        task, created = _queue_session_transcription(db, session)
+        task, created = queue_session_transcription(db, session)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     db.commit()
@@ -108,7 +72,7 @@ def queue_transcription_by_anchor(
             # 批量增量不反复消耗已确认无语音/失效的回放；单场接口仍可人工重试。
             if latest_task and latest_task.status == "failed":
                 continue
-            task, created = _queue_session_transcription(db, session)
+            task, created = queue_session_transcription(db, session)
             if task.status == "completed":
                 continue
             results.append({

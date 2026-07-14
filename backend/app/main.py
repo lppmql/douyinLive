@@ -1,6 +1,7 @@
 """
 抖音留资直播分析系统 - FastAPI 入口
 """
+import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI
@@ -12,6 +13,7 @@ from app.core.database import engine, SessionLocal
 from app.models.scraper_tasks import ScraperTask
 from app.api.v1 import v1_router
 from app.services.collector.scheduler import scheduler_manager
+from app.services.asr.control import start_asr_runtime
 from app.api.v1.ws import transcript_ws
 
 
@@ -52,6 +54,21 @@ async def lifespan(app: FastAPI):
             logger.warning("已回收 %s 个服务重启前遗留的采集任务", recovered_tasks)
     except Exception as exc:
         logger.warning("遗留采集任务恢复失败，不阻塞服务启动: %s", exc)
+
+    if settings.ASR_AUTO_START:
+        try:
+            runtime = await asyncio.to_thread(start_asr_runtime)
+            logger.info(
+                "✅ ASR 默认启动: engine=%s worker=%s 并发=%s 队列=%s",
+                runtime["engine_running"],
+                runtime["worker_running"],
+                settings.MAX_REALTIME_ASR_TASKS,
+                settings.ASR_MAX_QUEUED,
+            )
+        except Exception as exc:
+            logger.warning("ASR 自动启动失败，不阻塞数据采集: %s", exc)
+    else:
+        logger.info("⏸️  ASR 自动启动已关闭 (ASR_AUTO_START=false)")
 
     # 自动启动监控调度器
     if settings.MONITOR_ENABLED:

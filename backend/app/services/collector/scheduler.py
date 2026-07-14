@@ -305,12 +305,21 @@ class SchedulerManager:
                 if not session:
                     raise RuntimeError(f"直播场次不存在: {session_id}")
                 result = await collect_live_session_snapshot(db, context, session)
+                try:
+                    from app.services.sync import sync_session
+
+                    sync_session(db, session_id)
+                    result["dataease_synced"] = True
+                except Exception as sync_exc:
+                    db.rollback()
+                    result["dataease_synced"] = False
+                    logger.exception("实时 DataEase 同步失败 session=%s: %s", session_id, sync_exc)
                 task.progress_percent = 100
                 task.progress_stage = "live_detail"
                 task.progress_message = (
                     f"汇总字段 {result['overview_field_count']}，趋势 {result['trend_row_count']} 条，"
-                    f"新增指标 {result['new_metric_count']} 条，新增评论 {result['new_comment_count']} 条，"
-                    f"画像 {result['profile_count']} 条"
+                    f"指标写入 {result['new_metric_count']} 条，评论记录 {result['new_comment_count']} 条，"
+                    f"画像 {result['profile_count']} 条，DataEase {'已同步' if result['dataease_synced'] else '同步失败'}"
                 )
             else:
                 collector_cls = collector_map.get(job_type)

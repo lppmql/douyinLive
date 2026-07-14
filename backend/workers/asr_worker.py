@@ -14,6 +14,7 @@ ASR Worker 进程 — 独立运行的话术转写服务
 import asyncio
 import signal
 import sys
+from time import monotonic
 from datetime import datetime
 
 from app.core.config import settings
@@ -29,6 +30,7 @@ from app.services.asr.funasr_client import FunasrClient
 from app.services.asr.websocket_manager import ws_manager
 from app.services.ai.scoring import score_session_transcript
 from app.services.ai.kb_service import sync_session_to_kb
+from app.services.sync import sync_session
 
 
 class AsrWorker:
@@ -140,10 +142,15 @@ class AsrWorker:
                 pipe = M3u8Pipe(m3u8_url, headers)
                 client = FunasrClient()
 
+                deadline = monotonic() + settings.ASR_ENGINE_READY_TIMEOUT_SECONDS
                 connected = await client.connect()
+                while not connected and monotonic() < deadline:
+                    logger.info("任务 %s 等待 FunASR 模型就绪", task_id)
+                    await asyncio.sleep(5)
+                    connected = await client.connect()
                 if not connected and not settings.ASR_ALLOW_MOCK:
                     raise RuntimeError(
-                        f"真实 FunASR 服务不可用: {client.ws_url}；未写入模拟话术"
+                        f"真实 FunASR 服务在 {settings.ASR_ENGINE_READY_TIMEOUT_SECONDS} 秒内未就绪；未写入模拟话术"
                     )
                 if not connected:
                     logger.warning("任务 %s: 开发环境显式使用 Mock ASR 模式", task_id)
@@ -185,8 +192,9 @@ class AsrWorker:
                 try:
                     score = score_session_transcript(task.session_id, db)
                     knowledge_saved = sync_session_to_kb(db, task.session_id)
+                    sync_session(db, task.session_id)
                     logger.info(
-                        "任务 %s AI 闭环完成: score=%s, knowledge=%s",
+                        "任务 %s AI/DataEase 闭环完成: score=%s, knowledge=%s",
                         task_id,
                         (score or {}).get("total_score"),
                         knowledge_saved,

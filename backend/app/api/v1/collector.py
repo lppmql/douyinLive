@@ -174,13 +174,24 @@ async def get_asr_control(db: Session = Depends(get_db)):
 async def set_asr_control(enabled: bool, db: Session = Depends(get_db)):
     """按需启停 ASR，关闭时释放 FunASR 模型占用的内存。"""
     processing_count = db.query(AsrTask).filter(AsrTask.status == "processing").count()
-    if not enabled and processing_count:
-        raise HTTPException(409, f"当前有 {processing_count} 个话术任务正在生成，请等待完成后再关闭 ASR")
     try:
         runtime = await asyncio.to_thread(start_asr_runtime if enabled else stop_asr_runtime)
     except (OSError, subprocess.SubprocessError) as exc:
         raise HTTPException(500, f"ASR 服务{'启动' if enabled else '停止'}失败: {str(exc)}") from exc
-    message = "ASR 话术服务已开启" if runtime["enabled"] else "ASR 话术服务已关闭，模型内存已释放"
+    if not enabled and processing_count:
+        tasks = db.query(AsrTask).filter(AsrTask.status == "processing").all()
+        for task in tasks:
+            task.status = "failed"
+            task.error_message = "用户关闭 ASR，任务已安全中断，可手动重新排队"
+            task.completed_at = datetime.utcnow()
+        db.commit()
+    message = (
+        "ASR 话术服务已开启"
+        if runtime["enabled"]
+        else f"ASR 已关闭并释放模型内存，中断 {processing_count} 个任务"
+        if processing_count
+        else "ASR 话术服务已关闭，模型内存已释放"
+    )
     return _asr_control_response(db, runtime, message)
 
 

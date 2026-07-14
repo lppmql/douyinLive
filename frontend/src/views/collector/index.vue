@@ -15,6 +15,8 @@ import {
   fetchCollectorTasks,
   fetchAsrControlStatus,
   setAsrControl,
+  fetchDataEaseStatus,
+  syncDataEase,
   fetchMonitorStatus,
   startMonitor,
   stopMonitor,
@@ -50,6 +52,8 @@ const logDetailVisible = ref(false);
 const selectedLog = ref<Api.Douyin.CollectorLog | null>(null);
 const asrStatus = ref<Api.Douyin.AsrControlStatus | null>(null);
 const asrControlLoading = ref(false);
+const dataEaseStatus = ref<Api.Douyin.DataEaseStatus | null>(null);
+const dataEaseSyncLoading = ref(false);
 
 const loggedInAccountCount = computed(() => accounts.value.filter(item => item.login_status === 'logged_in').length);
 const errorLogCount = computed(() => logs.value.filter(item => item.level === 'error').length);
@@ -175,7 +179,7 @@ async function loadData(silent = false) {
   if (silent) silentRefreshing.value = true;
   else loading.value = true;
   try {
-    const [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes] = await Promise.allSettled([
+    const [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes, dataEaseRes] = await Promise.allSettled([
       fetchCollectorStatus(),
       fetchCollectorAccounts(),
       fetchCollectorLogs({
@@ -185,7 +189,8 @@ async function loadData(silent = false) {
       }),
       fetchCollectorTasks(),
       fetchMonitorStatus(),
-      fetchAsrControlStatus()
+      fetchAsrControlStatus(),
+      fetchDataEaseStatus()
     ]);
     if (statusRes.status === 'fulfilled' && statusRes.value.data != null) collectorStatus.value = statusRes.value.data;
     if (accountsRes.status === 'fulfilled' && accountsRes.value.data != null) accounts.value = accountsRes.value.data;
@@ -193,8 +198,11 @@ async function loadData(silent = false) {
     if (tasksRes.status === 'fulfilled' && tasksRes.value.data != null) tasks.value = tasksRes.value.data;
     if (monitorRes.status === 'fulfilled' && monitorRes.value.data != null) monitorStatus.value = monitorRes.value.data;
     if (asrRes.status === 'fulfilled' && asrRes.value.data != null) asrStatus.value = asrRes.value.data;
+    if (dataEaseRes.status === 'fulfilled' && dataEaseRes.value.data != null) {
+      dataEaseStatus.value = dataEaseRes.value.data;
+    }
 
-    const failedCount = [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes].filter(
+    const failedCount = [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes, dataEaseRes].filter(
       result => result.status === 'rejected'
     ).length;
     if (failedCount && !silent) message.warning(`${failedCount} 项数据暂时加载失败，其他区域已正常更新`);
@@ -206,7 +214,24 @@ async function loadData(silent = false) {
   }
 }
 
-async function handleAsrToggle(enabled: boolean) {
+async function handleDataEaseSync() {
+  dataEaseSyncLoading.value = true;
+  try {
+    const res = await syncDataEase();
+    if (res.data) {
+      dataEaseStatus.value = res.data.dataease;
+      const text = `DataEase 同步完成：成功 ${res.data.synced_count} 场，失败 ${res.data.failed_count} 场，清理旧宽表 ${res.data.removed_stale_row_count} 行`;
+      if (res.data.failed_count) message.warning(text);
+      else message.success(text);
+    }
+  } catch {
+    message.error('DataEase 同步失败，请查看后端日志');
+  } finally {
+    dataEaseSyncLoading.value = false;
+  }
+}
+
+async function applyAsrToggle(enabled: boolean) {
   asrControlLoading.value = true;
   try {
     const res = await setAsrControl(enabled);
@@ -220,6 +245,20 @@ async function handleAsrToggle(enabled: boolean) {
   } finally {
     asrControlLoading.value = false;
   }
+}
+
+function handleAsrToggle(enabled: boolean) {
+  if (!enabled && asrStatus.value?.processing_count) {
+    dialog.warning({
+      title: '确认停止 ASR',
+      content: `当前有 ${asrStatus.value.processing_count} 个话术任务正在生成。停止后会中断任务并立即释放模型内存，是否继续？`,
+      positiveText: '停止并释放内存',
+      negativeText: '继续生成',
+      onPositiveClick: () => applyAsrToggle(false)
+    });
+    return;
+  }
+  void applyAsrToggle(enabled);
 }
 
 async function filterLogs(level: string) {
@@ -311,6 +350,8 @@ function getStageLabel(stage: unknown) {
     history_sync: '历史同步',
     detail_enrichment: '详情补齐',
     cookie_refresh: '保存登录态',
+    dataease_sync: '同步 DataEase',
+    asr_queue: '排队生成话术',
     completed: '采集完成',
     failed: '采集失败'
   };
@@ -871,15 +912,17 @@ onUnmounted(() => {
                         <template v-if="asrStatus?.enabled">
                           模型与 Worker 正在运行 · 排队 {{ asrStatus.queued_count }} · 处理中
                           {{ asrStatus.processing_count }}
+                          <span v-if="!asrStatus.queued_count && !asrStatus.processing_count">
+                            · 当前空闲但仍占用模型内存，不使用时建议关闭
+                          </span>
                         </template>
-                        <template v-else>按需开启；关闭时不占用 FunASR 模型内存</template>
+                        <template v-else>默认随系统启动；当前已关闭，开启后继续处理安全队列</template>
                       </div>
                     </div>
                   </div>
                   <NSwitch
                     :value="Boolean(asrStatus?.enabled)"
                     :loading="asrControlLoading"
-                    :disabled="Boolean(asrStatus?.processing_count)"
                     @update:value="handleAsrToggle"
                   >
                     <template #checked>开启</template>
@@ -973,6 +1016,17 @@ onUnmounted(() => {
                     <NTag :type="collectAllResult.collected_rooms > 0 ? 'success' : 'warning'" round size="small">
                       {{ collectAllResult.collected_rooms }}/{{ collectAllResult.total_rooms }} 个房间成功
                     </NTag>
+                    <NTag
+                      :type="collectAllResult.dataease_failed_count ? 'warning' : 'success'"
+                      round
+                      size="small"
+                    >
+                      DataEase 同步 {{ collectAllResult.dataease_synced_count || 0 }} 场
+                    </NTag>
+                    <NTag type="info" round size="small">
+                      话术新增排队 {{ collectAllResult.asr_queued_count || 0 }} 场 · 当前
+                      {{ collectAllResult.asr_active_count || 0 }}/{{ collectAllResult.asr_queue_capacity || 5 }}
+                    </NTag>
                     <span v-if="collectAllResult.message" class="text-12px text-gray-500">
                       {{ collectAllResult.message }}
                     </span>
@@ -1047,6 +1101,56 @@ onUnmounted(() => {
             </NCard>
           </NGi>
         </NGrid>
+
+        <NCard :bordered="false" class="card-wrapper" title="DataEase 分析数据集">
+          <template #header-extra>
+            <NTag :type="dataEaseStatus?.pending_session_count ? 'warning' : 'success'" round size="small">
+              {{ dataEaseStatus?.pending_session_count ? `待同步 ${dataEaseStatus.pending_session_count} 场` : '数据已同步' }}
+            </NTag>
+          </template>
+          <div class="flex flex-col gap-14px">
+            <NGrid cols="2 s:3 l:6" responsive="screen" :x-gap="12" :y-gap="12">
+              <NGi><NStatistic label="完整场次" :value="dataEaseStatus?.source_session_count || 0" /></NGi>
+              <NGi><NStatistic label="已同步场次" :value="dataEaseStatus?.synced_session_count || 0" /></NGi>
+              <NGi><NStatistic label="分钟指标" :value="dataEaseStatus?.metric_row_count || 0" /></NGi>
+              <NGi><NStatistic label="观众画像" :value="dataEaseStatus?.profile_row_count || 0" /></NGi>
+              <NGi><NStatistic label="评论汇总" :value="dataEaseStatus?.comment_summary_count || 0" /></NGi>
+              <NGi><NStatistic label="AI 汇总" :value="dataEaseStatus?.ai_summary_count || 0" /></NGi>
+            </NGrid>
+            <NProgress
+              type="line"
+              :percentage="dataEaseStatus?.coverage_rate || 0"
+              :status="dataEaseStatus?.pending_session_count ? 'warning' : 'success'"
+              indicator-placement="inside"
+            />
+            <div class="flex flex-wrap items-center justify-between gap-12px">
+              <span class="text-12px text-gray-500">
+                最后同步：{{ formatFullTime(dataEaseStatus?.last_synced_at || null) }}；DataEase 只读 MySQL 的 de_* 宽表。
+              </span>
+              <NSpace>
+                <NButton
+                  size="small"
+                  type="primary"
+                  :loading="dataEaseSyncLoading"
+                  :disabled="!dataEaseStatus?.pending_session_count"
+                  @click="handleDataEaseSync"
+                >
+                  同步待更新数据
+                </NButton>
+                <NButton
+                  tag="a"
+                  href="http://localhost:8100"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  size="small"
+                  secondary
+                >
+                  打开 DataEase
+                </NButton>
+              </NSpace>
+            </div>
+          </div>
+        </NCard>
 
         <div
           ref="accountSectionRef"

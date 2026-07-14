@@ -62,9 +62,13 @@ def start_asr_runtime() -> dict:
     )
     if not _worker_pids():
         ASR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        worker_command = [str(BACKEND_DIR / ".venv" / "bin" / "python"), "-m", "workers.asr_worker"]
+        nice = shutil.which("nice")
+        if nice:
+            worker_command = [nice, "-n", "10", *worker_command]
         with ASR_LOG_PATH.open("ab") as log_file:
             subprocess.Popen(
-                [str(BACKEND_DIR / ".venv" / "bin" / "python"), "-m", "workers.asr_worker"],
+                worker_command,
                 cwd=BACKEND_DIR,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,

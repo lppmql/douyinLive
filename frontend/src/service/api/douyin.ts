@@ -1,4 +1,5 @@
 import { backendRequest } from '../request';
+import { getServiceBaseURL } from '@/utils/service';
 
 /**
  * 抖音留资直播数据分析系统 — API 接口
@@ -40,6 +41,14 @@ export function fetchLiveSessionDetail(id: number) {
 /** 获取单场直播的趋势、评论和流地址 */
 export function fetchLiveSessionData(id: number) {
   return backendRequest<Api.Douyin.LiveSessionDetail>({ url: `${API_PREFIX}/live-sessions/${id}/details` });
+}
+
+/** 获取低开销封装 MP4 的下载地址，开发环境自动复用 Vite 后端代理 */
+export function getLiveSessionVideoDownloadUrl(id: number) {
+  const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
+  const { otherBaseURL } = getServiceBaseURL(import.meta.env, isHttpProxy);
+  const backendBaseUrl = otherBaseURL.backend || window.location.origin;
+  return `${backendBaseUrl}${API_PREFIX}/live-sessions/${id}/video`;
 }
 
 /* ---------- 采集 ---------- */
@@ -115,6 +124,20 @@ export function setAsrControl(enabled: boolean) {
   return backendRequest<Api.Douyin.AsrControlStatus>({
     url: `${API_PREFIX}/collector/asr-control/${enabled}`,
     method: 'POST'
+  });
+}
+
+/** 获取 DataEase 宽表同步覆盖情况 */
+export function fetchDataEaseStatus() {
+  return backendRequest<Api.Douyin.DataEaseStatus>({ url: `${API_PREFIX}/dataease/status` });
+}
+
+/** 增量同步缺失或已过期的 DataEase 数据 */
+export function syncDataEase(limit = 100) {
+  return backendRequest<Api.Douyin.DataEaseSyncResult>({
+    url: `${API_PREFIX}/dataease/sync`,
+    method: 'POST',
+    params: { limit }
   });
 }
 
