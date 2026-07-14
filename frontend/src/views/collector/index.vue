@@ -20,7 +20,8 @@ import {
   stopMonitor,
   triggerMockLive,
   triggerMockEnd,
-  collectAllData
+  collectAllData,
+  stopCollectAll
 } from '@/service/api/douyin';
 
 defineOptions({
@@ -43,6 +44,7 @@ const logHighlight = ref(false);
 const taskDrawerVisible = ref(false);
 const logLevel = ref('all');
 const logTaskId = ref<number | null>(null);
+const searchText = ref('');
 const now = ref(Date.now());
 const silentRefreshing = ref(false);
 const accountHealthLoadingId = ref<number | null>(null);
@@ -53,6 +55,14 @@ const asrControlLoading = ref(false);
 
 const loggedInAccountCount = computed(() => accounts.value.filter(item => item.login_status === 'logged_in').length);
 const errorLogCount = computed(() => logs.value.filter(item => item.level === 'error').length);
+const filteredLogs = computed(() => {
+  let list = logs.value;
+  if (searchText.value.trim()) {
+    const keyword = searchText.value.trim().toLowerCase();
+    list = list.filter(l => l.message?.toLowerCase().includes(keyword));
+  }
+  return list;
+});
 const hasAvailableAccount = computed(() => loggedInAccountCount.value > 0);
 const activeTasks = computed(() => tasks.value.filter(item => ['pending', 'running'].includes(item.status)));
 const currentCollectTask = computed(() =>
@@ -167,6 +177,17 @@ async function handleCollectAll() {
   } finally {
     collectAllLoading.value = false;
     await loadData();
+  }
+}
+
+async function handleStopCollectAll() {
+  try {
+    const res = await stopCollectAll();
+    message.info(res.data?.message || '已发送停止请求');
+    // 等待后端处理，自动刷新
+    await loadData(true);
+  } catch {
+    message.error('发送停止请求失败');
   }
 }
 
@@ -312,7 +333,14 @@ function getStageLabel(stage: unknown) {
     detail_enrichment: '详情补齐',
     cookie_refresh: '保存登录态',
     completed: '采集完成',
-    failed: '采集失败'
+    failed: '采集失败',
+    collect_test: '测试采集',
+    accounts: '账号列表',
+    'live-screen/accounts': '主播列表',
+    'live-replay': '回放地址',
+    'comment-list': '评论采集',
+    'clue-detail': '留资线索',
+    'living-status': '直播状态'
   };
   return labels[String(stage || '')] || String(stage || '常规日志');
 }
@@ -595,11 +623,65 @@ const collectResultColumns = [
   }
 ];
 
+function renderLogLevel(level: string) {
+  const typeMap: Record<string, 'success' | 'warning' | 'error' | 'info'> = {
+    info: 'info',
+    warn: 'warning',
+    error: 'error'
+  };
+  return h(NTag, { type: typeMap[level] || 'info', size: 'small', round: true }, { default: () => level.toUpperCase() });
+}
+
+function renderLogMessage(message: string) {
+  if (!message) return '-';
+  const parts: ReturnType<typeof h>[] = [];
+  // 用 emoji 分割消息，给 emoji 加放大效果
+  let remaining = message;
+  const emojiRegex = /([✅❌⚠️🔄📊⏱️📌🔍🎯💡🛑▶️⏸️ℹ️])/g;
+  let lastIndex = 0;
+  let match;
+  const segments: { text: string; isEmoji: boolean }[] = [];
+  while ((match = emojiRegex.exec(remaining)) !== null) {
+    if (match.index > lastIndex) {
+      segments.push({ text: remaining.slice(lastIndex, match.index), isEmoji: false });
+    }
+    segments.push({ text: match[1], isEmoji: true });
+    lastIndex = match.index + match[1].length;
+  }
+  if (lastIndex < remaining.length) {
+    segments.push({ text: remaining.slice(lastIndex), isEmoji: false });
+  }
+
+  for (const seg of segments) {
+    if (seg.isEmoji) {
+      parts.push(h('span', { class: 'text-16px mr-2px' }, seg.text));
+    } else {
+      // 高亮耗时数字 如 0.8s / 2.3s / 0.3s
+      const textWithHighlights: ReturnType<typeof h>[] = [];
+      const timeRegex = /(\d+\.?\d*s)/g;
+      let tLast = 0;
+      let tMatch;
+      while ((tMatch = timeRegex.exec(seg.text)) !== null) {
+        if (tMatch.index > tLast) {
+          textWithHighlights.push(h('span', seg.text.slice(tLast, tMatch.index)));
+        }
+        textWithHighlights.push(h('span', { class: 'text-primary font-mono font-600' }, tMatch[1]));
+        tLast = tMatch.index + tMatch[1].length;
+      }
+      if (tLast < seg.text.length) {
+        textWithHighlights.push(h('span', seg.text.slice(tLast)));
+      }
+      parts.push(...textWithHighlights);
+    }
+  }
+  return h('span', { class: 'text-13px leading-relaxed' }, parts);
+}
+
 const logColumns = [
   {
     title: () => $t('page.collector.logTime'),
     key: 'created_at',
-    width: 150,
+    width: 160,
     render(row: Api.Douyin.CollectorLog) {
       return h('span', { title: formatFullTime(row.created_at) }, formatLogTime(row.created_at));
     }
@@ -607,7 +689,7 @@ const logColumns = [
   {
     title: '任务',
     key: 'task_id',
-    width: 90,
+    width: 70,
     render(row: Api.Douyin.CollectorLog) {
       return row.task_id ? `#${row.task_id}` : '-';
     }
@@ -617,27 +699,41 @@ const logColumns = [
     key: 'stage',
     width: 100,
     render(row: Api.Douyin.CollectorLog) {
-      return getStageLabel(getLogPayload(row).stage);
+      const stage = String(getLogPayload(row).stage || '');
+      const label = getStageLabel(stage);
+      const stageColors: Record<string, { type: string; color: string }> = {
+        room_collection: { type: 'primary', color: '' },
+        enterprise_sync: { type: 'info', color: '' },
+        detail_enrichment: { type: 'warning', color: '' },
+        completed: { type: 'success', color: '' },
+        failed: { type: 'error', color: '' },
+        'comment-list': { type: 'info', color: '' },
+        'live-replay': { type: 'info', color: '' }
+      };
+      const style = stageColors[stage];
+      return h(NTag, { type: (style?.type || 'default') as 'primary' | 'info' | 'success' | 'warning' | 'error' | 'default', size: 'small' }, { default: () => label });
     }
   },
   {
     title: () => $t('page.collector.logLevel'),
     key: 'level',
-    width: 80,
+    width: 72,
     render(row: { level: string }) {
-      const typeMap: Record<string, 'success' | 'warning' | 'error' | 'info'> = {
-        info: 'info',
-        warn: 'warning',
-        error: 'error'
-      };
-      return h(NTag, { type: typeMap[row.level] || 'info', size: 'small' }, { default: () => row.level.toUpperCase() });
+      return renderLogLevel(row.level);
     }
   },
-  { title: () => $t('page.collector.logMessage'), key: 'message', minWidth: 300, ellipsis: { tooltip: true } },
+  {
+    title: () => $t('page.collector.logMessage'),
+    key: 'message',
+    minWidth: 340,
+    render(row: Api.Douyin.CollectorLog) {
+      return renderLogMessage(row.message || '');
+    }
+  },
   {
     title: '数据摘要',
     key: 'summary',
-    minWidth: 240,
+    minWidth: 200,
     ellipsis: { tooltip: true },
     render(row: Api.Douyin.CollectorLog) {
       return getLogSummary(row);
@@ -646,7 +742,7 @@ const logColumns = [
   {
     title: '详情',
     key: 'detail',
-    width: 70,
+    width: 64,
     render(row: Api.Douyin.CollectorLog) {
       return h(
         NButton,
@@ -656,6 +752,12 @@ const logColumns = [
     }
   }
 ];
+
+function logRowClass(row: Api.Douyin.CollectorLog): string {
+  if (row.level === 'error') return 'log-row-error';
+  if (row.level === 'warn') return 'log-row-warn';
+  return '';
+}
 
 const taskColumns = [
   { title: '任务 ID', key: 'id', width: 90 },
@@ -900,6 +1002,17 @@ onUnmounted(() => {
                           <template #icon><SvgIcon icon="mdi:database-arrow-down-outline" /></template>
                           {{ collectAllLoading ? '正在刷新全部数据' : '刷新数据采集' }}
                         </NButton>
+                        <NButton
+                          v-if="collectionRunning"
+                          type="error"
+                          size="large"
+                          class="ml-8px"
+                          ghost
+                          @click="handleStopCollectAll"
+                        >
+                          <template #icon><SvgIcon icon="mdi:stop-circle-outline" /></template>
+                          停止
+                        </NButton>
                       </span>
                     </template>
                     {{ collectDisabledReason }}
@@ -1083,7 +1196,14 @@ onUnmounted(() => {
         >
           <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.logTitle')">
             <template #header-extra>
-              <NSpace>
+              <NSpace wrap>
+                <NInput
+                  v-model:value="searchText"
+                  clearable
+                  placeholder="搜索日志内容..."
+                  class="w-200px"
+                  size="small"
+                />
                 <NTag v-if="logTaskId" type="primary" closable @close="clearTaskLogFilter">
                   仅任务 #{{ logTaskId }}
                 </NTag>
@@ -1099,11 +1219,15 @@ onUnmounted(() => {
                 </NButton>
               </NSpace>
             </template>
+            <div v-if="searchText.trim()" class="mb-8px text-12px text-gray-500">
+              搜索「{{ searchText.trim() }}」共 {{ filteredLogs.length }} 条结果
+            </div>
             <NDataTable
               :loading="loading"
               :columns="logColumns"
-              :data="logs"
+              :data="filteredLogs"
               :row-key="getLogRowKey"
+              :row-class-name="logRowClass"
               :scroll-x="1260"
               :bordered="false"
               size="small"
@@ -1134,24 +1258,56 @@ onUnmounted(() => {
       </NDrawerContent>
     </NDrawer>
 
-    <NModal v-model:show="logDetailVisible" preset="card" title="采集日志详情" class="w-720px max-w-[calc(100vw-32px)]">
-      <NDescriptions v-if="selectedLog" :column="2" bordered label-placement="left" size="small">
-        <NDescriptionsItem label="日志 ID">#{{ selectedLog.id }}</NDescriptionsItem>
-        <NDescriptionsItem label="任务 ID">
-          {{ selectedLog.task_id ? `#${selectedLog.task_id}` : '-' }}
-        </NDescriptionsItem>
-        <NDescriptionsItem label="时间">{{ formatFullTime(selectedLog.created_at) }}</NDescriptionsItem>
-        <NDescriptionsItem label="级别">{{ selectedLog.level.toUpperCase() }}</NDescriptionsItem>
-        <NDescriptionsItem label="阶段">{{ getStageLabel(getLogPayload(selectedLog).stage) }}</NDescriptionsItem>
-        <NDescriptionsItem label="数据摘要">{{ getLogSummary(selectedLog) }}</NDescriptionsItem>
-        <NDescriptionsItem label="消息" :span="2">{{ selectedLog.message || '-' }}</NDescriptionsItem>
-      </NDescriptions>
-      <div v-if="selectedLog" class="mt-16px">
-        <div class="mb-8px font-600">结构化数据</div>
-        <pre
-          class="max-h-360px overflow-auto whitespace-pre-wrap rounded-8px bg-gray-100 p-12px text-12px dark:bg-white/5"
-        >{{ JSON.stringify(getLogPayload(selectedLog), null, 2) }}</pre>
-      </div>
+    <NModal v-model:show="logDetailVisible" preset="card" title="采集日志详情" class="w-780px max-w-[calc(100vw-32px)]">
+      <template v-if="selectedLog">
+        <NDescriptions :column="2" bordered label-placement="left" size="small">
+          <NDescriptionsItem label="日志 ID">#{{ selectedLog.id }}</NDescriptionsItem>
+          <NDescriptionsItem label="任务 ID">
+            {{ selectedLog.task_id ? `#${selectedLog.task_id}` : '-' }}
+          </NDescriptionsItem>
+          <NDescriptionsItem label="时间">{{ formatFullTime(selectedLog.created_at) }}</NDescriptionsItem>
+          <NDescriptionsItem label="级别">
+            <NTag :type="selectedLog.level === 'error' ? 'error' : selectedLog.level === 'warn' ? 'warning' : 'info'" round size="small">{{ selectedLog.level.toUpperCase() }}</NTag>
+          </NDescriptionsItem>
+          <NDescriptionsItem label="阶段">{{ getStageLabel(getLogPayload(selectedLog).stage) }}</NDescriptionsItem>
+          <NDescriptionsItem label="数据摘要">{{ getLogSummary(selectedLog) }}</NDescriptionsItem>
+          <NDescriptionsItem label="消息" :span="2">
+            <div class="whitespace-pre-wrap break-all">{{ selectedLog.message || '-' }}</div>
+          </NDescriptionsItem>
+        </NDescriptions>
+
+        <!-- 解析结构化数据 -->
+        <div v-if="Object.keys(getLogPayload(selectedLog)).length" class="mt-16px">
+          <div class="mb-8px font-600">结构化数据</div>
+          <NGrid cols="2 s:3" :x-gap="8" :y-gap="8">
+            <template v-for="(val, key) in getLogPayload(selectedLog)" :key="key">
+              <NGi v-if="!['details', 'results', 'raw_data'].includes(key) && (typeof val !== 'object' || val === null)" class="rounded-6px bg-gray-50 px-10px py-6px dark:bg-white/5">
+                <div class="text-11px text-gray-500">{{ key }}</div>
+                <div class="mt-2px text-13px font-mono font-600 text-primary">{{ typeof val === 'number' ? val : String(val) }}</div>
+              </NGi>
+            </template>
+          </NGrid>
+          <!-- 详情或 results 等复杂数据 -->
+          <template v-for="(val, key) in getLogPayload(selectedLog)" :key="'raw-' + key">
+            <div v-if="['details', 'results', 'raw_data'].includes(key) && val" class="mt-12px">
+              <div class="mb-4px text-13px font-600 text-gray-600">{{ key }}</div>
+              <pre
+                class="max-h-240px overflow-auto whitespace-pre-wrap rounded-8px bg-gray-100 p-10px text-12px dark:bg-white/5"
+              >{{ JSON.stringify(val, null, 2) }}</pre>
+            </div>
+          </template>
+          <!-- 还有其他没展示的字段 -->
+          <template v-for="(val, key) in getLogPayload(selectedLog)" :key="'rest-' + key">
+            <div v-if="typeof val === 'object' && val !== null && !['details', 'results', 'raw_data'].includes(key)" class="mt-12px">
+              <div class="mb-4px text-13px font-600 text-gray-600">{{ key }}</div>
+              <pre
+                class="max-h-200px overflow-auto whitespace-pre-wrap rounded-8px bg-gray-100 p-10px text-12px dark:bg-white/5"
+              >{{ JSON.stringify(val, null, 2) }}</pre>
+            </div>
+          </template>
+        </div>
+        <div v-else class="mt-16px text-13px text-gray-400">无额外结构化数据</div>
+      </template>
     </NModal>
 
     <!-- 扫码登录弹窗 -->
@@ -1203,4 +1359,11 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+.log-row-error :deep(td) {
+  background-color: rgba(255, 77, 79, 0.04) !important;
+}
+.log-row-warn :deep(td) {
+  background-color: rgba(250, 173, 20, 0.03) !important;
+}
+</style>

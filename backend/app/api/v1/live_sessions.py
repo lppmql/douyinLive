@@ -1,5 +1,6 @@
 """直播场次 CRUD API"""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -9,6 +10,15 @@ from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
 from app.models.live_audience_profiles import LiveAudienceProfile
+from app.models.asr_tasks import AsrTask
+from app.models.scraper_tasks import ScraperTask
+from app.models.scraper_logs import ScraperLog
+from app.models.transcript_segments import TranscriptSegment
+from app.models.transcript_full_texts import TranscriptFullText
+from app.models.analysis_reports import AnalysisReport
+from app.models.high_intent_users import HighIntentUser
+from app.models.knowledge_base import KnowledgeBase
+from app.models.leads import Lead
 from app.schemas import (
     LiveMetricDetailResponse,
     LiveSessionCreate,
@@ -16,6 +26,10 @@ from app.schemas import (
     LiveSessionResponse,
     LiveSessionUpdate,
 )
+
+
+class BatchDeleteRequest(BaseModel):
+    ids: list[int]
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
 
@@ -35,7 +49,7 @@ def _attach_room_profile(session: LiveSession) -> dict:
 @router.get("/page")
 def page_sessions(
     current: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=2000),
     anchor_name: str | None = Query(None),
     live_status: str | None = Query(None),
     detail_status: str | None = Query(None),
@@ -158,6 +172,52 @@ def update_session(session_id: int, data: LiveSessionUpdate, db: Session = Depen
     db.commit()
     db.refresh(s)
     return s
+
+
+@router.post("/batch-delete")
+def batch_delete_sessions(body: BatchDeleteRequest, db: Session = Depends(get_db)):
+    """批量删除直播场次（级联删除关联的指标、评论、流地址、画像等数据）"""
+    if not body.ids:
+        raise HTTPException(400, "请提供要删除的场次 ID 列表")
+    if len(body.ids) > 2000:
+        raise HTTPException(400, "单次最多删除 2000 个场次")
+
+    sessions = db.query(LiveSession).filter(LiveSession.id.in_(body.ids)).all()
+    found_ids = {s.id for s in sessions}
+    not_found = set(body.ids) - found_ids
+    if not sessions:
+        raise HTTPException(404, "未找到要删除的场次")
+
+    # 级联删除关联数据（按外键约束顺序，先删子表再删主表）
+    for sid in found_ids:
+        db.query(AnalysisReport).filter(AnalysisReport.session_id == sid).delete()
+        db.query(HighIntentUser).filter(HighIntentUser.session_id == sid).delete()
+        db.query(KnowledgeBase).filter(KnowledgeBase.session_id == sid).delete()
+        db.query(Lead).filter(Lead.session_id == sid).delete()
+        db.query(TranscriptSegment).filter(TranscriptSegment.session_id == sid).delete()
+        db.query(TranscriptFullText).filter(TranscriptFullText.session_id == sid).delete()
+        db.query(AsrTask).filter(AsrTask.session_id == sid).delete()
+        # 先删 scraper_logs（外键 fk_scraper_logs_task 引用了 scraper_tasks.id）
+        task_ids = db.query(ScraperTask.id).filter(ScraperTask.session_id == sid).all()
+        task_id_list = [t[0] for t in task_ids]
+        if task_id_list:
+            db.query(ScraperLog).filter(ScraperLog.task_id.in_(task_id_list)).delete(synchronize_session=False)
+        db.query(ScraperTask).filter(ScraperTask.session_id == sid).delete()
+        db.query(LiveMetric).filter(LiveMetric.session_id == sid).delete()
+        db.query(Comment).filter(Comment.session_id == sid).delete()
+        db.query(StreamSource).filter(StreamSource.session_id == sid).delete()
+        db.query(LiveAudienceProfile).filter(LiveAudienceProfile.session_id == sid).delete()
+
+    # 删除场次
+    for s in sessions:
+        db.delete(s)
+    db.commit()
+
+    return {
+        "message": f"已删除 {len(sessions)} 个场次",
+        "deleted_count": len(sessions),
+        "not_found_ids": list(not_found) if not_found else None,
+    }
 
 
 @router.delete("/{session_id}")

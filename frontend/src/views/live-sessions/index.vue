@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { h, reactive } from 'vue';
-import { NTag, NButton, NAvatar } from 'naive-ui';
+import { h, reactive, ref } from 'vue';
+import { NTag, NButton, NAvatar, useDialog, useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { $t } from '@/locales';
-import { fetchLiveSessionPage } from '@/service/api/douyin';
+import { fetchLiveSessionPage, deleteLiveSessions } from '@/service/api/douyin';
 import { defaultTransform, useNaivePaginatedTable } from '@/hooks/common/table';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
 
@@ -12,6 +12,8 @@ defineOptions({
 });
 
 const router = useRouter();
+const message = useMessage();
+const dialog = useDialog();
 
 const searchForm = reactive({
   anchorName: '',
@@ -25,6 +27,32 @@ const searchParams = reactive({
   live_status: undefined as string | undefined,
   detail_status: undefined as string | undefined
 });
+
+/* ---------- 多选删除 ---------- */
+const checkedRowKeys = ref<(string | number)[]>([]);
+
+async function handleDeleteSelected() {
+  if (!checkedRowKeys.value.length) {
+    message.warning('请先勾选要删除的场次');
+    return;
+  }
+  dialog.warning({
+    title: '批量删除场次',
+    content: `确定删除选中的 ${checkedRowKeys.value.length} 个场次吗？关联的指标、评论、流地址等数据也将一并删除，不可恢复！`,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      try {
+        const res = await deleteLiveSessions(checkedRowKeys.value as number[]);
+        message.success(res.data?.message || '删除成功');
+        checkedRowKeys.value = [];
+        await getDataByPage(searchParams.current);
+      } catch (e: any) {
+        message.error(e?.message || '删除失败');
+      }
+    }
+  });
+}
 
 /* ---------- 状态标签映射 ---------- */
 const statusMap: Record<string, { type: 'success' | 'warning' | 'info' | 'default'; labelKey: string }> = {
@@ -83,6 +111,11 @@ function displayCollectedNumber(row: Api.Douyin.LiveSession, value: number): num
 /* ---------- 表格列 ---------- */
 function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
   return [
+    {
+      type: 'selection',
+      width: 40,
+      fixed: 'left'
+    },
     {
       title: () => $t('page.live-sessions.anchorName'),
       key: 'anchor_name',
@@ -221,7 +254,7 @@ const {
     searchParams.size = pageSize || 10;
   },
   defaultPageSize: 10,
-  paginationProps: { pageSizes: [10, 20, 50, 100] },
+  paginationProps: { pageSizes: [10, 20, 50, 100, 500, 1000, 2000] },
   columns: createColumns
 });
 
@@ -291,12 +324,22 @@ async function handleReset() {
           <NButton type="primary" @click="handleSearch">查询</NButton>
           <NButton @click="handleReset">重置</NButton>
         </NSpace>
-        <TableHeaderOperation
-          v-model:columns="columnChecks"
-          :loading="loading"
-          :show-crud-actions="false"
-          @refresh="getData"
-        />
+        <NSpace align="center">
+          <NButton
+            v-if="checkedRowKeys.length > 0"
+            type="error"
+            dashed
+            @click="handleDeleteSelected"
+          >
+            删除选中 ({{ checkedRowKeys.length }})
+          </NButton>
+          <TableHeaderOperation
+            v-model:columns="columnChecks"
+            :loading="loading"
+            :show-crud-actions="false"
+            @refresh="getData"
+          />
+        </NSpace>
       </div>
 
       <NDataTable
@@ -307,6 +350,8 @@ async function handleReset() {
         :scroll-x="scrollX"
         :max-height="460"
         :row-key="row => row.id"
+        :checked-row-keys="checkedRowKeys"
+        @update:checked-row-keys="checkedRowKeys = $event"
         :bordered="false"
         :single-line="false"
         :empty-text="$t('page.live-sessions.noData')"

@@ -26,7 +26,7 @@ from app.schemas.scraper import (
 )
 from app.services.collector.browser import browser_manager
 from app.services.collector.browser import STORAGE_DIR
-from app.services.collector.manual_collect import collect_all
+from app.services.collector.manual_collect import collect_all, request_cancel, is_cancel_requested
 from app.services.collector.scheduler import scheduler_manager
 from app.services.asr.control import get_asr_runtime_status, start_asr_runtime, stop_asr_runtime
 from app.models.asr_tasks import AsrTask
@@ -300,9 +300,23 @@ def list_tasks(
 
 
 # ===== 刷新数据采集 =====
+_collect_all_task = None
+
+
+@router.post("/collect-all/stop")
+async def cancel_collect_all():
+    """立即停止正在运行的刷新数据采集任务"""
+    global _collect_all_task
+    if _collect_all_task and not _collect_all_task.done():
+        _collect_all_task.cancel()
+        return {"message": "已发送立即停止请求，正在中断采集"}
+    return {"message": "当前无运行中的采集任务"}
+
+
 @router.post("/collect-all", response_model=CollectAllResponse)
 async def manual_collect_all(db: Session = Depends(get_db)):
     """刷新全部主播、直播场次及场次详情数据。"""
+    global _collect_all_task
     if scheduler_manager.running:
         raise HTTPException(409, "直播监控运行中，请先停止监控再刷新数据采集")
     existing = db.query(ScraperTask).filter(
@@ -377,6 +391,7 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         )
         db.commit()
 
+    _collect_all_task = asyncio.current_task()
     try:
         result = await collect_all(db, task_id=task.id, progress_callback=update_progress)
         task.status = "completed" if result.get("collected_rooms", 0) else "failed"
@@ -384,6 +399,24 @@ async def manual_collect_all(db: Session = Depends(get_db)):
             task.error_message = result.get("message") or "未采集到房间数据"
             task.progress_message = task.error_message
         return result
+    except asyncio.CancelledError:
+        task.status = "failed"
+        task.error_message = "采集已被用户手动停止"
+        task.progress_stage = "cancelled"
+        task.progress_message = "采集已被用户手动停止"
+        db.add(
+            ScraperLog(
+                task_id=task.id,
+                level="warn",
+                message="采集已被用户手动停止",
+                raw_json={
+                    "stage": "cancelled",
+                    "event": "task_cancelled",
+                    "error": "用户手动停止采集",
+                },
+            )
+        )
+        return {"total_rooms": 0, "collected_rooms": 0, "message": "采集已停止", "results": []}
     except Exception as exc:
         task.status = "failed"
         task.error_message = str(exc)[:2000]
@@ -404,6 +437,7 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         )
         raise
     finally:
+        _collect_all_task = None
         task.completed_at = datetime.utcnow()
         if task.status == "completed":
             task.progress_percent = 100
