@@ -37,28 +37,11 @@ LIVE_SCREEN_URL = f"{LEADS_BASE}/pc/analysis/live-screen"
 COMMENT_URL = f"{LEADS_BASE}/pc/analysis/live-comment"
 HOME_URL = f"{LEADS_BASE}/pc/growth/home"
 HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
-HISTORY_DETAIL_TIMEOUT_SECONDS = 300
+HISTORY_DETAIL_TIMEOUT_SECONDS = 45
 HISTORY_DETAIL_CONCURRENCY = 2
-HISTORY_DETAIL_BATCH_SIZE = 0  # 0 表示不限，一次性处理所有待补场次
+HISTORY_DETAIL_BATCH_SIZE = 20
 ENTERPRISE_PAGE_SIZE = 100
 ENTERPRISE_MAX_PAGES = 200
-
-# 取消采集标志
-_cancel_requested = False
-
-def request_cancel():
-    """请求取消正在运行的采集任务"""
-    global _cancel_requested
-    _cancel_requested = True
-    logger.info("🛑 已收到取消采集请求")
-
-def reset_cancel():
-    """重置取消标志"""
-    global _cancel_requested
-    _cancel_requested = False
-
-def is_cancel_requested() -> bool:
-    return _cancel_requested
 
 
 ProgressCallback = Callable[[str, int, int, int, str, Optional[dict[str, Any]]], None]
@@ -76,9 +59,6 @@ async def collect_all(
     def report(stage: str, percent: int, current: int, total: int, message: str, details=None):
         if progress_callback:
             progress_callback(stage, percent, current, total, message, details)
-
-    # 重置取消标志
-    reset_cancel()
 
     report("prepare", 3, 0, 0, "正在查找可用采集账号")
     # 1. 获取已登录账号，设置持久化上下文的 storage path
@@ -169,28 +149,27 @@ async def collect_all(
                     "error": f"采集超过 {settings.ROOM_COLLECTION_TIMEOUT_SECONDS} 秒",
                 }
 
-            # 登录检查和正式打开页面之间仍可能发生浏览器句柄失效，自动重启浏览器重试（最多 3 次）
-            room_retries = 0
-            while _is_context_closed_message(result.get("error")) and room_retries < 3:
-                room_retries += 1
-                logger.warning("采集上下文已关闭（第 %s/3 次重试），正在关闭浏览器并重启后重试: room_id=%s", room_retries, room.room_id_str)
+            # 登录检查和正式打开页面之间仍可能发生浏览器句柄失效，自动恢复一次即可。
+            if _is_context_closed_message(result.get("error")):
+                logger.warning("采集上下文已关闭，正在关闭浏览器并重启后重试: room_id=%s", room.room_id_str)
+                # 关闭整个浏览器（包括 Playwright 连接），get_logged_in_context 会创建全新实例
                 await browser_manager.close()
                 context, recovered, recovery_message = await browser_manager.get_logged_in_context()
-                if not recovered or not context:
+                if recovered and context:
+                    try:
+                        result = await asyncio.wait_for(
+                            _collect_room_data(db, context, room, task_id=task_id),
+                            timeout=settings.ROOM_COLLECTION_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        result = {
+                            "room_id": room.room_id_str or str(room.id),
+                            "anchor_name": room.anchor_name or "",
+                            "is_live": False,
+                            "error": f"恢复后采集仍超过 {settings.ROOM_COLLECTION_TIMEOUT_SECONDS} 秒",
+                        }
+                else:
                     result["error"] = recovery_message or "浏览器上下文恢复失败，请重新扫码登录"
-                    break
-                try:
-                    result = await asyncio.wait_for(
-                        _collect_room_data(db, context, room, task_id=task_id),
-                        timeout=settings.ROOM_COLLECTION_TIMEOUT_SECONDS,
-                    )
-                except asyncio.TimeoutError:
-                    result = {
-                        "room_id": room.room_id_str or str(room.id),
-                        "anchor_name": room.anchor_name or "",
-                        "is_live": False,
-                        "error": f"恢复后采集仍超过 {settings.ROOM_COLLECTION_TIMEOUT_SECONDS} 秒",
-                    }
             results.append(result)
             report(
                 "room_collection",
@@ -200,10 +179,6 @@ async def collect_all(
                 f"房间采集进度 {index}/{len(rooms)}",
                 result,
             )
-            # 检查取消请求
-            if is_cancel_requested():
-                logger.warning("采集已取消（房间阶段），已完成 %s/%s 个房间", index, len(rooms))
-                break
 
         _phase_times["rooms"] = time.time() - _phase_start
         logger.info("[采集计时] 房间采集完成: %s间 耗时=%.1fs", len(results), _phase_times["rooms"])
@@ -213,18 +188,13 @@ async def collect_all(
         report("enterprise_sync", 40, 0, 0, "正在同步全部企业主播及所属场次")
         _t_enterprise = time.time()
         enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0], task_id=task_id)
-        # 企业主播映射时浏览器上下文可能已断开，自动重启浏览器重试（最多 3 次）
-        max_retries = 3
-        retry_count = 0
-        while enterprise_sync.get("error") and _is_context_closed_message(enterprise_sync.get("error")) and retry_count < max_retries:
-            retry_count += 1
-            logger.warning("企业主播映射同步时浏览器上下文已关闭（第 %s/%s 次重试），正在重启浏览器后重试", retry_count, max_retries)
+        # 企业主播映射时浏览器上下文可能已断开，检测到后重启浏览器重试一次
+        if enterprise_sync.get("error") and _is_context_closed_message(enterprise_sync.get("error")):
+            logger.warning("企业主播映射同步时浏览器上下文已关闭，正在重启浏览器后重试")
             await browser_manager.close()
             context, recovered, msg = await browser_manager.get_logged_in_context()
-            if not recovered or not context:
-                logger.error("浏览器重启失败: %s", msg)
-                break
-            enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0], task_id=task_id)
+            if recovered and context:
+                enterprise_sync = await _sync_enterprise_anchor_sessions(db, context, rooms[0], task_id=task_id)
         report(
             "enterprise_sync",
             60,
@@ -240,64 +210,50 @@ async def collect_all(
         report("history_sync", 65, 0, 0, "正在同步账号历史直播场次")
         _t_history = time.time()
         history_sync = _sync_history_sessions(db, account, rooms[0])
-
-        # 检查取消请求
-        if is_cancel_requested():
-            logger.warning("采集已取消（历史同步阶段），跳过详情补齐")
-        else:
-            report("history_sync", 75, history_sync, history_sync, f"历史场次同步完成，本次新增 {history_sync} 场")
+        report("history_sync", 75, history_sync, history_sync, f"历史场次同步完成，本次新增 {history_sync} 场")
 
         # 未映射只代表当前接口暂时没返回主播关系，不能在采集过程中删除真实场次。
         pruned_unmapped_count = 0
+        report("detail_enrichment", 78, 0, 0, "正在检查全部场次的指标、评论和主播资料")
 
-        history_detail_progress = {
-            "checked_count": 0, "enriched_count": 0, "failed_count": 0,
-            "remaining_count": 0, "batch_size": 0,
-        }
-
-        if not is_cancel_requested():
-            report("detail_enrichment", 78, 0, 0, "正在检查全部场次的指标、评论和主播资料")
-
-            def report_detail_progress(checked: int, total: int, enriched: int, failed: int) -> None:
-                percent = 78 + int(checked / max(total, 1) * 16)
-                report(
-                    "detail_enrichment",
-                    percent,
-                    checked,
-                    total,
-                    f"场次详情已处理 {checked}/{total}，补齐 {enriched} 场，失败 {failed} 场",
-                    {
-                        "checked_count": checked,
-                        "total_count": total,
-                        "enriched_count": enriched,
-                        "failed_count": failed,
-                    },
-                )
-
-            history_detail_progress = await _enrich_history_sessions(
-                db,
-                context,
-                account,
-                rooms[0],
-                progress_callback=report_detail_progress,
-            )
-            _phase_times["details"] = time.time() - _t_history
-            logger.info("[采集计时] 详情补齐完成: 检查=%s 补齐=%s 失败=%s 剩余=%s 耗时=%.1fs",
-                         history_detail_progress.get("checked_count", 0),
-                         history_detail_progress.get("enriched_count", 0),
-                         history_detail_progress.get("failed_count", 0),
-                         history_detail_progress.get("remaining_count", 0),
-                         _phase_times["details"])
+        def report_detail_progress(checked: int, total: int, enriched: int, failed: int) -> None:
+            percent = 78 + int(checked / max(total, 1) * 16)
             report(
                 "detail_enrichment",
-                94,
-                history_detail_progress["checked_count"],
-                history_detail_progress["batch_size"],
-                f"全部场次已检查，本次补齐 {history_detail_progress['enriched_count']} 场，失败 {history_detail_progress['failed_count']} 场",
-                history_detail_progress,
+                percent,
+                checked,
+                total,
+                f"场次详情已处理 {checked}/{total}，补齐 {enriched} 场，失败 {failed} 场",
+                {
+                    "checked_count": checked,
+                    "total_count": total,
+                    "enriched_count": enriched,
+                    "failed_count": failed,
+                },
             )
-        else:
-            logger.warning("采集已取消，跳过详情补齐")
+
+        history_detail_progress = await _enrich_history_sessions(
+            db,
+            context,
+            account,
+            rooms[0],
+            progress_callback=report_detail_progress,
+        )
+        _phase_times["details"] = time.time() - _t_history
+        logger.info("[采集计时] 详情补齐完成: 检查=%s 补齐=%s 失败=%s 剩余=%s 耗时=%.1fs",
+                     history_detail_progress.get("checked_count", 0),
+                     history_detail_progress.get("enriched_count", 0),
+                     history_detail_progress.get("failed_count", 0),
+                     history_detail_progress.get("remaining_count", 0),
+                     _phase_times["details"])
+        report(
+            "detail_enrichment",
+            94,
+            history_detail_progress["checked_count"],
+            history_detail_progress["batch_size"],
+            f"全部场次已检查，本次补齐 {history_detail_progress['enriched_count']} 场，失败 {history_detail_progress['failed_count']} 场",
+            history_detail_progress,
+        )
 
         # 采集完成后刷新持久化 Cookie（延长有效期）
         report("cookie_refresh", 97, 0, 0, "正在保存最新 Cookie 与浏览器指纹")
@@ -326,14 +282,7 @@ async def collect_all(
                      _phase_times.get("rooms", 0),
                      _phase_times.get("enterprise", 0),
                      _phase_times.get("details", 0))
-
-        # 重置取消标志，避免影响下次采集
-        if is_cancel_requested():
-            final_result["cancelled"] = True
-            report("completed", 100, collected, len(rooms), "采集已取消", final_result)
-        else:
-            report("completed", 100, collected, len(rooms), "刷新数据采集完成", final_result)
-        reset_cancel()
+        report("completed", 100, collected, len(rooms), "刷新数据采集完成", final_result)
         return final_result
     finally:
         # 注意：不关闭 context！它被 browser_manager 持久化了
@@ -1830,7 +1779,7 @@ async def _enrich_history_sessions(
             -(session.live_start_time.timestamp() if session.live_start_time else 0),
         )
     )
-    target_sessions = pending_sessions[:HISTORY_DETAIL_BATCH_SIZE] if HISTORY_DETAIL_BATCH_SIZE > 0 else pending_sessions
+    target_sessions = pending_sessions[:HISTORY_DETAIL_BATCH_SIZE]
     enriched = 0
     checked = 0
     failed = 0

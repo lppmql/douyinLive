@@ -42,15 +42,6 @@ export function fetchLiveSessionData(id: number) {
   return backendRequest<Api.Douyin.LiveSessionDetail>({ url: `${API_PREFIX}/live-sessions/${id}/details` });
 }
 
-/** 批量删除直播场次 */
-export function deleteLiveSessions(ids: number[]) {
-  return backendRequest<{ message: string; deleted_count: number; not_found_ids: number[] | null }>({
-    url: `${API_PREFIX}/live-sessions/batch-delete`,
-    method: 'POST',
-    data: { ids }
-  });
-}
-
 /* ---------- 采集 ---------- */
 
 /** 获取采集器状态 */
@@ -224,14 +215,6 @@ export function fetchKnowledgeItems(params?: { category?: string }) {
 }
 
 /* ---------- 刷新数据采集 ---------- */
-
-/** 请求停止正在运行的采集任务 */
-export function stopCollectAll() {
-  return backendRequest<{ message: string }>({
-    url: `${API_PREFIX}/collector/collect-all/stop`,
-    method: 'POST'
-  });
-}
 
 /** 刷新全部主播、直播场次及场次详情数据 */
 export function collectAllData() {
