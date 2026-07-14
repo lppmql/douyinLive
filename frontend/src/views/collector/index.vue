@@ -946,15 +946,18 @@ onUnmounted(() => {
                         </div>
                       </div>
                     </NGi>
-                    <NGi v-for="item in [
-                      { label: '已发现场次', value: currentCollectTask.collected_session_count },
-                      { label: '新增场次', value: currentCollectTask.new_session_count },
-                      { label: '主播映射', value: currentCollectTask.mapped_session_count },
-                      { label: '已检查详情', value: currentCollectTask.checked_detail_count },
-                      { label: '已补齐详情', value: currentCollectTask.refreshed_detail_count },
-                      { label: '详情失败', value: currentCollectTask.failed_detail_count },
-                      { label: '剩余待补', value: currentCollectTask.remaining_detail_count }
-                    ]" :key="item.label">
+                    <NGi
+                      v-for="item in [
+                        { label: '已发现场次', value: currentCollectTask.collected_session_count },
+                        { label: '新增场次', value: currentCollectTask.new_session_count },
+                        { label: '主播映射', value: currentCollectTask.mapped_session_count },
+                        { label: '已检查详情', value: currentCollectTask.checked_detail_count },
+                        { label: '已补齐详情', value: currentCollectTask.refreshed_detail_count },
+                        { label: '详情失败', value: currentCollectTask.failed_detail_count },
+                        { label: '剩余待补', value: currentCollectTask.remaining_detail_count }
+                      ]"
+                      :key="item.label"
+                    >
                       <div class="rounded-8px bg-white/70 px-10px py-10px dark:bg-black/15">
                         <div class="text-12px text-gray-500">{{ item.label }}</div>
                         <div class="mt-2px text-18px font-600">{{ item.value || 0 }} 场</div>
