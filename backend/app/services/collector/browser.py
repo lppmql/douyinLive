@@ -721,7 +721,9 @@ class BrowserManager:
     async def close(self):
         """关闭浏览器（释放所有资源）"""
         self._logged_in_context = None
-        self._logged_in_account_id = None
+        # 不清空 _logged_in_account_id 和 _logged_in_storage_path，
+        # 这样后续 get_logged_in_context() 恢复时能直接通过 account_id 或 storage_path 找到账号，
+        # 无需再次查询数据库。
         if self._browser:
             try:
                 await self._browser.close()

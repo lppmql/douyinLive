@@ -6,8 +6,8 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 1. 所有回答用中文
 2. 我是编程新手，解释要清楚
-3. 每次开发前先列计划，不要直接改代码
-4.
+3. 每次开发或修改前先列计划，不要直接改代码
+4. 思考过程要中文显示出来
 5. 修改完成后必须输出：修改文件、新增文件、启动方式、测试方式、验收清单
 6. 不要删除已有功能，除非我明确要求
 7. 前端页面开发要遵守 soybean-admin 官方要求（Elegant Router、pnpm、ESLint、Pinia）
