@@ -9,6 +9,7 @@ from uuid import uuid4
 from redis import Redis
 
 from app.core.config import settings
+from app.core.observability import TASK_EVENTS_TOTAL
 from app.core.logger import logger
 
 
@@ -49,6 +50,11 @@ def publish_task_event(
         "details": json.dumps(details or {}, ensure_ascii=False, default=str),
     }
     client = None
+    TASK_EVENTS_TOTAL.labels(
+        task_type=task_kind,
+        event=event,
+        status=str(getattr(task, "status", "unknown") or "unknown"),
+    ).inc()
     try:
         client = Redis.from_url(
             settings.REDIS_URL,

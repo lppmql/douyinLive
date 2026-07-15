@@ -15,6 +15,7 @@ from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.services.ai.deepseek_client import chat
 from app.services.ai.prompt_service import get_prompt
+from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +69,11 @@ def qa_search(
     3. 调用 DeepSeek QA 提示词
     4. 返回回答 + 引用来源
     """
-    # 1. 搜索
-    items = search_knowledge(db, keyword=question, category=category, limit=5)
+    # 1. 优先召回可追溯的时间片，再用原有整场知识补足上下文。
+    time_slices = search_time_slices(db, question=question, limit=5)
+    items = search_knowledge(db, keyword=question, category=category, limit=max(0, 5 - len(time_slices)))
 
-    if not items:
+    if not time_slices and not items:
         # 没有匹配的知识库内容，直接让 DeepSeek 回答
         return {
             "answer": "知识库中没有找到相关信息。请尝试其他关键词或稍后再试。",
@@ -82,7 +84,28 @@ def qa_search(
     # 2. 拼接上下文
     context_parts = []
     sources = []
-    for i, item in enumerate(items, 1):
+    for i, item in enumerate(time_slices, 1):
+        context_parts.append(
+            f"[{i}] 主播：{item['anchor_name'] or '未知'}｜场次：{item['session_id']}｜"
+            f"时间：{item['time_range']}｜来源：{' + '.join(item['source_types'])}\n"
+            f"{(item['content'] or '')[:8000]}"
+        )
+        sources.append({
+            "id": item["id"],
+            "title": f"{item['anchor_name'] or '未知主播'}｜场次{item['session_id']}｜{item['time_range']}",
+            "category": "直播时间片",
+            "source_type": "time_slice",
+            "session_id": item["session_id"],
+            "anchor_name": item["anchor_name"],
+            "time_range": item["time_range"],
+            "slice_start_seconds": item["slice_start_seconds"],
+            "slice_end_seconds": item["slice_end_seconds"],
+            "source_types": item["source_types"],
+            "excerpt": item["excerpt"],
+            "score": item["score"],
+        })
+    offset = len(time_slices)
+    for i, item in enumerate(items, offset + 1):
         context_parts.append(f"[{i}] {item.title or '无标题'}\n{item.content or ''}")
         sources.append({
             "id": item.id,
@@ -199,11 +222,17 @@ def save_comments_to_kb(db: Session, session_id: int) -> int:
 
 def sync_session_to_kb(db: Session, session_id: int) -> dict[str, int]:
     """幂等同步一场直播的全部已有知识资产，ASR 未开启也可同步数据和评论。"""
+    slice_result = sync_session_time_slices(db, session_id)
     return {
         "live_data_saved": save_session_data_to_kb(db, session_id),
         "comments_saved": save_comments_to_kb(db, session_id),
         "transcript_saved": save_transcript_to_kb(db, session_id),
         "analysis_saved": save_analysis_to_kb(db, session_id),
+        "time_slices_created": slice_result["created_count"],
+        "time_slices_updated": slice_result["updated_count"],
+        "time_slices_unchanged": slice_result["unchanged_count"],
+        "time_slices_total": slice_result["slice_count"],
+        "unmapped_comments": slice_result["unmapped_comment_count"],
     }
 
 

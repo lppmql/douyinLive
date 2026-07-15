@@ -237,6 +237,19 @@ export function fetchKnowledgeItems(params?: { category?: string }) {
   return backendRequest<Api.Douyin.KnowledgeItem[]>({ url: `${API_PREFIX}/knowledge-base/`, params });
 }
 
+/** 获取知识时间片覆盖状态 */
+export function fetchKnowledgeTimeSliceStatus() {
+  return backendRequest<Api.Douyin.KnowledgeTimeSliceStatus>({ url: `${API_PREFIX}/knowledge-base/time-slices/status` });
+}
+
+/** 获取最近知识时间片 */
+export function fetchKnowledgeTimeSlices(params?: { session_id?: number; limit?: number }) {
+  return backendRequest<Api.Douyin.KnowledgeTimeSlice[]>({
+    url: `${API_PREFIX}/knowledge-base/time-slices`,
+    params
+  });
+}
+
 /* ---------- 刷新数据采集 ---------- */
 
 /** 刷新全部主播、直播场次及场次详情数据 */

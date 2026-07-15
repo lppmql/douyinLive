@@ -320,6 +320,7 @@ declare namespace Api {
     /* ---------- 知识库 ---------- */
     interface KnowledgeItem {
       id: number;
+      session_id: number | null;
       title: string | null;
       category: string | null;
       content: string | null;
@@ -333,6 +334,13 @@ declare namespace Api {
       category: string | null;
       source_type: string | null;
       session_id: number | null;
+      anchor_name?: string | null;
+      time_range?: string;
+      slice_start_seconds?: number;
+      slice_end_seconds?: number;
+      source_types?: string[];
+      excerpt?: string;
+      score?: number;
     }
 
     interface KnowledgeSyncResult {
@@ -341,6 +349,42 @@ declare namespace Api {
       comments_saved: number;
       transcript_saved: number;
       analysis_saved: number;
+      time_slices_created: number;
+      time_slices_updated: number;
+      time_slices_unchanged: number;
+      time_slices_total: number;
+      unmapped_comments: number;
+    }
+
+    interface KnowledgeTimeSliceStatus {
+      slice_count: number;
+      session_count: number;
+      transcript_slice_count: number;
+      comment_slice_count: number;
+      metric_slice_count: number;
+      unmapped_comment_count: number;
+      slice_seconds: number;
+      parser_version: string;
+    }
+
+    interface KnowledgeTimeSlice {
+      id: number;
+      session_id: number;
+      anchor_name: string | null;
+      session_title: string | null;
+      slice_start_seconds: number;
+      slice_end_seconds: number;
+      slice_start_time: string | null;
+      slice_end_time: string | null;
+      transcript_text: string | null;
+      comments_text: string | null;
+      comment_count: number;
+      high_intent_comment_count: number;
+      unmapped_comment_count: number;
+      metric_point_count: number;
+      avg_online_count: number;
+      peak_online_count: number;
+      updated_at: string;
     }
 
     /* ---------- 刷新数据采集 ---------- */

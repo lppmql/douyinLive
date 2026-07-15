@@ -2,9 +2,10 @@
 抖音留资直播分析系统 - FastAPI 入口
 """
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
@@ -17,6 +18,13 @@ from app.services.collector.browser import browser_manager
 from app.services.asr.control import start_asr_runtime
 from app.services.tasks.runtime import publish_task_event, touch_task
 from app.api.v1.ws import transcript_ws
+from app.core.observability import (
+    new_trace_id,
+    observe_http,
+    refresh_runtime_metrics,
+    trace_id_var,
+)
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 
 def recover_interrupted_collector_tasks() -> int:
@@ -106,6 +114,25 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def trace_and_metrics_middleware(request: Request, call_next):
+    trace_id = new_trace_id(request.headers.get("x-trace-id"))
+    token = trace_id_var.set(trace_id)
+    started_at = time.perf_counter()
+    status_code = 500
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        response.headers["X-Trace-ID"] = trace_id
+        return response
+    finally:
+        route = request.scope.get("route")
+        route_path = getattr(route, "path", request.url.path)
+        if settings.OBSERVABILITY_ENABLED:
+            observe_http(request.method, route_path, status_code, started_at)
+        trace_id_var.reset(token)
+
+
 @app.get("/")
 def root():
     return {
@@ -144,6 +171,19 @@ def health():
         "redis": "ok" if redis_ok else "error",
         "monitor": "running" if scheduler_manager.running else "stopped",
     }
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics():
+    """Prometheus 拉取入口。"""
+    if not settings.OBSERVABILITY_ENABLED:
+        return Response(status_code=404)
+    db = SessionLocal()
+    try:
+        refresh_runtime_metrics(db, scheduler_manager.running)
+    finally:
+        db.close()
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 # 注册 API 路由

@@ -17,6 +17,8 @@ from app.models.de_tables import (
 from app.models.live_sessions import LiveSession
 from app.services.sync import sync_pending_complete_sessions
 from app.services.sync.de_sync import source_data_outdated_condition
+from app.services.metrics import METRIC_DEFINITIONS, SEMANTIC_DATASETS
+from app.core.observability import DATAEASE_SYNC_TOTAL
 
 router = APIRouter(prefix="/dataease", tags=["DataEase"])
 
@@ -65,6 +67,22 @@ def get_dataease_status(db: Session = Depends(get_db)):
     return _status(db)
 
 
+@router.get("/semantic-layer")
+def get_semantic_layer():
+    """返回 DataEase、前端和 API 共用的指标口径与只读数据集。"""
+    return {
+        "version": "semantic-v1",
+        "metrics": METRIC_DEFINITIONS,
+        "datasets": SEMANTIC_DATASETS,
+        "time_policy": {
+            "event_time": "平台事件发生时间，业务分析默认口径",
+            "collected_at": "采集器收到数据的时间，仅用于延迟与质量分析",
+            "source_updated_at": "业务源记录最后更新时间，用于增量同步判断",
+        },
+        "dataease_access": "只读 de_v_* 视图；保留现有 de_* 宽表兼容已有大屏",
+    }
+
+
 @router.post("/sync")
 def sync_dataease(
     limit: int = Query(100, ge=1, le=500),
@@ -73,4 +91,6 @@ def sync_dataease(
 ):
     """增量同步缺失/过期场次；force=true 时强制重建最近完整场次。"""
     result = sync_pending_complete_sessions(db, limit=limit, force=force)
+    DATAEASE_SYNC_TOTAL.labels(result="success").inc(result["synced_count"])
+    DATAEASE_SYNC_TOTAL.labels(result="failed").inc(result["failed_count"])
     return {"status": "ok" if not result["failed_count"] else "partial", **result, "dataease": _status(db)}

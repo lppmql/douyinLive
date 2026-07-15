@@ -1,10 +1,15 @@
 """知识库 CRUD API"""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.knowledge_base import KnowledgeBase
+from app.models.knowledge_time_slices import KnowledgeTimeSlice
+from app.models.live_sessions import LiveSession
+from app.core.config import settings
 from app.schemas import KnowledgeBaseCreate, KnowledgeBaseResponse
+from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices
 
 router = APIRouter(prefix="/knowledge-base", tags=["知识库"])
 
@@ -24,6 +29,86 @@ def list_knowledge(
     if source_type:
         q = q.filter(KnowledgeBase.source_type == source_type)
     return q.order_by(KnowledgeBase.created_at.desc()).offset(skip).limit(limit).all()
+
+
+@router.get("/time-slices/status")
+def time_slice_status(db: Session = Depends(get_db)):
+    """返回真实知识时间片覆盖情况。"""
+    session_count = db.query(func.count(func.distinct(KnowledgeTimeSlice.session_id))).scalar() or 0
+    return {
+        "slice_count": db.query(func.count(KnowledgeTimeSlice.id)).scalar() or 0,
+        "session_count": session_count,
+        "transcript_slice_count": db.query(func.count(KnowledgeTimeSlice.id)).filter(
+            KnowledgeTimeSlice.transcript_text.is_not(None),
+        ).scalar() or 0,
+        "comment_slice_count": db.query(func.count(KnowledgeTimeSlice.id)).filter(
+            KnowledgeTimeSlice.comment_count > 0,
+        ).scalar() or 0,
+        "metric_slice_count": db.query(func.count(KnowledgeTimeSlice.id)).filter(
+            KnowledgeTimeSlice.metric_point_count > 0,
+        ).scalar() or 0,
+        "unmapped_comment_count": db.query(func.sum(KnowledgeTimeSlice.unmapped_comment_count)).scalar() or 0,
+        "slice_seconds": settings.KNOWLEDGE_SLICE_SECONDS,
+        "parser_version": "time-slice-v1",
+    }
+
+
+@router.get("/time-slices/search")
+def search_slices(
+    query: str = Query(..., min_length=1, max_length=500),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """搜索话术、评论和分钟指标已绑定的时间片。"""
+    return search_time_slices(db, question=query, limit=limit)
+
+
+@router.post("/time-slices/sync/{session_id}")
+def sync_time_slices(session_id: int, db: Session = Depends(get_db)):
+    """幂等同步单场真实数据的知识时间片。"""
+    if not db.get(LiveSession, session_id):
+        raise HTTPException(404, "直播场次不存在")
+    result = sync_session_time_slices(db, session_id)
+    return {"status": "ok", "session_id": session_id, **result}
+
+
+@router.get("/time-slices")
+def list_time_slices(
+    session_id: int | None = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    query = db.query(KnowledgeTimeSlice)
+    if session_id is not None:
+        query = query.filter(KnowledgeTimeSlice.session_id == session_id)
+    rows = query.order_by(
+        KnowledgeTimeSlice.slice_start_time.desc(),
+        KnowledgeTimeSlice.session_id.desc(),
+        KnowledgeTimeSlice.slice_index,
+    ).offset(skip).limit(limit).all()
+    return [
+        {
+            "id": row.id,
+            "session_id": row.session_id,
+            "anchor_name": row.anchor_name,
+            "session_title": row.session_title,
+            "slice_start_seconds": row.slice_start_seconds,
+            "slice_end_seconds": row.slice_end_seconds,
+            "slice_start_time": row.slice_start_time,
+            "slice_end_time": row.slice_end_time,
+            "transcript_text": row.transcript_text,
+            "comments_text": row.comments_text,
+            "comment_count": row.comment_count,
+            "high_intent_comment_count": row.high_intent_comment_count,
+            "unmapped_comment_count": row.unmapped_comment_count,
+            "metric_point_count": row.metric_point_count,
+            "avg_online_count": float(row.avg_online_count or 0),
+            "peak_online_count": row.peak_online_count,
+            "updated_at": row.updated_at,
+        }
+        for row in rows
+    ]
 
 
 @router.get("/{kb_id}", response_model=KnowledgeBaseResponse)

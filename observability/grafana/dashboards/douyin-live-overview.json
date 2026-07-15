@@ -1,0 +1,57 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "实时监控",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [{ "expr": "douyin_monitor_running", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "ASR 排队任务",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "targets": [{ "expr": "douyin_asr_queue_size", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "知识时间片",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "targets": [{ "expr": "douyin_knowledge_slice_count", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "DataEase 待同步",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "targets": [{ "expr": "douyin_dataease_sync_pending", "refId": "A" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "API 请求速率",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "targets": [{ "expr": "sum by (route, status) (rate(douyin_http_requests_total[5m]))", "refId": "A" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "API P95 延迟",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "targets": [{ "expr": "histogram_quantile(0.95, sum by (le, route) (rate(douyin_http_request_duration_seconds_bucket[5m])))", "refId": "A" }]
+    },
+    {
+      "type": "timeseries",
+      "title": "任务事件",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 },
+      "targets": [{ "expr": "sum by (task_type, event, status) (rate(douyin_task_events_total[5m]))", "refId": "A" }]
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["douyin-live", "collector", "asr"],
+  "templating": { "list": [] },
+  "time": { "from": "now-6h", "to": "now" },
+  "timezone": "browser",
+  "title": "抖音直播采集运行总览",
+  "uid": "douyin-live-overview",
+  "version": 1
+}

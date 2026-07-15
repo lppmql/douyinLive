@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = True
     ALLOW_SYNTHETIC_DATA: bool = False
+    LOG_FORMAT: str = "json"
+    OBSERVABILITY_ENABLED: bool = True
 
     # 数据库
     DB_HOST: str = "localhost"
@@ -25,6 +27,8 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "root123"
     DB_NAME: str = "douyin_live"
     DATABASE_URL: str = ""
+    DATAEASE_READER_USER: str = "dataease_reader"
+    DATAEASE_READER_PASSWORD: str = "dataease_reader_change_me"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
@@ -55,6 +59,9 @@ class Settings(BaseSettings):
     ASR_CHUNK_SECONDS: int = 300
     ASR_CHUNK_MAX_RETRIES: int = 2
     ASR_ALLOW_MOCK: bool = False
+
+    # P1: 知识库时间片
+    KNOWLEDGE_SLICE_SECONDS: int = 300
 
     # Playwright / 采集
     PLAYWRIGHT_HEADLESS: bool = True

@@ -227,7 +227,17 @@ def sync_recent_to_knowledge_base(
     sessions = db.query(LiveSession).filter(
         LiveSession.detail_collection_status == "complete",
     ).order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc()).limit(limit).all()
-    totals = {"live_data_saved": 0, "comments_saved": 0, "transcript_saved": 0, "analysis_saved": 0}
+    totals = {
+        "live_data_saved": 0,
+        "comments_saved": 0,
+        "transcript_saved": 0,
+        "analysis_saved": 0,
+        "time_slices_created": 0,
+        "time_slices_updated": 0,
+        "time_slices_unchanged": 0,
+        "time_slices_total": 0,
+        "unmapped_comments": 0,
+    }
     for session in sessions:
         result = sync_session_to_kb(db, session.id)
         for key, value in result.items():
