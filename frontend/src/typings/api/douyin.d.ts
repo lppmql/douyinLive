@@ -305,6 +305,25 @@ declare namespace Api {
       full_text: string;
     }
 
+    interface TranscriptTask {
+      id: number;
+      session_id: number;
+      status: 'queued' | 'processing' | 'completed' | 'failed';
+      task_type: string;
+      anchor_name: string;
+      session_title: string;
+      live_start_time: string | null;
+      live_duration_seconds: number;
+      segment_count: number;
+      error_message: string | null;
+      retry_count: number;
+      max_retries: number;
+      started_at: string | null;
+      completed_at: string | null;
+      created_at: string;
+      updated_at: string;
+    }
+
     /* ---------- AI 分析 ---------- */
     interface AnalysisScore {
       completeness: number;

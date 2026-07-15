@@ -153,7 +153,10 @@ export function syncDataEase(limit = 100) {
 
 /** 获取话术分段列表 */
 export function fetchTranscriptSegments(sessionId: number) {
-  return backendRequest<Api.Douyin.TranscriptSegment[]>({ url: `${API_PREFIX}/transcripts/${sessionId}/segments` });
+  return backendRequest<Api.Douyin.TranscriptSegment[]>({
+    url: `${API_PREFIX}/transcripts/${sessionId}/segments`,
+    params: { limit: 500 }
+  });
 }
 
 /** 获取完整话术文本 */
@@ -184,6 +187,14 @@ export function queueTranscriptsByAnchor(perAnchor = 1) {
 export function fetchTranscriptTaskStatus() {
   return backendRequest<Record<'queued' | 'processing' | 'completed' | 'failed', number>>({
     url: `${API_PREFIX}/transcripts/tasks/status`
+  });
+}
+
+/** 获取真实转写任务明细，可按状态穿透查看失败原因。 */
+export function fetchTranscriptTasks(status?: Api.Douyin.TranscriptTask['status']) {
+  return backendRequest<Api.Douyin.TranscriptTask[]>({
+    url: `${API_PREFIX}/transcripts/tasks`,
+    params: { status, limit: 100 }
   });
 }
 

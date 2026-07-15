@@ -16,6 +16,28 @@ from app.services.asr.websocket_manager import ws_manager
 rest_router = APIRouter(prefix="/transcripts", tags=["话术转写"])
 
 
+def serialize_transcription_task(task: AsrTask, session: LiveSession, segment_count: int) -> dict:
+    """统一任务明细结构，页面只展示数据库中的真实任务与场次信息。"""
+    return {
+        "id": task.id,
+        "session_id": task.session_id,
+        "status": task.status or "failed",
+        "task_type": task.task_type or "offline",
+        "anchor_name": session.anchor_name or "未知主播",
+        "session_title": session.session_title or "未命名直播场次",
+        "live_start_time": session.live_start_time,
+        "live_duration_seconds": session.live_duration_seconds or 0,
+        "segment_count": int(segment_count or 0),
+        "error_message": task.error_message,
+        "retry_count": task.retry_count or 0,
+        "max_retries": task.max_retries or 0,
+        "started_at": task.started_at,
+        "completed_at": task.completed_at,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+    }
+
+
 @rest_router.post("/{session_id:int}/queue")
 def queue_transcription(session_id: int, db: Session = Depends(get_db)):
     """为指定场次排队转写，复用已采集流源并避免重复任务。"""
@@ -104,6 +126,36 @@ def get_transcription_task_status(db: Session = Depends(get_db)):
     for status, count in db.query(AsrTask.status, func.count(AsrTask.id)).group_by(AsrTask.status):
         counts[status or "failed"] = count
     return counts
+
+
+@rest_router.get("/tasks")
+def list_transcription_tasks(
+    status: str | None = Query(None, pattern="^(queued|processing|completed|failed)$"),
+    limit: int = Query(100, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """返回近期任务明细，支持从状态卡片穿透查看真实失败原因。"""
+    segment_counts = (
+        db.query(
+            TranscriptSegment.session_id.label("session_id"),
+            func.count(TranscriptSegment.id).label("segment_count"),
+        )
+        .group_by(TranscriptSegment.session_id)
+        .subquery()
+    )
+    query = (
+        db.query(
+            AsrTask,
+            LiveSession,
+            func.coalesce(segment_counts.c.segment_count, 0).label("segment_count"),
+        )
+        .join(LiveSession, LiveSession.id == AsrTask.session_id)
+        .outerjoin(segment_counts, segment_counts.c.session_id == AsrTask.session_id)
+    )
+    if status:
+        query = query.filter(AsrTask.status == status)
+    rows = query.order_by(AsrTask.id.desc()).limit(limit).all()
+    return [serialize_transcription_task(task, session, segment_count) for task, session, segment_count in rows]
 
 
 @rest_router.get("/{session_id:int}/segments")
