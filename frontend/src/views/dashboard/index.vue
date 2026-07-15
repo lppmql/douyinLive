@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import CountTo from '@/components/custom/count-to.vue';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 import { $t } from '@/locales';
 import { fetchDashboardSummary } from '@/service/api/douyin';
 
@@ -83,6 +84,25 @@ const dataeaseUrl = ref(import.meta.env.VITE_DATAEASE_URL || '');
 
 <template>
   <NSpace vertical :size="16">
+    <BusinessPageHeader
+      title="经营数据大屏"
+      description="汇总真实主播、场次、评论、线索和数据完整率；先看完整率，再判断经营指标是否可用于决策。"
+      icon="mdi:monitor-dashboard"
+      :status="summary ? `已汇总 ${summary.session_count} 场` : '正在读取数据'"
+      :status-type="summary ? 'success' : 'info'"
+    >
+      <template #actions>
+        <NButton type="primary" :loading="loading" @click="loadSummary">
+          <template #icon><SvgIcon icon="mdi:refresh" /></template>
+          刷新数据
+        </NButton>
+      </template>
+      <NAlert v-if="summary && summary.detail_completion_rate < 80" type="warning" :bordered="false" show-icon>
+        当前场次详情完整率为 {{ summary.detail_completion_rate.toFixed(1) }}%，指标为 0
+        可能表示尚未补齐数据。请先到“数据采集”执行刷新采集。
+      </NAlert>
+    </BusinessPageHeader>
+
     <NSpin :show="loading">
       <NGrid :x-gap="16" :y-gap="16" cols="1 s:2 m:4" responsive="screen">
         <NGi v-for="item in kpiData" :key="item.key">
@@ -145,7 +165,7 @@ const dataeaseUrl = ref(import.meta.env.VITE_DATAEASE_URL || '');
         v-else
         status="info"
         :title="$t('page.dashboard.placeholder')"
-        :description="$t('page.dashboard.placeholderDesc')"
+        description="DataEase 地址尚未配置。经营汇总数据不受影响；完成 DataEase 配置后，这里会嵌入实时图表。"
       >
         <template #icon>
           <SvgIcon icon="mdi:chart-box-outline" class="text-64px text-primary" />

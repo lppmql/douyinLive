@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { NTag, NButton, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
 import { useWebSocket } from '@vueuse/core';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 import {
   fetchTranscriptSegments,
   fetchTranscriptFullText,
@@ -220,7 +221,27 @@ watch(selectedSessionId, newId => {
 </script>
 
 <template>
-  <div>
+  <NSpace vertical :size="16">
+    <BusinessPageHeader
+      title="主播话术转写"
+      description="将真实直播流按受控队列转成带时间轴的话术。ASR 会占用较多内存，系统通过单 Worker 和有限队列避免电脑卡死。"
+      icon="mdi:chat-processing"
+      :status="taskSummary.processing ? `${taskSummary.processing} 个处理中` : `${taskSummary.queued} 个排队`"
+      :status-type="taskSummary.failed ? 'warning' : taskSummary.processing ? 'info' : 'success'"
+    >
+      <div class="flex flex-wrap gap-x-18px gap-y-6px text-12px text-gray-500">
+        <span>1. 选择场次</span>
+        <span>2. 创建真实转写任务</span>
+        <span>3. 等待 WebSocket 更新</span>
+        <span>4. AI 分析并入库</span>
+      </div>
+    </BusinessPageHeader>
+
+    <NAlert v-if="taskSummary.failed" type="warning" :bordered="false" show-icon>
+      当前有 {{ taskSummary.failed }} 个失败任务。常见原因是场次没有可用
+      m3u8；请先到场次详情确认直播流地址，再重新转写。
+    </NAlert>
+
     <!-- 选择场次 + 连接状态 -->
     <NCard :bordered="false" class="card-wrapper mb-16px">
       <div class="flex flex-wrap items-center justify-between gap-12px">
@@ -241,9 +262,14 @@ watch(selectedSessionId, newId => {
           <NTag type="warning" round size="small">处理中 {{ taskSummary.processing }}</NTag>
           <NTag type="success" round size="small">完成 {{ taskSummary.completed }}</NTag>
           <NTag v-if="taskSummary.failed" type="error" round size="small">失败 {{ taskSummary.failed }}</NTag>
-          <NTag :type="wsConnected ? 'success' : 'default'" round size="small">
-            {{ wsConnected ? $t('page.transcripts.wsConnected') : $t('page.transcripts.wsDisconnected') }}
-          </NTag>
+          <NTooltip>
+            <template #trigger>
+              <NTag :type="wsConnected ? 'success' : 'default'" round size="small">
+                {{ wsConnected ? $t('page.transcripts.wsConnected') : $t('page.transcripts.wsDisconnected') }}
+              </NTag>
+            </template>
+            未选择场次时不连接；选择场次后会自动连接并接收实时转写进度。
+          </NTooltip>
           <NButton size="small" type="primary" secondary @click="copyFullText">
             <template #icon>
               <SvgIcon icon="mdi:content-copy" />
@@ -265,7 +291,11 @@ watch(selectedSessionId, newId => {
       <!-- 分段列表 -->
       <NGi span="1 m:2">
         <NCard :bordered="false" class="card-wrapper" :title="$t('page.transcripts.title')">
-          <NEmpty v-if="!selectedSessionId" class="py-40px" :description="$t('page.transcripts.selectSession')" />
+          <NEmpty v-if="!selectedSessionId" class="py-40px" description="请先在上方选择一个直播场次">
+            <template #extra>
+              <span class="text-12px text-gray-500">建议选择场次详情中已保存 m3u8 地址的记录</span>
+            </template>
+          </NEmpty>
           <NSpin v-else :show="loading">
             <NSpace vertical :size="12">
               <div
@@ -334,7 +364,7 @@ watch(selectedSessionId, newId => {
         </NCard>
       </NGi>
     </NGrid>
-  </div>
+  </NSpace>
 </template>
 
 <style scoped></style>

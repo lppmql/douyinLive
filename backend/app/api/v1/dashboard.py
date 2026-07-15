@@ -35,7 +35,8 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
     """返回基于真实直播场次的核心经营数据。"""
     row = db.query(
         func.count(LiveSession.id).label("session_count"),
-        func.count(distinct(case((LiveSession.anchor_name != "", LiveSession.anchor_name)))).label("anchor_count"),
+        # 昵称会变更，同一主播可能出现多个历史昵称；抖音号才是稳定的去重口径。
+        func.count(distinct(case((LiveSession.douyin_id != "", LiveSession.douyin_id)))).label("anchor_count"),
         func.sum(case((LiveSession.live_status == "live", 1), else_=0)).label("live_session_count"),
         func.sum(case((LiveSession.detail_collection_status == "complete", 1), else_=0)).label("detail_complete_count"),
         func.coalesce(func.sum(LiveSession.total_viewers), 0).label("total_viewers"),

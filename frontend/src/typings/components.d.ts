@@ -12,6 +12,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AppHelp: typeof import('./../components/business/app-help.vue')['default']
     AppProvider: typeof import('./../components/common/app-provider.vue')['default']
     BetterScroll: typeof import('./../components/custom/better-scroll.vue')['default']
     ButtonIcon: typeof import('./../components/custom/button-icon.vue')['default']
@@ -94,6 +95,7 @@ declare module 'vue' {
     NThing: typeof import('naive-ui')['NThing']
     NTooltip: typeof import('naive-ui')['NTooltip']
     NWatermark: typeof import('naive-ui')['NWatermark']
+    PageHeader: typeof import('./../components/business/page-header.vue')['default']
     PinToggler: typeof import('./../components/common/pin-toggler.vue')['default']
     ReloadButton: typeof import('./../components/common/reload-button.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
@@ -110,6 +112,7 @@ declare module 'vue' {
 
 // For TSX support
 declare global {
+  const AppHelp: typeof import('./../components/business/app-help.vue')['default']
   const AppProvider: typeof import('./../components/common/app-provider.vue')['default']
   const BetterScroll: typeof import('./../components/custom/better-scroll.vue')['default']
   const ButtonIcon: typeof import('./../components/custom/button-icon.vue')['default']
@@ -192,6 +195,7 @@ declare global {
   const NThing: typeof import('naive-ui')['NThing']
   const NTooltip: typeof import('naive-ui')['NTooltip']
   const NWatermark: typeof import('naive-ui')['NWatermark']
+  const PageHeader: typeof import('./../components/business/page-header.vue')['default']
   const PinToggler: typeof import('./../components/common/pin-toggler.vue')['default']
   const ReloadButton: typeof import('./../components/common/reload-button.vue')['default']
   const RouterLink: typeof import('vue-router')['RouterLink']

@@ -1,6 +1,6 @@
 const local: App.I18n.Schema = {
   system: {
-    title: 'Soybean 管理系统',
+    title: '抖音直播经营中台',
     updateTitle: '系统版本更新通知',
     updateContent: '检测到系统有新版本发布，是否立即刷新页面？',
     updateConfirm: '立即刷新',
@@ -313,8 +313,8 @@ const local: App.I18n.Schema = {
       creativity: '创意'
     },
     dashboard: {
-      placeholder: 'DataEase 数据大屏将在 Phase 6 嵌入此处',
-      placeholderDesc: '届时将展示直播间实时数据、转换漏斗、用户画像等可视化图表',
+      placeholder: 'DataEase 数据大屏尚未配置',
+      placeholderDesc: '配置地址后可展示直播间实时数据、转化漏斗和用户画像等可视化图表',
       todayLeads: '今日留资',
       onlineUsers: '在线人数',
       validLeadRate: '有效留资率',
@@ -456,8 +456,8 @@ const local: App.I18n.Schema = {
       summary: '摘要',
       source: '来源',
       time: '时间',
-      chatPlaceholder: '知识库问答功能将在 Phase 7 实现',
-      chatDesc: '届时您可以在这里向 AI 提问，获取基于知识库的回答'
+      chatPlaceholder: '询问已同步直播中的经营问题',
+      chatDesc: '向 AI 提问，并获取带真实知识来源的回答'
     }
   },
   form: {

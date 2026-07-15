@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import { NTag, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 import {
   askKnowledge,
   fetchKnowledgeItems,
@@ -89,7 +90,22 @@ async function sendQuestion() {
 </script>
 
 <template>
-  <div>
+  <NSpace vertical :size="16">
+    <BusinessPageHeader
+      title="直播经营知识库"
+      description="把真实直播场次按 5 分钟切片，并严格按平台时间关联话术、评论和分钟指标；缺少时间的数据不会被强行匹配。"
+      icon="mdi:book-open-page-variant-outline"
+      :status="`覆盖 ${sliceStatus?.session_count || 0} 场直播`"
+      :status-type="sliceStatus?.session_count ? 'success' : 'warning'"
+    >
+      <template #actions>
+        <NButton type="primary" :loading="syncing" @click="syncRecent">
+          <template #icon><SvgIcon icon="mdi:database-sync-outline" /></template>
+          同步最近 20 场
+        </NButton>
+      </template>
+    </BusinessPageHeader>
+
     <NGrid :x-gap="16" :y-gap="16" cols="2 s:4" responsive="screen" class="mb-16px">
       <NGi>
         <NCard :bordered="false" size="small" class="card-wrapper h-full">
@@ -102,7 +118,9 @@ async function sendQuestion() {
       <NGi>
         <NCard :bordered="false" size="small" class="card-wrapper h-full">
           <NStatistic label="话术时间片" :value="sliceStatus?.transcript_slice_count || 0" />
-          <p class="mb-0 mt-8px text-12px text-gray-500">每 {{ (sliceStatus?.slice_seconds || 300) / 60 }} 分钟建立检索块</p>
+          <p class="mb-0 mt-8px text-12px text-gray-500">
+            每 {{ (sliceStatus?.slice_seconds || 300) / 60 }} 分钟建立检索块
+          </p>
         </NCard>
       </NGi>
       <NGi>
@@ -114,7 +132,9 @@ async function sendQuestion() {
       <NGi>
         <NCard :bordered="false" size="small" class="card-wrapper h-full">
           <NStatistic label="指标时间片" :value="sliceStatus?.metric_slice_count || 0" />
-          <p class="mb-0 mt-8px text-12px text-gray-500">未映射评论 {{ sliceStatus?.unmapped_comment_count || 0 }} 条</p>
+          <p class="mb-0 mt-8px text-12px text-gray-500">
+            未映射评论 {{ sliceStatus?.unmapped_comment_count || 0 }} 条
+          </p>
         </NCard>
       </NGi>
     </NGrid>
@@ -125,10 +145,13 @@ async function sendQuestion() {
         <NCard :bordered="false" class="card-wrapper">
           <template #header>
             <div class="flex w-full items-center justify-between gap-12px">
-              <NSpace><SvgIcon icon="mdi:book-open-variant" class="text-22px" /><span class="text-16px font-bold">{{ $t('page.knowledge.title') }}</span></NSpace>
-              <NButton type="primary" secondary :loading="syncing" @click="syncRecent">
+              <NSpace>
+                <SvgIcon icon="mdi:book-open-variant" class="text-22px" />
+                <span class="text-16px font-bold">{{ $t('page.knowledge.title') }}</span>
+              </NSpace>
+              <NButton secondary :loading="syncing" @click="syncRecent">
                 <template #icon><SvgIcon icon="mdi:database-sync-outline" /></template>
-                同步最近20场
+                刷新知识时间片
               </NButton>
             </div>
           </template>
@@ -151,15 +174,23 @@ async function sendQuestion() {
                       </NTag>
                     </div>
                     <p class="my-8px text-12px text-gray-500">{{ slice.session_title || '未命名直播' }}</p>
-                    <div class="grid grid-cols-3 gap-8px rounded-8px bg-gray-50 p-8px text-center text-12px dark:bg-dark-300">
+                    <div
+                      class="grid grid-cols-3 gap-8px rounded-8px bg-gray-50 p-8px text-center text-12px dark:bg-dark-300"
+                    >
                       <span>评论 {{ slice.comment_count }}</span>
                       <span>指标 {{ slice.metric_point_count }}</span>
                       <span>峰值在线 {{ slice.peak_online_count }}</span>
                     </div>
-                    <p v-if="slice.transcript_text" class="line-clamp-4 mb-0 mt-8px whitespace-pre-wrap text-13px leading-22px">
+                    <p
+                      v-if="slice.transcript_text"
+                      class="line-clamp-4 mb-0 mt-8px whitespace-pre-wrap text-13px leading-22px"
+                    >
                       {{ slice.transcript_text }}
                     </p>
-                    <p v-else-if="slice.comments_text" class="line-clamp-4 mb-0 mt-8px whitespace-pre-wrap text-13px leading-22px">
+                    <p
+                      v-else-if="slice.comments_text"
+                      class="line-clamp-4 mb-0 mt-8px whitespace-pre-wrap text-13px leading-22px"
+                    >
                       {{ slice.comments_text }}
                     </p>
                   </NCard>
@@ -198,8 +229,12 @@ async function sendQuestion() {
           <div ref="chatEndRef" class="h-400px overflow-y-auto mb-12px px-4px">
             <div v-if="messages.length === 0" class="flex flex-col items-center justify-center py-40px text-center">
               <SvgIcon icon="mdi:robot-outline" class="text-64px text-gray-300 dark:text-gray-600 mb-16px" />
-              <p class="text-14px text-gray-500 mb-8px">{{ $t('page.knowledge.chatPlaceholder') }}</p>
-              <p class="text-12px text-gray-400">{{ $t('page.knowledge.chatDesc') }}</p>
+              <p class="text-14px text-gray-500 mb-8px">可以询问已同步场次中的真实经营问题</p>
+              <p class="text-12px text-gray-400">回答会附带场次与时间片来源，不足时会明确说明</p>
+              <div class="mt-14px flex flex-wrap justify-center gap-8px">
+                <NButton size="tiny" secondary @click="question = '最近场次中用户最常问什么问题？'">常见问题</NButton>
+                <NButton size="tiny" secondary @click="question = '哪些话术带来的评论互动更高？'">高互动话术</NButton>
+              </div>
             </div>
             <div
               v-for="(msg, i) in messages"
@@ -218,7 +253,10 @@ async function sendQuestion() {
                 "
               >
                 {{ msg.content }}
-                <div v-if="msg.sources?.length" class="mt-10px border-t border-gray-200/60 pt-8px text-11px text-gray-500">
+                <div
+                  v-if="msg.sources?.length"
+                  class="mt-10px border-t border-gray-200/60 pt-8px text-11px text-gray-500"
+                >
                   <div class="mb-6px font-medium">引用来源</div>
                   <div
                     v-for="source in msg.sources"
@@ -241,7 +279,7 @@ async function sendQuestion() {
             <NInput
               v-model:value="question"
               type="text"
-              placeholder="输入问题..."
+              placeholder="输入关于已同步场次的问题"
               :disabled="chatting"
               @keyup.enter="sendQuestion"
             />
@@ -250,7 +288,7 @@ async function sendQuestion() {
         </NCard>
       </NGi>
     </NGrid>
-  </div>
+  </NSpace>
 </template>
 
 <style scoped></style>

@@ -2,6 +2,7 @@
 import { computed, h, onMounted, onUnmounted, ref } from 'vue';
 import { NButton, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 import {
   fetchCollectorStatus,
   fetchCollectorAccounts,
@@ -70,9 +71,7 @@ const errorLogCount = computed(
 const historicalErrorCount = computed(() => logs.value.filter(item => item.level === 'error').length);
 const hasAvailableAccount = computed(() => loggedInAccountCount.value > 0);
 const activeTasks = computed(() => tasks.value.filter(item => ['pending', 'running'].includes(item.status)));
-const currentCollectTask = computed(() =>
-  tasks.value.find(item => item.task_type === 'collect_all')
-);
+const currentCollectTask = computed(() => tasks.value.find(item => item.task_type === 'collect_all'));
 
 const getAccountRowKey = (row: Api.Douyin.CollectorAccount) => row.id;
 const getLogRowKey = (row: Api.Douyin.CollectorLog) => row.id;
@@ -772,7 +771,11 @@ const taskColumns = [
       const heartbeat = row.heartbeat_at ? formatLogTime(row.heartbeat_at) : '-';
       return h('div', { class: 'flex flex-col gap-4px text-11px' }, [
         h('span', { class: 'font-mono text-gray-600', title: row.trace_id || '' }, `Trace ${trace}`),
-        h('span', { class: 'text-gray-500' }, `心跳 ${heartbeat} · 执行 ${row.retry_count || 0}/${row.max_retries || 0}`)
+        h(
+          'span',
+          { class: 'text-gray-500' },
+          `心跳 ${heartbeat} · 执行 ${row.retry_count || 0}/${row.max_retries || 0}`
+        )
       ]);
     }
   },
@@ -808,7 +811,44 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-full flex flex-col gap-16px overflow-auto">
+  <div class="min-h-full flex flex-col gap-16px">
+    <BusinessPageHeader
+      title="数据采集中心"
+      description="使用已保存的 Cookie 与浏览器指纹发现全部主播，并持续补齐直播场次、评论、画像、分钟指标和直播流地址。"
+      icon="mdi:database-sync-outline"
+      :status="hasAvailableAccount ? `${loggedInAccountCount} 个账号可用` : '需要扫码登录'"
+      :status-type="hasAvailableAccount ? 'success' : 'error'"
+    >
+      <template #actions>
+        <NButton secondary @click="openAccounts">
+          <template #icon><SvgIcon icon="mdi:account-key-outline" /></template>
+          管理采集账号
+        </NButton>
+        <NButton type="primary" :disabled="!hasAvailableAccount" @click="openTasks">
+          <template #icon><SvgIcon icon="mdi:clipboard-text-clock-outline" /></template>
+          查看任务队列
+        </NButton>
+      </template>
+      <div class="flex flex-wrap items-center gap-x-18px gap-y-6px text-12px text-gray-500">
+        <span class="flex items-center gap-5px">
+          <SvgIcon icon="mdi:numeric-1-circle-outline" />
+          扫码并检查存活
+        </span>
+        <span class="flex items-center gap-5px">
+          <SvgIcon icon="mdi:numeric-2-circle-outline" />
+          选择刷新采集或实时监控
+        </span>
+        <span class="flex items-center gap-5px">
+          <SvgIcon icon="mdi:numeric-3-circle-outline" />
+          查看进度与失败日志
+        </span>
+        <span class="flex items-center gap-5px">
+          <SvgIcon icon="mdi:numeric-4-circle-outline" />
+          同步 DataEase
+        </span>
+      </div>
+    </BusinessPageHeader>
+
     <NSpin :show="loading">
       <NSpace vertical :size="16">
         <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">
@@ -914,6 +954,18 @@ onUnmounted(() => {
                 <NAlert type="info" :show-icon="true" :bordered="false">
                   重新发现账号下全部主播和直播场次，并补齐每场直播的主播资料、指标、评论和观众画像。可与实时监控同时开启，刷新期间由全量任务接管重复采集，完成后自动恢复监控。
                 </NAlert>
+                <NSteps
+                  size="small"
+                  :current="
+                    currentCollectTask?.status === 'running' ? 2 : currentCollectTask?.status === 'completed' ? 3 : 1
+                  "
+                  status="process"
+                  responsive="screen"
+                >
+                  <NStep title="账号就绪" description="Cookie 与指纹有效" />
+                  <NStep title="发现与补齐" description="主播、场次和详情" />
+                  <NStep title="同步完成" description="日志与 DataEase 更新" />
+                </NSteps>
                 <div
                   class="flex flex-wrap items-center justify-between gap-12px rounded-10px bg-gray-100 p-12px dark:bg-white/5"
                 >
@@ -986,10 +1038,23 @@ onUnmounted(() => {
                       </div>
                     </div>
                     <NTag
-                      :type="currentCollectTask.status === 'completed' ? 'success' : currentCollectTask.status === 'failed' ? 'error' : 'primary'"
+                      :type="
+                        currentCollectTask.status === 'completed'
+                          ? 'success'
+                          : currentCollectTask.status === 'failed'
+                            ? 'error'
+                            : 'primary'
+                      "
                       round
                     >
-                      任务 #{{ currentCollectTask.id }} · {{ currentCollectTask.status === 'completed' ? '已完成' : currentCollectTask.status === 'failed' ? '失败' : '运行中' }}
+                      任务 #{{ currentCollectTask.id }} ·
+                      {{
+                        currentCollectTask.status === 'completed'
+                          ? '已完成'
+                          : currentCollectTask.status === 'failed'
+                            ? '失败'
+                            : '运行中'
+                      }}
                     </NTag>
                   </div>
                   <NProgress
@@ -1005,7 +1070,13 @@ onUnmounted(() => {
                         / {{ currentCollectTask.progress_total }}
                       </template>
                     </span>
-                    <span>{{ currentCollectTask.status === 'running' ? '页面每 5 秒自动更新' : formatFullTime(currentCollectTask.completed_at) }}</span>
+                    <span>
+                      {{
+                        currentCollectTask.status === 'running'
+                          ? '页面每 5 秒自动更新'
+                          : formatFullTime(currentCollectTask.completed_at)
+                      }}
+                    </span>
                   </div>
                   <NGrid class="mt-12px" cols="2 s:4 l:8" responsive="screen" :x-gap="10" :y-gap="10">
                     <NGi>
@@ -1043,11 +1114,7 @@ onUnmounted(() => {
                     <NTag :type="collectAllResult.collected_rooms > 0 ? 'success' : 'warning'" round size="small">
                       {{ collectAllResult.collected_rooms }}/{{ collectAllResult.total_rooms }} 个房间成功
                     </NTag>
-                    <NTag
-                      :type="collectAllResult.dataease_failed_count ? 'warning' : 'success'"
-                      round
-                      size="small"
-                    >
+                    <NTag :type="collectAllResult.dataease_failed_count ? 'warning' : 'success'" round size="small">
                       DataEase 同步 {{ collectAllResult.dataease_synced_count || 0 }} 场
                     </NTag>
                     <NTag type="info" round size="small">
@@ -1101,6 +1168,9 @@ onUnmounted(() => {
                 </NSpace>
               </template>
               <div class="flex flex-col gap-16px">
+                <NAlert type="info" :bordered="false" show-icon>
+                  适合长期开启：周期检查主播是否开播，开播后持续采集直播间指标和评论；刷新采集运行时会自动协调重复任务。
+                </NAlert>
                 <div class="flex items-center justify-between gap-12px rounded-8px bg-gray-100 p-12px dark:bg-white/5">
                   <div>
                     <div class="font-600">
@@ -1144,7 +1214,11 @@ onUnmounted(() => {
         <NCard :bordered="false" class="card-wrapper" title="DataEase 分析数据集">
           <template #header-extra>
             <NTag :type="dataEaseStatus?.pending_session_count ? 'warning' : 'success'" round size="small">
-              {{ dataEaseStatus?.pending_session_count ? `待同步 ${dataEaseStatus.pending_session_count} 场` : '数据已同步' }}
+              {{
+                dataEaseStatus?.pending_session_count
+                  ? `待同步 ${dataEaseStatus.pending_session_count} 场`
+                  : '数据已同步'
+              }}
             </NTag>
           </template>
           <div class="flex flex-col gap-14px">
@@ -1164,7 +1238,8 @@ onUnmounted(() => {
             />
             <div class="flex flex-wrap items-center justify-between gap-12px">
               <span class="text-12px text-gray-500">
-                最后同步：{{ formatFullTime(dataEaseStatus?.last_synced_at || null) }}；DataEase 只读 MySQL 的 de_* 宽表。
+                最后同步：{{ formatFullTime(dataEaseStatus?.last_synced_at || null) }}；DataEase 只读 MySQL 的 de_*
+                宽表。
               </span>
               <NSpace>
                 <NButton

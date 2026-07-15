@@ -4,7 +4,9 @@ import { useEcharts } from '@/hooks/common/echarts';
 
 defineOptions({ name: 'LiveMetricsChart' });
 const props = defineProps<{ metrics: Api.Douyin.LiveMetric[] }>();
-const selected = defineModel<string[]>('selected', { default: ['online_count', 'enter_count', 'comment_count', 'clue_count'] });
+const selected = defineModel<string[]>('selected', {
+  default: ['online_count', 'enter_count', 'comment_count', 'clue_count']
+});
 
 const indicators = [
   { label: '在线人数', value: 'online_count', color: '#2080f0' },
@@ -28,7 +30,9 @@ const { domRef, updateOptions } = useEcharts(() => ({
 
 function refreshChart() {
   updateOptions(options => {
-    options.xAxis.data = props.metrics.map(item => new Date(item.metric_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
+    options.xAxis.data = props.metrics.map(item =>
+      new Date(item.metric_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+    );
     options.legend = { top: 4, data: activeIndicators.value.map(item => item.label) };
     options.series = activeIndicators.value.map(item => ({
       name: item.label,

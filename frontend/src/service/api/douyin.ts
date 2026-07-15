@@ -239,7 +239,9 @@ export function fetchKnowledgeItems(params?: { category?: string }) {
 
 /** 获取知识时间片覆盖状态 */
 export function fetchKnowledgeTimeSliceStatus() {
-  return backendRequest<Api.Douyin.KnowledgeTimeSliceStatus>({ url: `${API_PREFIX}/knowledge-base/time-slices/status` });
+  return backendRequest<Api.Douyin.KnowledgeTimeSliceStatus>({
+    url: `${API_PREFIX}/knowledge-base/time-slices/status`
+  });
 }
 
 /** 获取最近知识时间片 */

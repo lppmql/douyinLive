@@ -15,11 +15,20 @@ const groups = computed(() => {
     group.comments.push(comment);
     map.set(identity, group);
   });
-  return [...map.entries()].map(([identity, group]) => ({ identity, ...group })).sort((a, b) => b.comments.length - a.comments.length);
+  return [...map.entries()]
+    .map(([identity, group]) => ({ identity, ...group }))
+    .sort((a, b) => b.comments.length - a.comments.length);
 });
 const visibleGroups = computed(() => groups.value.slice((page.value - 1) * pageSize, page.value * pageSize));
-watch(() => props.comments, () => { page.value = 1; });
-function formatTime(value: string | null) { return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-'; }
+watch(
+  () => props.comments,
+  () => {
+    page.value = 1;
+  }
+);
+function formatTime(value: string | null) {
+  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
+}
 </script>
 
 <template>
@@ -33,7 +42,13 @@ function formatTime(value: string | null) { return value ? new Date(value).toLoc
       <NGi v-for="group in visibleGroups" :key="group.identity">
         <NCard size="small" class="comment-card h-full" :bordered="true">
           <template #header>
-            <div class="flex min-w-0 items-center gap-10px"><NAvatar round :size="34">{{ group.user.slice(0, 1) }}</NAvatar><div class="min-w-0"><div class="truncate font-600">{{ group.user }}</div><div class="text-12px text-gray-400">{{ group.comments.length }} 条评论</div></div></div>
+            <div class="flex min-w-0 items-center gap-10px">
+              <NAvatar round :size="34">{{ group.user.slice(0, 1) }}</NAvatar>
+              <div class="min-w-0">
+                <div class="truncate font-600">{{ group.user }}</div>
+                <div class="text-12px text-gray-400">{{ group.comments.length }} 条评论</div>
+              </div>
+            </div>
           </template>
           <NSpace vertical :size="10">
             <div v-for="comment in group.comments" :key="comment.id" class="comment-bubble rounded-8px p-10px">
@@ -44,12 +59,23 @@ function formatTime(value: string | null) { return value ? new Date(value).toLoc
         </NCard>
       </NGi>
     </NGrid>
-    <div v-if="groups.length > pageSize" class="mt-16px flex justify-end"><NPagination v-model:page="page" :page-size="pageSize" :item-count="groups.length" show-quick-jumper /></div>
+    <div v-if="groups.length > pageSize" class="mt-16px flex justify-end">
+      <NPagination v-model:page="page" :page-size="pageSize" :item-count="groups.length" show-quick-jumper />
+    </div>
   </div>
 </template>
 
 <style scoped>
-.comment-card { transition: border-color .2s ease, box-shadow .2s ease; }
-.comment-card:hover { border-color: rgba(32, 128, 240, .45); box-shadow: 0 8px 24px rgba(31, 34, 37, .07); }
-.comment-bubble { background: rgba(128, 128, 128, .08); }
+.comment-card {
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+.comment-card:hover {
+  border-color: rgba(32, 128, 240, 0.45);
+  box-shadow: 0 8px 24px rgba(31, 34, 37, 0.07);
+}
+.comment-bubble {
+  background: rgba(128, 128, 128, 0.08);
+}
 </style>

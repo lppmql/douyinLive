@@ -6,6 +6,7 @@ import { $t } from '@/locales';
 import { fetchLiveSessionPage } from '@/service/api/douyin';
 import { defaultTransform, useNaivePaginatedTable } from '@/hooks/common/table';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 
 defineOptions({
   name: 'LiveSessions'
@@ -245,6 +246,26 @@ async function handleReset() {
 
 <template>
   <NSpace vertical :size="16">
+    <BusinessPageHeader
+      title="直播场次"
+      description="查询全部真实直播记录，优先处理“待采集/待重试”的场次；表格中的短横线表示尚未采到，0 表示平台返回的真实零值。"
+      icon="mdi:video-vintage"
+      :status="`数据库共 ${mobilePagination.itemCount || 0} 场`"
+      status-type="info"
+    >
+      <template #actions>
+        <NButton type="primary" @click="router.push({ name: 'collector' })">
+          <template #icon><SvgIcon icon="mdi:database-sync-outline" /></template>
+          去补齐数据
+        </NButton>
+      </template>
+      <div class="flex flex-wrap gap-x-18px gap-y-6px text-12px text-gray-500">
+        <span>主播列与操作列固定</span>
+        <span>默认每页 10 场</span>
+        <span>表格内可上下、左右滚动</span>
+      </div>
+    </BusinessPageHeader>
+
     <NCard :bordered="false" class="card-wrapper">
       <template #header>
         <div class="flex flex-wrap items-center justify-between gap-12px">
@@ -256,13 +277,17 @@ async function handleReset() {
         </div>
       </template>
 
+      <NAlert class="mb-14px" type="info" :bordered="false" show-icon>
+        建议先筛选“详情待采集”或“待重试”。详情完整后，评论、分钟趋势和 AI 分析才具备可靠的数据基础。
+      </NAlert>
+
       <div class="mb-16px flex flex-wrap items-center justify-between gap-12px">
         <NSpace wrap>
           <NInput
             v-model:value="searchForm.anchorName"
             clearable
             placeholder="搜索主播昵称"
-            class="w-180px lt-sm:w-150px"
+            class="w-200px lt-sm:w-full"
             @keyup.enter="handleSearch"
           />
           <NSelect

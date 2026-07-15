@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 import { fetchCollectorStatus, fetchCollectorTasks, fetchMonitorStatus } from '@/service/api/douyin';
 
 defineOptions({ name: 'Home' });
@@ -54,28 +55,48 @@ onMounted(loadWorkspace);
 
 <template>
   <NSpace vertical :size="16">
-    <NCard :bordered="false" class="card-wrapper overflow-hidden">
-      <div class="relative flex flex-wrap items-center justify-between gap-20px">
-        <div class="relative z-1">
-          <NTag type="primary" round :bordered="false">直播经营工作台</NTag>
-          <h1 class="mb-0 mt-12px text-26px font-700 lt-sm:text-22px">欢迎回来，今天从真实数据开始</h1>
-          <p class="mb-0 mt-8px text-14px text-gray-500">
-            采集、监控、话术与分析状态集中管理，异常会在对应页面明确提示。
-          </p>
-        </div>
+    <BusinessPageHeader
+      title="欢迎回来，今天从真实数据开始"
+      description="先确认采集账号和运行任务，再进入场次、话术与分析页面。所有数量都来自当前数据库。"
+      icon="mdi:view-dashboard-outline"
+      eyebrow="直播经营工作台"
+      :status="failedTaskCount ? `${failedTaskCount} 个历史失败任务` : '系统状态已汇总'"
+      :status-type="failedTaskCount ? 'error' : 'success'"
+    >
+      <template #actions>
         <NButton type="primary" :loading="loading" @click="loadWorkspace">
           <template #icon><SvgIcon icon="mdi:refresh" /></template>
           刷新工作台
         </NButton>
-        <div
-          class="pointer-events-none absolute right--40px top--70px size-220px rounded-full bg-primary-100/60 blur-3xl dark:bg-primary-900/20"
-        ></div>
+      </template>
+      <div class="flex flex-wrap items-center gap-x-18px gap-y-6px text-12px text-gray-500">
+        <span class="flex items-center gap-5px">
+          <SvgIcon icon="mdi:numeric-1-circle-outline" />
+          扫码并检查账号
+        </span>
+        <span class="flex items-center gap-5px">
+          <SvgIcon icon="mdi:numeric-2-circle-outline" />
+          刷新或实时采集
+        </span>
+        <span class="flex items-center gap-5px">
+          <SvgIcon icon="mdi:numeric-3-circle-outline" />
+          核对场次详情
+        </span>
+        <span class="flex items-center gap-5px">
+          <SvgIcon icon="mdi:numeric-4-circle-outline" />
+          转写与 AI 分析
+        </span>
       </div>
-    </NCard>
+    </BusinessPageHeader>
 
     <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">
       <NGi>
-        <NCard :bordered="false" class="card-wrapper h-full" size="small">
+        <NCard
+          :bordered="false"
+          class="card-wrapper h-full cursor-pointer"
+          size="small"
+          @click="router.push({ name: 'collector' })"
+        >
           <NStatistic label="采集服务" :value="collectorStatus?.connected ? '正常' : '异常'" />
           <NTag class="mt-12px" :type="collectorStatus?.connected ? 'success' : 'error'" round size="small">
             {{ collectorStatus?.connected ? '服务连接正常' : '等待采集账号' }}
@@ -83,7 +104,12 @@ onMounted(loadWorkspace);
         </NCard>
       </NGi>
       <NGi>
-        <NCard :bordered="false" class="card-wrapper h-full" size="small">
+        <NCard
+          :bordered="false"
+          class="card-wrapper h-full cursor-pointer"
+          size="small"
+          @click="router.push({ name: 'collector' })"
+        >
           <NStatistic
             label="可用采集账号"
             :value="collectorStatus?.default_account?.login_status === 'logged_in' ? 1 : 0"
@@ -94,7 +120,12 @@ onMounted(loadWorkspace);
         </NCard>
       </NGi>
       <NGi>
-        <NCard :bordered="false" class="card-wrapper h-full" size="small">
+        <NCard
+          :bordered="false"
+          class="card-wrapper h-full cursor-pointer"
+          size="small"
+          @click="router.push({ name: 'collector' })"
+        >
           <NStatistic label="实时监控" :value="monitorStatus?.active_session_count || 0">
             <template #suffix>场</template>
           </NStatistic>
@@ -104,7 +135,12 @@ onMounted(loadWorkspace);
         </NCard>
       </NGi>
       <NGi>
-        <NCard :bordered="false" class="card-wrapper h-full" size="small">
+        <NCard
+          :bordered="false"
+          class="card-wrapper h-full cursor-pointer"
+          size="small"
+          @click="router.push({ name: 'collector' })"
+        >
           <NStatistic label="运行任务" :value="runningTaskCount">
             <template #suffix>个</template>
           </NStatistic>

@@ -1,6 +1,6 @@
 const local: App.I18n.Schema = {
   system: {
-    title: '抖音留资直播分析系统',
+    title: 'Douyin Live Operations',
     updateTitle: 'System Version Update Notification',
     updateContent: 'A new version of the system has been detected. Do you want to refresh the page immediately?',
     updateConfirm: 'Refresh immediately',
@@ -288,8 +288,8 @@ const local: App.I18n.Schema = {
       }
     },
     dashboard: {
-      placeholder: 'DataEase Dashboard will be embedded here in Phase 6',
-      placeholderDesc: 'Then it will display real-time live room data, conversion funnel, user profile charts, etc.',
+      placeholder: 'DataEase dashboard is not configured',
+      placeholderDesc: 'Configure the URL to display live metrics, conversion funnels and audience profiles.',
       todayLeads: 'Today Leads',
       onlineUsers: 'Online Users',
       validLeadRate: 'Valid Lead Rate',
@@ -431,8 +431,8 @@ const local: App.I18n.Schema = {
       summary: 'Summary',
       source: 'Source',
       time: 'Date',
-      chatPlaceholder: 'Chat function will be available in Phase 7',
-      chatDesc: 'You can ask AI questions and get answers based on the knowledge base'
+      chatPlaceholder: 'Ask about synced live session data',
+      chatDesc: 'Ask AI questions and receive answers with traceable knowledge sources'
     },
     home: {
       branchDesc:

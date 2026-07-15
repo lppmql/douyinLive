@@ -2,6 +2,7 @@
 import { ref, onMounted } from 'vue';
 import { useMessage } from 'naive-ui';
 import { $t } from '@/locales';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 import { fetchLiveSessions, scoreSession, optimizeSession } from '@/service/api/douyin';
 
 defineOptions({ name: 'Analysis' });
@@ -10,7 +11,7 @@ const message = useMessage();
 
 /* ---------- 场次选择 ---------- */
 interface SessionOption {
-  id: number;
+  value: number;
   label: string;
 }
 
@@ -22,10 +23,10 @@ onMounted(async () => {
     const res = await fetchLiveSessions();
     const list = (res as unknown as { data: { id: number; session_title: string }[] }).data || [];
     sessions.value = list.map((s: { id: number; session_title: string }) => ({
-      id: s.id,
+      value: s.id,
       label: s.session_title ? `#${s.id} ${s.session_title}` : `#${s.id}`
     }));
-    if (sessions.value.length) selectedSession.value = sessions.value[0].id;
+    if (sessions.value.length) selectedSession.value = sessions.value[0].value;
   } catch {
     message.error('直播场次加载失败');
   }
@@ -62,6 +63,7 @@ async function runOptimize() {
     const res = await optimizeSession(selectedSession.value);
     const data = (res as unknown as { data: { result: { suggestions?: string[]; summary?: string } } }).data;
     optimizeResult.value = data.result;
+    message.success('优化建议生成完成');
   } catch {
     message.error('优化建议生成失败');
   }
@@ -71,6 +73,20 @@ async function runOptimize() {
 
 <template>
   <NSpace vertical :size="16">
+    <BusinessPageHeader
+      title="AI 经营分析"
+      description="基于已采集的真实场次、评论和 ASR 话术生成评分与优化建议，不会为缺失数据编造结论。"
+      icon="mdi:chart-box-outline"
+      :status="selectedSession ? `已选择场次 #${selectedSession}` : '请先选择场次'"
+      :status-type="selectedSession ? 'success' : 'warning'"
+    >
+      <div class="flex flex-wrap gap-x-18px gap-y-6px text-12px text-gray-500">
+        <span>1. 选择已有话术的场次</span>
+        <span>2. 运行话术评分</span>
+        <span>3. 生成可执行优化建议</span>
+      </div>
+    </BusinessPageHeader>
+
     <!-- 控制栏 -->
     <NCard :bordered="false" class="card-wrapper" size="small">
       <NSpace align="center" wrap>
@@ -78,12 +94,23 @@ async function runOptimize() {
           v-model:value="selectedSession"
           placeholder="选择直播场次"
           :options="sessions"
-          style="width: 280px"
+          class="w-420px max-w-full"
           clearable
         />
         <NButton type="primary" :loading="loadingScore" @click="runScore">话术评分</NButton>
         <NButton :loading="loadingOptimize" @click="runOptimize">优化建议</NButton>
       </NSpace>
+    </NCard>
+
+    <NCard v-if="!scoreResult && !optimizeResult" :bordered="false" class="card-wrapper">
+      <NEmpty description="选择直播场次后运行分析">
+        <template #icon><SvgIcon icon="mdi:robot-outline" class="text-58px text-primary" /></template>
+        <template #extra>
+          <div class="max-w-520px text-center text-13px leading-21px text-gray-500">
+            如果按钮执行失败，请先进入场次详情确认已有评论、分钟指标和 ASR 话术；缺失数据会直接提示，不会生成虚假结果。
+          </div>
+        </template>
+      </NEmpty>
     </NCard>
 
     <!-- 评分卡片 -->

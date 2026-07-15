@@ -16,6 +16,7 @@ import {
 import { fetchUserList, fetchCreateUser, fetchUpdateUser, fetchDeleteUser, type UserRecord } from '@/service/api/user';
 import { defaultTransform, useNaivePaginatedTable } from '@/hooks/common/table';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 
 defineOptions({ name: 'UserManagement' });
 
@@ -277,85 +278,99 @@ function handleDelete(row: UserRecord) {
 </script>
 
 <template>
-  <NCard :bordered="false" class="card-wrapper h-full" title="用户管理">
-    <div class="mb-16px flex flex-wrap items-center justify-between gap-12px">
-      <NSpace align="center" wrap>
-        <NInput
-          v-model:value="searchUsername"
-          placeholder="搜索用户名"
-          clearable
-          class="w-200px lt-sm:w-160px"
-          @keyup.enter="handleSearch"
-        />
-        <NButton type="primary" @click="handleSearch">搜索</NButton>
-        <NButton @click="handleResetSearch">重置</NButton>
-      </NSpace>
-      <TableHeaderOperation v-model:columns="columnChecks" :loading="loading" @refresh="getData">
-        <template #default>
-          <NButton type="primary" size="small" @click="openCreate">
-            <template #icon><SvgIcon icon="mdi:account-plus-outline" /></template>
-            新增用户
-          </NButton>
-        </template>
-      </TableHeaderOperation>
-    </div>
-
-    <NDataTable
-      :loading="loading"
-      :columns="columns"
-      :data="users"
-      :pagination="mobilePagination"
-      :row-key="(row: UserRecord) => row.id"
-      :scroll-x="scrollX"
-      remote
-      size="small"
-      striped
-      :bordered="false"
-      class="min-h-0"
-    />
-
-    <!-- 新增/编辑对话框 -->
-    <NModal
-      v-model:show="modalShow"
-      :title="modalTitle"
-      :mask-closable="false"
-      preset="card"
-      class="w-520px max-w-[calc(100vw-32px)]"
+  <NSpace vertical :size="16">
+    <BusinessPageHeader
+      title="系统用户管理"
+      description="维护中台登录账号、角色和启停状态。管理员账号受保护；不确定是否仍需使用时，建议先停用而不是删除。"
+      icon="mdi:account-group-outline"
+      :status="`共 ${users.length} 个当前页用户`"
+      status-type="info"
     >
-      <NForm label-placement="left" label-width="80px">
-        <NFormItem label="用户名" required>
-          <NInput v-model:value="formData.username" placeholder="请输入用户名" />
-        </NFormItem>
-        <NFormItem :label="editingId ? '新密码' : '密码'" :required="!editingId">
-          <NInput
-            v-model:value="formData.password"
-            type="password"
-            show-password-on="click"
-            :placeholder="editingId ? '留空则不修改' : '请输入密码'"
-          />
-        </NFormItem>
-        <NFormItem label="昵称">
-          <NInput v-model:value="formData.nickname" placeholder="请输入昵称" />
-        </NFormItem>
-        <NFormItem label="邮箱">
-          <NInput v-model:value="formData.email" placeholder="请输入邮箱" />
-        </NFormItem>
-        <NFormItem label="手机号">
-          <NInput v-model:value="formData.phone" placeholder="请输入手机号" />
-        </NFormItem>
-        <NFormItem label="角色">
-          <NSelect v-model:value="formData.roles" :options="roleOptions" multiple />
-        </NFormItem>
-        <NFormItem label="状态">
-          <NSelect v-model:value="formData.status" :options="statusOptions" />
-        </NFormItem>
-      </NForm>
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="modalShow = false">取消</NButton>
-          <NButton type="primary" :loading="saving" @click="handleSave">保存</NButton>
-        </NSpace>
+      <template #actions>
+        <NButton type="primary" @click="openCreate">
+          <template #icon><SvgIcon icon="mdi:account-plus-outline" /></template>
+          新增用户
+        </NButton>
       </template>
-    </NModal>
-  </NCard>
+    </BusinessPageHeader>
+
+    <NCard :bordered="false" class="card-wrapper h-full" title="用户列表">
+      <div class="mb-16px flex flex-wrap items-center justify-between gap-12px">
+        <NSpace align="center" wrap>
+          <NInput
+            v-model:value="searchUsername"
+            placeholder="搜索用户名"
+            clearable
+            class="w-200px lt-sm:w-160px"
+            @keyup.enter="handleSearch"
+          />
+          <NButton type="primary" @click="handleSearch">搜索</NButton>
+          <NButton @click="handleResetSearch">重置</NButton>
+        </NSpace>
+        <TableHeaderOperation v-model:columns="columnChecks" :loading="loading" @refresh="getData">
+          <template #default>
+            <NTag type="info" round size="small">超级管理员不可删除</NTag>
+          </template>
+        </TableHeaderOperation>
+      </div>
+
+      <NDataTable
+        :loading="loading"
+        :columns="columns"
+        :data="users"
+        :pagination="mobilePagination"
+        :row-key="(row: UserRecord) => row.id"
+        :scroll-x="scrollX"
+        remote
+        size="small"
+        striped
+        :bordered="false"
+        class="min-h-0"
+      />
+
+      <!-- 新增/编辑对话框 -->
+      <NModal
+        v-model:show="modalShow"
+        :title="modalTitle"
+        :mask-closable="false"
+        preset="card"
+        class="w-520px max-w-[calc(100vw-32px)]"
+      >
+        <NForm label-placement="left" label-width="80px">
+          <NFormItem label="用户名" required>
+            <NInput v-model:value="formData.username" placeholder="请输入用户名" />
+          </NFormItem>
+          <NFormItem :label="editingId ? '新密码' : '密码'" :required="!editingId">
+            <NInput
+              v-model:value="formData.password"
+              type="password"
+              show-password-on="click"
+              :placeholder="editingId ? '留空则不修改' : '请输入密码'"
+            />
+          </NFormItem>
+          <NFormItem label="昵称">
+            <NInput v-model:value="formData.nickname" placeholder="请输入昵称" />
+          </NFormItem>
+          <NFormItem label="邮箱">
+            <NInput v-model:value="formData.email" placeholder="请输入邮箱" />
+          </NFormItem>
+          <NFormItem label="手机号">
+            <NInput v-model:value="formData.phone" placeholder="请输入手机号" />
+          </NFormItem>
+          <NFormItem label="角色">
+            <NSelect v-model:value="formData.roles" :options="roleOptions" multiple />
+          </NFormItem>
+          <NFormItem label="状态">
+            <NSelect v-model:value="formData.status" :options="statusOptions" />
+          </NFormItem>
+        </NForm>
+        <template #footer>
+          <NSpace justify="end">
+            <NButton @click="modalShow = false">取消</NButton>
+            <NButton type="primary" :loading="saving" @click="handleSave">保存</NButton>
+          </NSpace>
+        </template>
+      </NModal>
+    </NCard>
+  </NSpace>
 </template>
