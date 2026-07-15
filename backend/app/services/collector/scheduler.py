@@ -3,6 +3,7 @@
 
 管理所有定时任务的注册、启动、停止。
 """
+import asyncio
 from typing import Optional
 from datetime import datetime
 
@@ -16,6 +17,12 @@ from app.core.database import SessionLocal
 from app.core.logger import logger
 from app.models.scraper_tasks import ScraperTask
 from app.services.collector.browser import browser_manager
+from app.services.tasks.runtime import (
+    current_worker_id,
+    ensure_task_identity,
+    publish_task_event,
+    touch_task,
+)
 
 
 class SchedulerManager:
@@ -32,6 +39,7 @@ class SchedulerManager:
             cls._instance._collector_factory = None
             cls._instance._last_error = None
             cls._instance._paused_for_collection = False
+            cls._instance._active_browser_jobs = 0
         return cls._instance
 
     def set_collector_factory(self, factory):
@@ -150,6 +158,17 @@ class SchedulerManager:
         if job:
             job.modify(next_run_time=datetime.now())
 
+    async def wait_for_collection_slot(self, timeout_seconds: int = 90) -> None:
+        """保持监控开启，停止接新任务并等待在途浏览器页面安全结束。"""
+        self._paused_for_collection = True
+        deadline = asyncio.get_running_loop().time() + max(1, timeout_seconds)
+        while self._active_browser_jobs > 0:
+            if asyncio.get_running_loop().time() >= deadline:
+                raise RuntimeError(
+                    f"等待 {self._active_browser_jobs} 个实时浏览器任务结束超时，请稍后重试"
+                )
+            await asyncio.sleep(0.25)
+
     @staticmethod
     def _has_running_full_collection(db: Session) -> bool:
         return db.query(ScraperTask.id).filter(
@@ -165,6 +184,7 @@ class SchedulerManager:
         from app.services.collector.monitor import MockLiveDetector
 
         db = SessionLocal()
+        monitor_browser_started = False
         try:
             if self._has_running_full_collection(db):
                 if not self._paused_for_collection:
@@ -173,10 +193,12 @@ class SchedulerManager:
                 self._last_error = None
                 return
             self._paused_for_collection = False
+            self._active_browser_jobs += 1
+            monitor_browser_started = True
             rooms = db.query(LiveRoom).filter(LiveRoom.status == True).all()
             self._last_error = None
             for room in rooms:
-                if not settings.MONITOR_MOCK_MODE:
+                if not settings.monitor_mock_enabled:
                     await self._monitor_enterprise_room(db, room)
                     continue
 
@@ -204,6 +226,8 @@ class SchedulerManager:
             self._last_error = str(e)[:500]
             logger.error(f"monitor_check 异常: {e}")
         finally:
+            if monitor_browser_started:
+                self._active_browser_jobs = max(0, self._active_browser_jobs - 1)
             db.close()
 
     async def _monitor_enterprise_room(self, db: Session, room):
@@ -292,21 +316,28 @@ class SchedulerManager:
         """统一采集包装器 — 异常处理 + 任务记录"""
         db = SessionLocal()
         task = None
+        browser_job_started = False
         try:
             if self._has_running_full_collection(db):
                 if not self._paused_for_collection:
                     logger.info("刷新数据采集已接管实时数据，本轮 %s 任务自动跳过", job_type)
                 self._paused_for_collection = True
                 return
+            self._active_browser_jobs += 1
+            browser_job_started = True
             task = ScraperTask(
                 session_id=session_id,
                 task_type=job_type,
                 status="running",
                 started_at=datetime.utcnow(),
             )
+            ensure_task_identity(task, f"scraper-{job_type}")
+            task.retry_count = 1
+            touch_task(task, current_worker_id("monitor"))
             db.add(task)
             db.commit()
             db.refresh(task)
+            publish_task_event("scraper", task, "started", {"session_id": session_id, "task_type": job_type})
 
             context, is_valid, message = await browser_manager.get_logged_in_context()
             if not is_valid or not context:
@@ -367,14 +398,26 @@ class SchedulerManager:
 
             task.status = "completed"
             task.completed_at = datetime.utcnow()
+            touch_task(task)
             db.commit()
+            publish_task_event("scraper", task, "completed", {"session_id": session_id, "task_type": job_type})
         except Exception as e:
             logger.error(f"采集失败 [{job_type}/{session_id}]: {e}")
             if task:
                 task.status = "failed"
                 task.error_message = str(e)[:200]
+                task.completed_at = datetime.utcnow()
+                touch_task(task)
                 db.commit()
+                publish_task_event(
+                    "scraper",
+                    task,
+                    "failed",
+                    {"session_id": session_id, "task_type": job_type, "error": task.error_message},
+                )
         finally:
+            if browser_job_started:
+                self._active_browser_jobs = max(0, self._active_browser_jobs - 1)
             db.close()
 
     async def _cleanup_expired(self):

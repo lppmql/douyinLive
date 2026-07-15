@@ -1,13 +1,14 @@
 """Phase 3: 采集状态 & 扫码登录 API"""
 import asyncio
 import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_tasks import ScraperTask
 from app.models.scraper_logs import ScraperLog
@@ -29,9 +30,44 @@ from app.services.collector.browser import STORAGE_DIR
 from app.services.collector.manual_collect import collect_all
 from app.services.collector.scheduler import scheduler_manager
 from app.services.asr.control import get_asr_runtime_status, start_asr_runtime, stop_asr_runtime
+from app.services.tasks.runtime import (
+    current_worker_id,
+    ensure_task_identity,
+    publish_task_event,
+    touch_task,
+)
 from app.models.asr_tasks import AsrTask
 
 router = APIRouter(prefix="/collector", tags=["数据采集"])
+
+
+def _collector_heartbeat_loop(task_id: int, stop_event: threading.Event) -> None:
+    """长任务独立心跳，避免页面等待阶段被误判为卡死。"""
+    while not stop_event.wait(30):
+        heartbeat_db = SessionLocal()
+        try:
+            heartbeat_db.query(ScraperTask).filter(
+                ScraperTask.id == task_id,
+                ScraperTask.status == "running",
+            ).update({ScraperTask.heartbeat_at: datetime.utcnow()}, synchronize_session=False)
+            heartbeat_db.commit()
+        except Exception:
+            heartbeat_db.rollback()
+        finally:
+            heartbeat_db.close()
+
+
+def _collection_succeeded(result: dict) -> bool:
+    """企业主播、场次或详情任一真实链路成功，都不应被入口房间失败覆盖。"""
+    return any(
+        int(result.get(key) or 0) > 0
+        for key in (
+            "collected_rooms",
+            "enterprise_anchor_count",
+            "enterprise_session_discovered_count",
+            "history_detail_synced_count",
+        )
+    )
 
 
 # ===== 采集器状态 =====
@@ -200,10 +236,14 @@ async def set_asr_control(enabled: bool, db: Session = Depends(get_db)):
 async def start_login(db: Session = Depends(get_db)):
     """启动扫码登录（后台打开有头浏览器）"""
     task = ScraperTask(task_type="login", status="running", started_at=datetime.utcnow())
+    ensure_task_identity(task, "scraper-login")
+    task.retry_count = 1
+    touch_task(task, current_worker_id("collector-api"))
     # 先 flush 获取 ID
     db.add(task)
     db.commit()
     db.refresh(task)
+    publish_task_event("scraper", task, "started", {"task_type": "login"})
 
     # 在后台启动浏览器扫码
     await browser_manager.start_qr_login(task.id, f"采集账号_{task.id}")
@@ -264,9 +304,14 @@ async def re_login(account_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "账号不存在")
 
     task = ScraperTask(task_type="login", status="running")
+    ensure_task_identity(task, "scraper-relogin")
+    task.retry_count = 1
+    task.started_at = datetime.utcnow()
+    touch_task(task, current_worker_id("collector-api"))
     db.add(task)
     db.commit()
     db.refresh(task)
+    publish_task_event("scraper", task, "started", {"task_type": "login", "account_id": account_id})
 
     await browser_manager.start_qr_login(
         task.id,
@@ -330,8 +375,21 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         status="running",
         started_at=datetime.utcnow(),
     )
+    ensure_task_identity(task, "scraper-collect-all")
+    task.retry_count = 1
+    touch_task(task, current_worker_id("collector-api"))
     db.add(task)
     db.commit()
+    db.refresh(task)
+    publish_task_event("scraper", task, "started", {"task_type": "collect_all"})
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=_collector_heartbeat_loop,
+        args=(task.id, heartbeat_stop),
+        name=f"collector-heartbeat-{task.id}",
+        daemon=True,
+    )
+    heartbeat_thread.start()
 
     def update_progress(stage, percent, current, total, message, details=None):
         details = details or {}
@@ -340,6 +398,7 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         task.progress_current = max(0, int(current or 0))
         task.progress_total = max(0, int(total or 0))
         task.progress_message = str(message)[:500]
+        touch_task(task)
         anchor_count = details.get("anchor_count", details.get("enterprise_anchor_count"))
         session_count = details.get(
             "discovered_session_count",
@@ -385,10 +444,23 @@ async def manual_collect_all(db: Session = Depends(get_db)):
             )
         )
         db.commit()
+        publish_task_event(
+            "scraper",
+            task,
+            "progress",
+            {
+                "stage": stage,
+                "percent": task.progress_percent,
+                "current": task.progress_current,
+                "total": task.progress_total,
+                "message": task.progress_message,
+            },
+        )
 
     try:
+        await scheduler_manager.wait_for_collection_slot()
         result = await collect_all(db, task_id=task.id, progress_callback=update_progress)
-        task.status = "completed" if result.get("collected_rooms", 0) else "failed"
+        task.status = "completed" if _collection_succeeded(result) else "failed"
         if task.status == "failed":
             task.error_message = result.get("message") or "未采集到房间数据"
             task.progress_message = task.error_message
@@ -416,8 +488,22 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         )
         raise
     finally:
+        heartbeat_stop.set()
+        await asyncio.to_thread(heartbeat_thread.join, 5)
         task.completed_at = datetime.utcnow()
+        touch_task(task)
         if task.status == "completed":
             task.progress_percent = 100
         db.commit()
+        publish_task_event(
+            "scraper",
+            task,
+            "completed" if task.status == "completed" else "failed",
+            {
+                "stage": task.progress_stage,
+                "message": task.progress_message or task.error_message or "",
+                "anchor_count": task.collected_anchor_count,
+                "session_count": task.collected_session_count,
+            },
+        )
         scheduler_manager.resume_after_collection()

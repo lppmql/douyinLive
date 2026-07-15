@@ -763,6 +763,19 @@ const taskColumns = [
       return formatFullTime(row.started_at);
     }
   },
+  {
+    title: '执行信息',
+    key: 'trace_id',
+    width: 210,
+    render(row: Api.Douyin.CollectorTask) {
+      const trace = row.trace_id ? row.trace_id.slice(0, 12) : '-';
+      const heartbeat = row.heartbeat_at ? formatLogTime(row.heartbeat_at) : '-';
+      return h('div', { class: 'flex flex-col gap-4px text-11px' }, [
+        h('span', { class: 'font-mono text-gray-600', title: row.trace_id || '' }, `Trace ${trace}`),
+        h('span', { class: 'text-gray-500' }, `心跳 ${heartbeat} · 执行 ${row.retry_count || 0}/${row.max_retries || 0}`)
+      ]);
+    }
+  },
   { title: '失败原因', key: 'error_message', minWidth: 220, ellipsis: { tooltip: true } },
   {
     title: '操作',

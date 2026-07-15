@@ -6,8 +6,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.asr_tasks import AsrTask
+from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.live_sessions import LiveSession
 from app.models.stream_sources import StreamSource
+from app.services.tasks.runtime import ensure_task_identity
 
 
 def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrTask, bool]:
@@ -33,14 +35,32 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
 
     existing = (
         db.query(AsrTask)
-        .filter(AsrTask.session_id == session.id, AsrTask.status.in_(["queued", "processing", "completed"]))
+        .filter(AsrTask.session_id == session.id)
         .order_by(AsrTask.created_at.desc())
         .first()
     )
     if existing:
+        if existing.status == "failed" and (existing.retry_count or 0) < (existing.max_retries or 3):
+            failed_chunks = db.query(AsrAudioChunk).filter(
+                AsrAudioChunk.task_id == existing.id,
+                AsrAudioChunk.status == "failed",
+            ).all()
+            for chunk in failed_chunks:
+                chunk.status = "pending"
+                chunk.retry_count = 0
+                chunk.error_message = None
+                chunk.completed_at = None
+            existing.stream_id = stream.id
+            existing.status = "queued"
+            existing.error_message = None
+            existing.completed_at = None
+            ensure_task_identity(existing, "asr", f"asr:session:{session.id}")
+            db.flush()
+            return existing, True
         return existing, False
 
     task = AsrTask(session_id=session.id, stream_id=stream.id, status="queued", task_type="offline")
+    ensure_task_identity(task, "asr", f"asr:session:{session.id}")
     db.add(task)
     db.flush()
     return task, True

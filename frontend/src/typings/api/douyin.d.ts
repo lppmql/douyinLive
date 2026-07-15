@@ -187,6 +187,13 @@ declare namespace Api {
       started_at: string | null;
       completed_at: string | null;
       error_message: string | null;
+      idempotency_key: string | null;
+      trace_id: string | null;
+      worker_id: string | null;
+      heartbeat_at: string | null;
+      retry_count: number;
+      max_retries: number;
+      priority: number;
       progress_percent: number;
       progress_current: number;
       progress_total: number;

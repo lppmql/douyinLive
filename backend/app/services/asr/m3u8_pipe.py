@@ -29,9 +29,19 @@ class M3u8Pipe:
             await funasr.send(frame)
     """
 
-    def __init__(self, m3u8_url: str, headers: Optional[dict] = None):
+    def __init__(
+        self,
+        m3u8_url: str,
+        headers: Optional[dict] = None,
+        start_seconds: float = 0,
+        duration_seconds: float | None = None,
+    ):
         self.m3u8_url = m3u8_url
         self.headers = headers or {}
+        self.start_seconds = max(0.0, float(start_seconds or 0))
+        self.duration_seconds = (
+            max(0.1, float(duration_seconds)) if duration_seconds is not None else None
+        )
         self._process: Optional[asyncio.subprocess.Process] = None
 
     def _build_cmd(self) -> list[str]:
@@ -43,9 +53,16 @@ class M3u8Pipe:
             if key.lower() in ("referer", "user-agent", "origin"):
                 cmd.extend(["-headers", f"{key}: {val}\r\n"])
 
+        if self.start_seconds > 0:
+            cmd.extend(["-ss", f"{self.start_seconds:.3f}"])
+
         cmd.extend([
             "-protocol_whitelist", "https,http,tcp,tls,crypto,file,pipe",
             "-i", self.m3u8_url,
+        ])
+        if self.duration_seconds is not None:
+            cmd.extend(["-t", f"{self.duration_seconds:.3f}"])
+        cmd.extend([
             "-vn",                     # 不要视频
             "-threads", "1",           # 限制解码线程，避免与 FunASR 抢占全部 CPU
             "-ac", "1",                # 单声道

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.api.v1.monitor import start_monitor
+from app.api.v1.collector import _collection_succeeded
 from app.services.collector.scheduler import scheduler_manager
 
 
@@ -81,3 +82,30 @@ def test_monitor_can_start_while_full_collection_is_running():
     assert "全量采集接管" in response.message
     start.assert_awaited_once()
     login_check.assert_not_awaited()
+
+
+def test_collection_waits_for_inflight_monitor_browser_job():
+    async def scenario():
+        scheduler_manager._active_browser_jobs = 1
+
+        async def finish_job():
+            await asyncio.sleep(0.05)
+            scheduler_manager._active_browser_jobs = 0
+
+        release = asyncio.create_task(finish_job())
+        await scheduler_manager.wait_for_collection_slot(timeout_seconds=1)
+        await release
+
+    try:
+        asyncio.run(scenario())
+        assert scheduler_manager.paused_for_collection is True
+    finally:
+        scheduler_manager._active_browser_jobs = 0
+        scheduler_manager._paused_for_collection = False
+
+
+def test_enterprise_discovery_counts_as_success_when_root_room_page_warns():
+    assert _collection_succeeded({"collected_rooms": 0, "enterprise_anchor_count": 9}) is True
+    assert _collection_succeeded({"collected_rooms": 0, "enterprise_session_discovered_count": 1022}) is True
+    assert _collection_succeeded({"collected_rooms": 0, "history_detail_synced_count": 20}) is True
+    assert _collection_succeeded({"collected_rooms": 0}) is False

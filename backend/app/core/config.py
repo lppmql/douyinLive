@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "抖音留资直播分析系统"
     APP_VERSION: str = "0.1.0"
     DEBUG: bool = True
+    ALLOW_SYNTHETIC_DATA: bool = False
 
     # 数据库
     DB_HOST: str = "localhost"
@@ -27,6 +28,9 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
+    TASK_EVENT_STREAM: str = "douyin:task-events"
+    TASK_EVENT_STREAM_MAXLEN: int = 10000
+    TASK_HEARTBEAT_TIMEOUT_SECONDS: int = 180
 
     # DeepSeek
     DEEPSEEK_API_KEY: str = ""
@@ -48,6 +52,8 @@ class Settings(BaseSettings):
     ASR_ENGINE_READY_TIMEOUT_SECONDS: int = 300
     ASR_TASK_TIMEOUT_SECONDS: int = 600
     ASR_NO_AUDIO_TIMEOUT_SECONDS: int = 30
+    ASR_CHUNK_SECONDS: int = 300
+    ASR_CHUNK_MAX_RETRIES: int = 2
     ASR_ALLOW_MOCK: bool = False
 
     # Playwright / 采集
@@ -73,5 +79,18 @@ class Settings(BaseSettings):
         if self.DATABASE_URL:
             return self.DATABASE_URL
         return f"mysql+pymysql://{self.DB_USER}:{self.DB_PASSWORD}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}?charset=utf8mb4"
+
+    @property
+    def synthetic_data_enabled(self) -> bool:
+        """模拟数据必须经过全局、调试模式和具体功能三重开关。"""
+        return self.DEBUG and self.ALLOW_SYNTHETIC_DATA
+
+    @property
+    def monitor_mock_enabled(self) -> bool:
+        return self.synthetic_data_enabled and self.MONITOR_MOCK_MODE
+
+    @property
+    def asr_mock_enabled(self) -> bool:
+        return self.synthetic_data_enabled and self.ASR_ALLOW_MOCK
 
 settings = Settings()

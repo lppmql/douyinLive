@@ -347,6 +347,8 @@ def _is_context_closed_message(value: Any) -> bool:
         "browsercontext.new_page",
         "browser.new_context",
         "浏览器进程意外退出",
+        "handler is closed",
+        "transport closed",
     ))
 
 
@@ -1523,7 +1525,11 @@ async def discover_enterprise_live_sessions(context: BrowserContext, room: LiveR
                 })
         return live_sessions
     finally:
-        await page.close()
+        try:
+            await page.close()
+        except Exception as exc:
+            if not _is_context_closed_message(exc):
+                logger.debug("监控发现页面关闭失败: %s", exc)
 
 
 def _first_value(data: dict, *keys: str):
@@ -2024,7 +2030,12 @@ def _parse_watch_profiles(raw_rows) -> list[dict]:
 def _is_context_closed_error(exc: Exception) -> bool:
     """识别 Playwright 上下文/页面已关闭错误。"""
     text = str(exc).lower()
-    return "target page, context or browser has been closed" in text or "browsercontext.new_page" in text
+    return (
+        "target page, context or browser has been closed" in text
+        or "browsercontext.new_page" in text
+        or "handler is closed" in text
+        or "transport closed" in text
+    )
 
 
 async def _reveal_session_anchor(page) -> dict:
@@ -2068,7 +2079,11 @@ async def _scrape_stream_url(context: BrowserContext, room_id: str) -> Optional[
     except Exception:
         return None
     finally:
-        await page.close()
+        try:
+            await page.close()
+        except Exception as exc:
+            if not _is_context_closed_message(exc):
+                logger.debug("流地址页面关闭失败: %s", exc)
 
 
 # ==================== 数据入库 ====================

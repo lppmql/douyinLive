@@ -15,6 +15,7 @@ from app.models.scraper_tasks import ScraperTask
 from app.models.scraper_logs import ScraperLog
 from app.models.stream_sources import StreamSource
 from app.models.asr_tasks import AsrTask
+from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.user import User
 
 __all__ = [
@@ -35,5 +36,6 @@ __all__ = [
     "ScraperLog",
     "StreamSource",
     "AsrTask",
+    "AsrAudioChunk",
     "User",
 ]

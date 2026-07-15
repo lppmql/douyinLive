@@ -9,6 +9,8 @@ class ScraperTask(Base, TimestampMixin):
     __tablename__ = "scraper_tasks"
     __table_args__ = (
         Index("idx_scraper_tasks_status_type", "status", "task_type", "id"),
+        Index("idx_scraper_tasks_idempotency", "idempotency_key", unique=True),
+        Index("idx_scraper_tasks_trace", "trace_id"),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="任务ID")
@@ -19,6 +21,13 @@ class ScraperTask(Base, TimestampMixin):
     started_at = Column(DateTime, nullable=True, comment="开始时间")
     completed_at = Column(DateTime, nullable=True, comment="完成时间")
     error_message = Column(Text, nullable=True, comment="错误信息")
+    idempotency_key = Column(String(100), nullable=True, comment="幂等键，防止任务重复提交")
+    trace_id = Column(String(64), nullable=True, comment="任务链路追踪ID")
+    worker_id = Column(String(100), nullable=True, comment="当前执行Worker")
+    heartbeat_at = Column(DateTime, nullable=True, comment="最近心跳时间")
+    retry_count = Column(Integer, nullable=False, default=0, comment="已执行次数")
+    max_retries = Column(Integer, nullable=False, default=2, comment="最大执行次数")
+    priority = Column(Integer, nullable=False, default=50, comment="优先级，数值越小越优先")
     progress_percent = Column(Integer, nullable=False, default=0, comment="任务进度百分比")
     progress_current = Column(Integer, nullable=False, default=0, comment="当前完成数量")
     progress_total = Column(Integer, nullable=False, default=0, comment="预计总数量")

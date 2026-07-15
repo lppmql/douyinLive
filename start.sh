@@ -43,6 +43,8 @@ echo "[2/5] 启动后端 FastAPI..."
 clean_port 8000
 cd "$BACKEND_DIR"
 source .venv/bin/activate
+alembic upgrade head
+echo "  ✅ 数据库迁移已更新到最新版本"
 uvicorn app.main:app --reload --port 8000 &
 BACKEND_PID=$!
 echo "  ✅ 后端: http://localhost:8000"

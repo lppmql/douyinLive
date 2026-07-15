@@ -59,7 +59,7 @@ class FunasrClient:
             return True
         except Exception as e:
             logger.warning(f"FunASR 连接失败 ({self.ws_url}): {e}")
-            if settings.ASR_ALLOW_MOCK:
+            if settings.asr_mock_enabled:
                 logger.warning("已显式开启 ASR_ALLOW_MOCK，将使用模拟识别结果")
             return False
 
@@ -83,7 +83,7 @@ class FunasrClient:
         self._session_id = session_id
 
         if not self.connected:
-            if not settings.ASR_ALLOW_MOCK:
+            if not settings.asr_mock_enabled:
                 raise RuntimeError(
                     f"真实 FunASR 服务不可用: {self.ws_url}；任务已停止，未写入模拟话术"
                 )

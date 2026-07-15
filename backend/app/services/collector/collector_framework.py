@@ -52,7 +52,12 @@ class BaseCollector(ABC):
     async def close(self):
         """清理资源"""
         if self.page:
-            await self.page.close()
+            try:
+                await self.page.close()
+            except Exception as exc:
+                text = str(exc).lower()
+                if "handler is closed" not in text and "target page, context or browser has been closed" not in text:
+                    logger.debug("采集页面关闭失败: %s", exc)
             self.page = None
 
     @abstractmethod

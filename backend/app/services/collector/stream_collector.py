@@ -72,4 +72,9 @@ class StreamCollector:
             self.db.commit()
             return None
         finally:
-            await page.close()
+            try:
+                await page.close()
+            except Exception as exc:
+                text = str(exc).lower()
+                if "handler is closed" not in text and "target page, context or browser has been closed" not in text:
+                    logger.debug("流地址页面关闭失败: %s", exc)

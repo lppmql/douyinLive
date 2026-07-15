@@ -15,6 +15,7 @@ from app.api.v1 import v1_router
 from app.services.collector.scheduler import scheduler_manager
 from app.services.collector.browser import browser_manager
 from app.services.asr.control import start_asr_runtime
+from app.services.tasks.runtime import publish_task_event, touch_task
 from app.api.v1.ws import transcript_ws
 
 
@@ -29,8 +30,11 @@ def recover_interrupted_collector_tasks() -> int:
             task.error_message = "后端服务重启，任务已中断，请重新执行"
             task.progress_stage = "interrupted"
             task.progress_message = "任务因服务重启而中断"
+            touch_task(task)
         if tasks:
             db.commit()
+            for task in tasks:
+                publish_task_event("scraper", task, "interrupted", {"reason": task.error_message})
         return len(tasks)
     finally:
         db.close()

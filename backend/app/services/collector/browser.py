@@ -20,6 +20,7 @@ from app.core.logger import logger
 from app.core.database import SessionLocal
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_tasks import ScraperTask
+from app.services.tasks.runtime import publish_task_event, touch_task
 
 # 浏览器状态存储目录
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "storage_state"
@@ -550,6 +551,7 @@ class BrowserManager:
                 self.login_sessions[task_id]["status"] = "timeout"
                 self.login_sessions[task_id]["message"] = "登录超时，请重新扫码"
                 logger.warning(f"扫码登录超时: {e}")
+                self._finish_login_task(task_id, "failed", "扫码登录超时，请重新扫码")
                 # 即使超时也保存上下文（可能部分登录成功）
                 try:
                     await self.set_logged_in_context(context,
@@ -563,6 +565,7 @@ class BrowserManager:
             logger.error(f"扫码登录失败: {e}")
             self.login_sessions[task_id]["status"] = "failed"
             self.login_sessions[task_id]["message"] = f"登录失败: {str(e)}"
+            self._finish_login_task(task_id, "failed", f"扫码登录失败: {str(e)}")
         finally:
             # 注意：不关闭 browser 和 playwright！
             # 上下文被保持为持久化上下文，浏览器需要继续运行
@@ -685,6 +688,8 @@ class BrowserManager:
             if db_task:
                 db_task.status = "completed"
                 db_task.completed_at = datetime.utcnow()
+                db_task.error_message = None
+                touch_task(db_task)
                 if existing:
                     db_task.account_id = existing.id
 
@@ -693,12 +698,42 @@ class BrowserManager:
             if db_task and saved_account:
                 db_task.account_id = saved_account.id
                 db.commit()
+                publish_task_event(
+                    "scraper",
+                    db_task,
+                    "completed",
+                    {"task_type": "login", "account_id": saved_account.id},
+                )
 
             return saved_account.id
         except Exception as e:
             logger.error(f"保存账号记录失败: {e}")
             db.rollback()
             return None
+        finally:
+            db.close()
+
+    def _finish_login_task(self, task_id: int, status: str, error_message: str | None = None) -> None:
+        """可靠结束扫码任务，防止异常后任务永久停留在 running。"""
+        db = SessionLocal()
+        try:
+            task = db.get(ScraperTask, task_id)
+            if not task or task.status == "completed":
+                return
+            task.status = status
+            task.completed_at = datetime.utcnow()
+            task.error_message = error_message[:500] if error_message else None
+            touch_task(task)
+            db.commit()
+            publish_task_event(
+                "scraper",
+                task,
+                "failed" if status == "failed" else status,
+                {"task_type": "login", "error": task.error_message or ""},
+            )
+        except Exception as exc:
+            db.rollback()
+            logger.warning("扫码任务状态更新失败 task_id=%s: %s", task_id, exc)
         finally:
             db.close()
 

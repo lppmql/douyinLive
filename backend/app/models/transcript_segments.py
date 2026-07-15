@@ -1,5 +1,5 @@
 """主播话术分段表"""
-from sqlalchemy import Column, Integer, BigInteger, String, Text, DECIMAL, ForeignKey
+from sqlalchemy import Column, Integer, BigInteger, String, Text, DECIMAL, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 
@@ -7,9 +7,13 @@ class TranscriptSegment(Base, TimestampMixin):
     """主播话术分段 - 带时间戳、转写状态、AI评分"""
 
     __tablename__ = "transcript_segments"
+    __table_args__ = (
+        Index("idx_transcript_segments_asr_chunk", "asr_chunk_id", "segment_start"),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="ID")
     session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")
+    asr_chunk_id = Column(BigInteger, ForeignKey("asr_audio_chunks.id"), nullable=True, comment="关联ASR音频分片")
     segment_start = Column(DECIMAL(10, 1), nullable=True, comment="片段开始时间（秒）")
     segment_end = Column(DECIMAL(10, 1), nullable=True, comment="片段结束时间（秒）")
     text_content = Column(Text, nullable=True, comment="话术内容")

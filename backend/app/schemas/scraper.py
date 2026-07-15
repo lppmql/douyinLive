@@ -1,7 +1,7 @@
 """Phase 3: 采集相关 Pydantic 数据模型"""
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ===== 采集账号 =====
@@ -54,6 +54,13 @@ class ScraperTaskResponse(ScraperTaskBase):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    trace_id: Optional[str] = None
+    worker_id: Optional[str] = None
+    heartbeat_at: Optional[datetime] = None
+    retry_count: int = 0
+    max_retries: int = 2
+    priority: int = 50
     progress_percent: int = 0
     progress_current: int = 0
     progress_total: int = 0
@@ -68,6 +75,13 @@ class ScraperTaskResponse(ScraperTaskBase):
     failed_detail_count: int = 0
     remaining_detail_count: int = 0
     created_at: datetime
+
+    @field_validator("retry_count", "max_retries", "priority", mode="before")
+    @classmethod
+    def normalize_runtime_defaults(cls, value, info):
+        if value is not None:
+            return value
+        return {"retry_count": 0, "max_retries": 2, "priority": 50}[info.field_name]
 
 # ===== 采集日志 =====
 class ScraperLogBase(BaseModel):

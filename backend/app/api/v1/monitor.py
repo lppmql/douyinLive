@@ -25,7 +25,7 @@ def get_monitor_status():
         enabled=settings.MONITOR_ENABLED,
         running=scheduler_manager.running,
         paused_for_collection=scheduler_manager.paused_for_collection,
-        mock_mode=settings.MONITOR_MOCK_MODE,
+        mock_mode=settings.monitor_mock_enabled,
         active_session_count=len(scheduler_manager.get_active_sessions()),
         active_sessions=scheduler_manager.get_active_sessions(),
         last_error=scheduler_manager.last_error,
@@ -40,7 +40,7 @@ async def start_monitor(db: Session = Depends(get_db)):
         ScraperTask.task_type == "collect_all",
         ScraperTask.status == "running",
     ).first()
-    if not settings.MONITOR_MOCK_MODE and not running_collect:
+    if not settings.monitor_mock_enabled and not running_collect:
         context, is_valid, message = await browser_manager.get_logged_in_context()
         if not is_valid or not context:
             raise HTTPException(409, message or "采集账号登录状态不可用，请重新扫码")
@@ -77,7 +77,7 @@ def list_monitor_rooms(db: Session = Depends(get_db)):
 @router.post("/test/trigger-live", response_model=MonitorActionResponse)
 async def trigger_live():
     """Mock 模式模拟开播事件"""
-    if not settings.MONITOR_MOCK_MODE:
+    if not settings.monitor_mock_enabled:
         raise HTTPException(400, "非 Mock 模式下不可用")
     detector = MockLiveDetector(idle_count=0, live_count=10)
     result = await detector.detect()
@@ -89,7 +89,7 @@ async def trigger_live():
 @router.post("/test/trigger-end", response_model=MonitorActionResponse)
 async def trigger_end():
     """Mock 模式模拟下播"""
-    if not settings.MONITOR_MOCK_MODE:
+    if not settings.monitor_mock_enabled:
         raise HTTPException(400, "非 Mock 模式下不可用")
     active = scheduler_manager.get_active_sessions()
     if not active:
