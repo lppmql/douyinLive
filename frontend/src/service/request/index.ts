@@ -170,10 +170,9 @@ export const backendRequest = createFlatRequest(
     },
     onError(error) {
       let message = error.message;
-      if (error.code === BACKEND_ERROR_CODE) {
-        // FastAPI 的 422/401 错误在 response.data.detail 中
-        message = error.response?.data?.detail || error.response?.data?.msg || message;
-      }
+      // Axios 的 4xx 通常是 ERR_BAD_REQUEST，不只会使用 BACKEND_ERROR_CODE。
+      // 始终优先显示 FastAPI 返回的中文 detail，避免暴露生硬的英文状态码。
+      message = error.response?.data?.detail || error.response?.data?.msg || message;
       window.$message?.error(message);
     }
   }

@@ -2,7 +2,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.api.v1.ws import serialize_transcription_task
+from app.api.v1.ws import get_full_text, serialize_transcription_task
 from app.services.asr.control import _worker_pids
 
 
@@ -55,3 +55,18 @@ def test_transcription_task_payload_keeps_real_failure_context():
     assert result["error_message"] == "真实回放地址已失效"
     assert result["segment_count"] == 18
     assert result["retry_count"] == 2
+
+
+def test_missing_full_transcript_is_a_normal_empty_state():
+    class EmptyQuery:
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return None
+
+    db = SimpleNamespace(query=lambda _model: EmptyQuery())
+
+    result = get_full_text(13246, db=db)
+
+    assert result == {"id": None, "full_text": "", "available": False}

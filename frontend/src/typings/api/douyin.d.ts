@@ -301,8 +301,9 @@ declare namespace Api {
     }
 
     interface TranscriptFullText {
-      id: number;
+      id: number | null;
       full_text: string;
+      available: boolean;
     }
 
     interface TranscriptTask {

@@ -195,8 +195,9 @@ def get_full_text(session_id: int, db: Session = Depends(get_db)):
         .first()
     )
     if not record:
-        raise HTTPException(404, "完整话术不存在")
-    return {"id": record.id, "full_text": record.full_text or ""}
+        # 未开始、失败或仍在分片转写的场次没有全文是正常状态，不应让前端误报 404。
+        return {"id": None, "full_text": "", "available": False}
+    return {"id": record.id, "full_text": record.full_text or "", "available": bool(record.full_text)}
 
 
 # WebSocket 路由（直接在 app 上注册）
