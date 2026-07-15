@@ -132,7 +132,7 @@ function isActive(item: TimelineEvent) {
     </div>
 
     <NEmpty v-if="!visibleEvents.length" description="暂无可展示的复盘时间轴数据" class="py-50px" />
-    <NVirtualList v-else :items="visibleEvents" :item-size="92" item-resizable class="h-520px pr-6px">
+    <NVirtualList v-else :items="visibleEvents" :item-size="92" item-resizable class="h-430px pr-6px lt-sm:h-360px">
       <template #default="{ item }">
         <button
           type="button"

@@ -257,30 +257,28 @@ onBeforeUnmount(() => {
 
       <NGrid :x-gap="16" :y-gap="16" cols="1 xl:5" responsive="screen">
         <NGi span="1 xl:3">
-          <NSpace vertical :size="14">
-            <ReviewVideoPlayer
-              :session-id="sessionId"
-              :stream-url="detail.stream_url"
-              :title="detail.session.session_title || '直播场次回放'"
-            />
-            <NCard :bordered="false" class="card-wrapper">
-              <NTabs type="segment" animated>
-                <NTabPane name="timeline" tab="统一复盘时间轴">
-                  <ReviewTimeline
-                    :session-start="detail.session.live_start_time"
-                    :metrics="detail.metrics"
-                    :comments="detail.comments"
-                    :segments="workbench.transcript_segments"
-                    :findings="workbench.findings"
-                    @create-asset="openAssetModal"
-                  />
-                </NTabPane>
-                <NTabPane name="metrics" tab="分钟指标曲线">
-                  <MetricsChart :metrics="detail.metrics" />
-                </NTabPane>
-              </NTabs>
+          <div class="space-y-14px">
+            <div class="grid grid-cols-1 items-start gap-14px md:grid-cols-[280px_minmax(0,1fr)]">
+              <ReviewVideoPlayer
+                :session-id="sessionId"
+                :stream-url="detail.stream_url"
+                :title="detail.session.session_title || '直播场次回放'"
+              />
+              <NCard title="统一复盘时间轴" :bordered="false" class="card-wrapper min-w-0">
+                <ReviewTimeline
+                  :session-start="detail.session.live_start_time"
+                  :metrics="detail.metrics"
+                  :comments="detail.comments"
+                  :segments="workbench.transcript_segments"
+                  :findings="workbench.findings"
+                  @create-asset="openAssetModal"
+                />
+              </NCard>
+            </div>
+            <NCard title="分钟指标曲线" :bordered="false" class="card-wrapper">
+              <MetricsChart :metrics="detail.metrics" />
             </NCard>
-          </NSpace>
+          </div>
         </NGi>
         <NGi span="1 xl:2">
           <NCard :bordered="false" class="card-wrapper h-full">

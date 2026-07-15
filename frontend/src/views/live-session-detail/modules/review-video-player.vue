@@ -144,8 +144,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .review-player {
-  width: min(100%, 360px);
-  margin-inline: auto;
+  width: min(100%, 280px);
   box-shadow: 0 18px 40px rgba(11, 20, 28, 0.18);
 }
 
