@@ -12,6 +12,8 @@ from app.models.stream_sources import StreamSource
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.services.collector.video_download import (
     build_video_download_command,
+    build_browser_playback_command,
+    stream_browser_playback,
     stream_video_as_mp4,
     video_download_semaphore,
 )
@@ -167,6 +169,42 @@ def download_session_video(session_id: int, db: Session = Depends(get_db)):
         media_type="video/mp4",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/{session_id}/playback")
+def playback_session_video(
+    session_id: int,
+    start_seconds: float = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """将真实 H.265 回放按需转换为浏览器兼容的 H.264 流。"""
+    session = db.get(LiveSession, session_id)
+    if not session:
+        raise HTTPException(404, "直播场次不存在")
+    source = (
+        db.query(StreamSource)
+        .filter(StreamSource.session_id == session_id)
+        .order_by((StreamSource.status == "active").desc(), StreamSource.fetched_at.desc(), StreamSource.id.desc())
+        .first()
+    )
+    stream_url = (source.m3u8_url if source else None) or session.stream_url
+    if not stream_url:
+        raise HTTPException(404, "该场次暂无可回放地址，请先刷新采集")
+    headers = dict(source.headers_json or {}) if source else {}
+    try:
+        build_browser_playback_command(stream_url, headers, start_seconds, encoder="h264_videotoolbox")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    return StreamingResponse(
+        stream_browser_playback(stream_url, headers, start_seconds),
+        media_type="video/mp4",
+        headers={
+            "Content-Disposition": f'inline; filename="live-session-{session_id}.mp4"',
+            "Cache-Control": "no-store",
             "X-Accel-Buffering": "no",
         },
     )

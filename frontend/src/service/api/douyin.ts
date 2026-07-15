@@ -51,6 +51,14 @@ export function getLiveSessionVideoDownloadUrl(id: number) {
   return `${backendBaseUrl}${API_PREFIX}/live-sessions/${id}/video`;
 }
 
+/** 获取浏览器兼容的 H.264 回放流，按需从指定时间点开始。 */
+export function getLiveSessionPlaybackUrl(id: number, startSeconds = 0) {
+  const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
+  const { otherBaseURL } = getServiceBaseURL(import.meta.env, isHttpProxy);
+  const backendBaseUrl = otherBaseURL.backend || window.location.origin;
+  return `${backendBaseUrl}${API_PREFIX}/live-sessions/${id}/playback?start_seconds=${Math.max(0, startSeconds).toFixed(3)}`;
+}
+
 /* ---------- 采集 ---------- */
 
 /** 获取采集器状态 */

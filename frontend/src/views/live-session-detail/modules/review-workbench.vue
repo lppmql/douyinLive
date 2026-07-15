@@ -258,7 +258,11 @@ onBeforeUnmount(() => {
       <NGrid :x-gap="16" :y-gap="16" cols="1 xl:5" responsive="screen">
         <NGi span="1 xl:3">
           <NSpace vertical :size="14">
-            <ReviewVideoPlayer :stream-url="detail.stream_url" :title="detail.session.session_title || '直播场次回放'" />
+            <ReviewVideoPlayer
+              :session-id="sessionId"
+              :stream-url="detail.stream_url"
+              :title="detail.session.session_title || '直播场次回放'"
+            />
             <NCard :bordered="false" class="card-wrapper">
               <NTabs type="segment" animated>
                 <NTabPane name="timeline" tab="统一复盘时间轴">

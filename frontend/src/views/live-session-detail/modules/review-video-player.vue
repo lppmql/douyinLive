@@ -1,92 +1,143 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import Hls, { ErrorTypes, Events } from 'hls.js';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import { getLiveSessionPlaybackUrl } from '@/service/api/douyin';
 import { useReviewStore } from '@/store/modules/review';
 
 defineOptions({ name: 'ReviewVideoPlayer' });
-const props = defineProps<{ streamUrl: string | null; title: string }>();
+const props = defineProps<{ sessionId: number; streamUrl: string | null; title: string }>();
 const videoRef = ref<HTMLVideoElement | null>(null);
+const started = ref(false);
+const loading = ref(false);
+const playbackOffset = ref(0);
 const errorMessage = ref('');
 const reviewStore = useReviewStore();
 const { seekToken } = storeToRefs(reviewStore);
-let hls: Hls | null = null;
+let loadingTimer: ReturnType<typeof setTimeout> | undefined;
 
-const isHls = computed(() => Boolean(props.streamUrl && /\.m3u8(?:\?|$)/i.test(props.streamUrl)));
+const playbackUrl = computed(() => getLiveSessionPlaybackUrl(props.sessionId, playbackOffset.value));
 
-function destroyHls() {
-  hls?.destroy();
-  hls = null;
+function clearLoadingTimer() {
+  if (loadingTimer) clearTimeout(loadingTimer);
+  loadingTimer = undefined;
 }
 
-async function attachStream() {
-  destroyHls();
-  errorMessage.value = '';
-  await nextTick();
+function beginLoading() {
+  clearLoadingTimer();
+  loading.value = true;
+  loadingTimer = setTimeout(() => {
+    loading.value = false;
+    started.value = false;
+    releaseVideo();
+    errorMessage.value = '兼容画面生成超时，旧播放连接已释放，请重新播放。';
+  }, 30_000);
+}
+
+function releaseVideo() {
   const video = videoRef.value;
-  if (!video || !props.streamUrl) return;
-  if (!isHls.value) {
-    errorMessage.value = '当前是直播 FLV 地址，浏览器不能直接回放；下播补齐 m3u8 后即可在此联动复盘。';
-    return;
-  }
-  if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = props.streamUrl;
-    return;
-  }
-  // oxlint-disable-next-line import/no-named-as-default-member -- hls.js types only expose this as a static class method.
-  if (!Hls.isSupported()) {
-    errorMessage.value = '当前浏览器不支持 HLS 回放，可继续使用时间轴和视频下载功能。';
-    return;
-  }
-  hls = new Hls({ enableWorker: true, lowLatencyMode: false, backBufferLength: 90 });
-  hls.loadSource(props.streamUrl);
-  hls.attachMedia(video);
-  hls.on(Events.ERROR, (_event, data) => {
-    if (!data.fatal) return;
-    errorMessage.value = '回放地址已过期或暂时不可访问，请刷新采集后重试。';
-    if (data.type === ErrorTypes.NETWORK_ERROR) hls?.startLoad();
-    else if (data.type === ErrorTypes.MEDIA_ERROR) hls?.recoverMediaError();
-    else destroyHls();
+  if (!video) return;
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+}
+
+function loadAndPlay() {
+  const video = videoRef.value;
+  if (!video) return;
+  video.src = playbackUrl.value;
+  video.load();
+  void video.play().catch(() => {
+    // 保留原生播放按钮，用户仍可手动继续播放。
   });
+}
+
+function startPlayback() {
+  if (!props.streamUrl) return;
+  errorMessage.value = '';
+  beginLoading();
+  started.value = true;
+  loadAndPlay();
+}
+
+function restartAt(second: number) {
+  playbackOffset.value = Math.max(0, second);
+  if (!started.value) return;
+  beginLoading();
+  errorMessage.value = '';
+  loadAndPlay();
 }
 
 function updatePlayback() {
   const video = videoRef.value;
   if (!video) return;
-  reviewStore.updatePlayback(video.currentTime, !video.paused);
+  reviewStore.updatePlayback(playbackOffset.value + video.currentTime, !video.paused);
 }
 
-watch(() => props.streamUrl, attachStream, { immediate: true });
-watch(seekToken, () => {
-  const video = videoRef.value;
-  if (!video) return;
-  video.currentTime = reviewStore.currentSecond;
+function handleLoaded() {
+  clearLoadingTimer();
+  loading.value = false;
+  errorMessage.value = '';
+  updatePlayback();
+}
+
+function handlePlaybackError() {
+  clearLoadingTimer();
+  loading.value = false;
+  const mediaError = videoRef.value?.error;
+  errorMessage.value = mediaError?.message || '兼容回放启动失败，请刷新采集后重试。';
+}
+
+watch(seekToken, () => restartAt(reviewStore.currentSecond));
+onBeforeUnmount(() => {
+  clearLoadingTimer();
+  releaseVideo();
 });
-onBeforeUnmount(destroyHls);
 </script>
 
 <template>
   <div class="review-player overflow-hidden rounded-12px bg-[#101820]">
     <div class="aspect-video w-full flex-center">
       <video
-        v-if="streamUrl && isHls"
+        v-if="streamUrl"
         ref="videoRef"
         class="size-full bg-black object-contain"
+        :class="{ 'pointer-events-none opacity-0': !started }"
         controls
-        preload="metadata"
+        playsinline
+        preload="none"
         :aria-label="`${title}直播回放`"
+        @loadeddata="handleLoaded"
+        @canplay="handleLoaded"
+        @waiting="loading = true"
+        @error="handlePlaybackError"
         @timeupdate="updatePlayback"
         @play="updatePlayback"
         @pause="updatePlayback"
       ></video>
-      <div v-else class="max-w-520px px-24px text-center text-13px leading-22px text-gray-300">
-        <SvgIcon icon="mdi:video-off-outline" class="mb-10px text-42px text-gray-500" />
-        <div>{{ errorMessage || '该场次尚未采集到可回放的 m3u8 地址' }}</div>
+      <div v-if="!started" class="absolute max-w-560px px-24px text-center text-13px leading-22px text-gray-300">
+        <SvgIcon icon="mdi:video-outline" class="mb-10px text-42px text-gray-400" />
+        <div v-if="streamUrl">该回放是 H.265，需转换为浏览器兼容画面。仅在播放期间占用一路硬件转码。</div>
+        <div v-else>该场次尚未采集到可回放的 m3u8 地址。</div>
+        <NButton v-if="streamUrl" class="mt-14px" type="primary" secondary @click="startPlayback">
+          <template #icon><SvgIcon icon="mdi:play-circle-outline" /></template>
+          {{ playbackOffset ? `从 ${Math.floor(playbackOffset / 60)}:${String(Math.floor(playbackOffset % 60)).padStart(2, '0')} 播放` : '播放兼容回放' }}
+        </NButton>
+      </div>
+      <div v-if="started && loading" class="pointer-events-none absolute flex flex-col items-center text-white">
+        <NSpin size="large" stroke="#fff" />
+        <span class="mt-10px text-12px">正在准备 H.264 兼容画面...</span>
       </div>
     </div>
+    <NAlert v-if="errorMessage" type="error" :show-icon="true" :bordered="false" class="mx-12px mt-10px">
+      {{ errorMessage }}
+      <NButton text type="primary" class="ml-8px" @click="startPlayback">重新播放</NButton>
+    </NAlert>
     <div class="flex items-center justify-between gap-12px px-14px py-10px text-12px text-gray-300">
       <span class="truncate">{{ title }}</span>
-      <span class="shrink-0">联动位置 {{ Math.floor(reviewStore.currentSecond / 60) }}:{{ String(Math.floor(reviewStore.currentSecond % 60)).padStart(2, '0') }}</span>
+      <div class="flex shrink-0 items-center gap-8px">
+        <NTag size="small" type="success" :bordered="false">H.264 兼容播放</NTag>
+        <span>联动位置 {{ Math.floor(reviewStore.currentSecond / 60) }}:{{ String(Math.floor(reviewStore.currentSecond % 60)).padStart(2, '0') }}</span>
+      </div>
     </div>
   </div>
 </template>
@@ -94,5 +145,9 @@ onBeforeUnmount(destroyHls);
 <style scoped>
 .review-player {
   box-shadow: 0 18px 40px rgba(11, 20, 28, 0.18);
+}
+
+.aspect-video {
+  position: relative;
 }
 </style>
