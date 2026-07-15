@@ -96,7 +96,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="review-player overflow-hidden rounded-12px bg-[#101820]">
-    <div class="aspect-video w-full flex-center">
+    <div class="portrait-video-stage w-full flex-center">
       <video
         v-if="streamUrl"
         ref="videoRef"
@@ -114,7 +114,7 @@ onBeforeUnmount(() => {
         @play="updatePlayback"
         @pause="updatePlayback"
       ></video>
-      <div v-if="!started" class="absolute max-w-560px px-24px text-center text-13px leading-22px text-gray-300">
+      <div v-if="!started" class="absolute max-w-360px px-20px text-center text-13px leading-22px text-gray-300">
         <SvgIcon icon="mdi:video-outline" class="mb-10px text-42px text-gray-400" />
         <div v-if="streamUrl">该回放是 H.265，需转换为浏览器兼容画面。仅在播放期间占用一路硬件转码。</div>
         <div v-else>该场次尚未采集到可回放的 m3u8 地址。</div>
@@ -132,10 +132,10 @@ onBeforeUnmount(() => {
       {{ errorMessage }}
       <NButton text type="primary" class="ml-8px" @click="startPlayback">重新播放</NButton>
     </NAlert>
-    <div class="flex items-center justify-between gap-12px px-14px py-10px text-12px text-gray-300">
-      <span class="truncate">{{ title }}</span>
+    <div class="flex flex-wrap items-center justify-between gap-8px px-14px py-10px text-12px text-gray-300">
+      <span class="min-w-0 flex-1 truncate">{{ title }}</span>
       <div class="flex shrink-0 items-center gap-8px">
-        <NTag size="small" type="success" :bordered="false">H.264 兼容播放</NTag>
+        <NTag size="small" type="success" :bordered="false">9:16 · H.264</NTag>
         <span>联动位置 {{ Math.floor(reviewStore.currentSecond / 60) }}:{{ String(Math.floor(reviewStore.currentSecond % 60)).padStart(2, '0') }}</span>
       </div>
     </div>
@@ -144,10 +144,13 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .review-player {
+  width: min(100%, 360px);
+  margin-inline: auto;
   box-shadow: 0 18px 40px rgba(11, 20, 28, 0.18);
 }
 
-.aspect-video {
+.portrait-video-stage {
   position: relative;
+  aspect-ratio: 9 / 16;
 }
 </style>
