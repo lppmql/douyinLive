@@ -1,4 +1,5 @@
 """AI 分析 API（DeepSeek）"""
+import json
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from app.services.ai.kb_service import qa_search, sync_session_to_kb
 from app.models.analysis_reports import AnalysisReport
 from app.models.high_intent_users import HighIntentUser
 from app.models.live_sessions import LiveSession
+from app.models.comments import Comment
+from app.models.transcript_segments import TranscriptSegment
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI-分析"])
@@ -124,6 +127,9 @@ def anomaly_detection(session_id: int, db: Session = Depends(get_db)):
 @router.post("/optimize/{session_id}")
 def optimize_session(session_id: int, db: Session = Depends(get_db)):
     """生成单场直播的优化建议"""
+    session = db.get(LiveSession, session_id)
+    if not session:
+        raise HTTPException(404, "直播场次不存在")
     # 获取该场次的话术评分和场次数据
     score_report = db.query(AnalysisReport).filter(
         AnalysisReport.session_id == session_id,
@@ -134,7 +140,47 @@ def optimize_session(session_id: int, db: Session = Depends(get_db)):
     if not prompt:
         raise HTTPException(500, "未找到 optimization 提示词模板")
 
-    user_message = prompt.replace("{session_data}", f"场次ID: {session_id}")
+    comments = db.query(Comment).filter(Comment.session_id == session_id).order_by(
+        Comment.comment_time.asc(), Comment.id.asc()
+    ).limit(200).all()
+    segments = db.query(TranscriptSegment).filter(
+        TranscriptSegment.session_id == session_id,
+        TranscriptSegment.asr_status == "completed",
+    ).order_by(TranscriptSegment.segment_start.asc()).limit(400).all()
+    session_data = {
+        "场次ID": session.id,
+        "主播": session.anchor_name,
+        "标题": session.session_title,
+        "直播时长秒": session.live_duration_seconds,
+        "累计观看": session.total_viewers,
+        "峰值在线": session.peak_online_count,
+        "平均停留秒": float(session.avg_watch_seconds or 0),
+        "评论数": session.comments_count,
+        "私信人数": session.private_message_count,
+        "场景线索人数": session.scene_leads_count,
+        "新增关注": session.new_followers,
+    }
+    real_comments = [
+        {"用户": item.user_nickname or "匿名", "评论": item.comment_content or "", "时间": str(item.comment_time or "")}
+        for item in comments
+    ]
+    real_transcript = [
+        {
+            "开始秒": float(item.segment_start or 0),
+            "结束秒": float(item.segment_end or 0),
+            "话术": item.text_content or "",
+        }
+        for item in segments
+    ]
+    evidence_payload = {
+        "session": session_data,
+        "comments": real_comments,
+        "transcript_segments": real_transcript,
+    }
+    user_message = prompt.replace(
+        "{session_data}",
+        json.dumps(evidence_payload, ensure_ascii=False),
+    )
     user_message = user_message.replace(
         "{speech_data}",
         str(score_report.report_content if score_report else "暂无话术评分数据"),
@@ -142,7 +188,12 @@ def optimize_session(session_id: int, db: Session = Depends(get_db)):
 
     from app.services.ai.deepseek_client import chat_json
     result = chat_json(
-        system_prompt="你是一个直播运营专家，请按JSON格式输出优化建议。",
+        system_prompt=(
+            "你是零食店开店避坑知识科普直播的运营复盘专家。"
+            "业务目标是通过真实知识解答和资料钩子，引导有筹备意向的用户主动站内私信。"
+            "不得建议虚假稀缺、抽奖促单、夸大收益或站外导流；每条结论必须引用提供的真实证据。"
+            "请按JSON格式输出。"
+        ),
         user_message=user_message,
         temperature=0.3,
     )

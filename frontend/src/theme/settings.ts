@@ -59,7 +59,7 @@ export const themeSettings: App.Theme.ThemeSetting = {
   },
   watermark: {
     visible: false,
-    text: '抖音留资直播分析系统',
+    text: '零食店避坑直播复盘系统',
     enableUserName: false,
     enableTime: false,
     timeFormat: 'YYYY-MM-DD HH:mm'

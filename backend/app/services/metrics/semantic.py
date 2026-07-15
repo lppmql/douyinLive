@@ -33,6 +33,12 @@ METRIC_DEFINITIONS = (
     _metric("follow_conversion_rate", "关注转化率", "新增关注人数除以累计观看人数", "de_v_fact_live_session", "SUM(new_followers) / NULLIF(SUM(total_viewers), 0)", "percent"),
     _metric("lead_conversion_rate", "线索转化率", "留资人数除以累计观看人数", "de_v_fact_live_session", "SUM(leads_count) / NULLIF(SUM(total_viewers), 0)", "percent"),
     _metric("lead_cost", "线索成本", "广告消耗除以留资人数", "de_v_fact_live_session", "SUM(ad_cost) / NULLIF(SUM(leads_count), 0)", "currency"),
+    _metric("private_message_count", "站内私信人数", "筛选范围内各场直播采集到的站内私信人数之和", "de_v_fact_live_session", "SUM(private_message_count)"),
+    _metric("private_message_rate", "私信转化率", "站内私信人数除以累计观看人数", "de_v_fact_live_session", "SUM(private_message_count) / NULLIF(SUM(total_viewers), 0)", "percent"),
+    _metric("high_intent_comment_count", "高意向评论数", "命中零食店筹备问题或资料领取意图的真实评论数", "de_v_fact_comment", "SUM(CASE WHEN is_high_intent = 1 THEN 1 ELSE 0 END)"),
+    _metric("review_risk_count", "待复核风险数", "未关闭的直播复盘风险发现数量", "de_v_fact_review_finding", "SUM(CASE WHEN finding_type = 'risk' AND status IN ('open', 'confirmed') THEN 1 ELSE 0 END)", "integer", "platform_start_time"),
+    _metric("review_action_completion_rate", "整改完成率", "已完成或已验证整改任务占全部整改任务的比例", "de_v_fact_review_action", "SUM(CASE WHEN status IN ('completed', 'verified') THEN 1 ELSE 0 END) / NULLIF(COUNT(action_id), 0)", "percent", "platform_start_time"),
+    _metric("approved_script_asset_count", "已确认话术资产数", "从真实直播话术中人工确认可复用的片段数量", "de_v_fact_script_asset", "SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END)", "integer", "platform_start_time"),
     _metric("transcript_coverage_seconds", "话术覆盖时长", "完成转写片段的去重前累计秒数", "de_v_fact_transcript_segment", "SUM(GREATEST(segment_end - segment_start, 0))", "duration", "platform_start_time"),
 )
 
@@ -45,4 +51,7 @@ SEMANTIC_DATASETS = (
     {"name": "评论事实", "view": "de_v_fact_comment", "grain": "每条真实评论一行", "time_field": "platform_comment_time"},
     {"name": "话术事实", "view": "de_v_fact_transcript_segment", "grain": "每个完成转写片段一行", "time_field": "segment_start"},
     {"name": "AI 分析事实", "view": "de_v_fact_ai_analysis", "grain": "每份分析报告一行", "time_field": "generated_at"},
+    {"name": "复盘发现事实", "view": "de_v_fact_review_finding", "grain": "每条可追溯复盘发现一行", "time_field": "platform_start_time"},
+    {"name": "整改任务事实", "view": "de_v_fact_review_action", "grain": "每个复盘整改任务一行", "time_field": "platform_start_time"},
+    {"name": "话术资产事实", "view": "de_v_fact_script_asset", "grain": "每个真实直播话术资产一行", "time_field": "platform_start_time"},
 )

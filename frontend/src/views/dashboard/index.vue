@@ -69,13 +69,13 @@ const kpiData = computed<KpiItem[]>(() => [
     description: `完整 ${summary.value?.detail_complete_count || 0} 场`
   },
   {
-    key: 'leads',
-    title: '累计线索',
-    endValue: summary.value?.total_leads || 0,
-    suffix: ' 条',
-    icon: 'mdi:account-arrow-right-outline',
+    key: 'private-messages',
+    title: '站内私信人数',
+    endValue: summary.value?.total_private_messages || 0,
+    suffix: ' 人',
+    icon: 'mdi:message-badge-outline',
     iconClass: 'bg-error-100 text-error dark:bg-error-900/30',
-    description: `平均成本 ¥${(summary.value?.average_lead_cost || 0).toFixed(2)}`
+    description: `高意向评论 ${summary.value?.high_intent_comment_count || 0} 条`
   }
 ]);
 
@@ -85,8 +85,8 @@ const dataeaseUrl = ref(import.meta.env.VITE_DATAEASE_URL || '');
 <template>
   <NSpace vertical :size="16">
     <BusinessPageHeader
-      title="经营数据大屏"
-      description="汇总真实主播、场次、评论、线索和数据完整率；先看完整率，再判断经营指标是否可用于决策。"
+      title="零食店避坑直播数据大屏"
+      description="汇总真实主播、科普场次、筹备问题、站内私信和数据完整率；先看完整率，再判断资料钩子是否有效。"
       icon="mdi:monitor-dashboard"
       :status="summary ? `已汇总 ${summary.session_count} 场` : '正在读取数据'"
       :status-type="summary ? 'success' : 'info'"
@@ -142,9 +142,9 @@ const dataeaseUrl = ref(import.meta.env.VITE_DATAEASE_URL || '');
       </template>
       <NDescriptions label-placement="top" :column="4" bordered size="small" responsive="screen">
         <NDescriptionsItem label="累计评论">{{ (summary?.total_comments || 0).toLocaleString() }}</NDescriptionsItem>
-        <NDescriptionsItem label="累计投放">¥{{ (summary?.total_ad_cost || 0).toLocaleString() }}</NDescriptionsItem>
+        <NDescriptionsItem label="累计线索">{{ (summary?.total_leads || 0).toLocaleString() }}</NDescriptionsItem>
         <NDescriptionsItem label="平均线索成本">¥{{ (summary?.average_lead_cost || 0).toFixed(2) }}</NDescriptionsItem>
-        <NDescriptionsItem label="监控中场次">{{ summary?.live_session_count || 0 }} 场</NDescriptionsItem>
+        <NDescriptionsItem label="待处理整改">{{ summary?.open_review_action_count || 0 }} 项</NDescriptionsItem>
       </NDescriptions>
     </NCard>
 

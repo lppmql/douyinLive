@@ -1,5 +1,6 @@
 """本地 ASR 服务启停控制，供管理页面按需释放模型资源。"""
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -23,13 +24,30 @@ def _docker_bin() -> str:
 
 
 def _worker_pids() -> list[int]:
+    """只识别真实 Python Worker，避免 macOS 的 pgrep 把查询进程自身算进去。"""
     result = subprocess.run(
-        ["pgrep", "-f", "python -m workers.asr_worker"],
+        ["ps", "-axo", "pid=,comm=,args="],
         capture_output=True,
         text=True,
         check=False,
     )
-    return [int(value) for value in result.stdout.split() if value.isdigit()]
+    worker_pids = []
+    for line in result.stdout.splitlines():
+        columns = line.strip().split(maxsplit=2)
+        if len(columns) < 3 or not columns[0].isdigit():
+            continue
+        try:
+            command = shlex.split(columns[2])
+        except ValueError:
+            continue
+        if not command or "python" not in Path(command[0]).name.lower():
+            continue
+        if any(
+            command[index] == "-m" and command[index + 1] == "workers.asr_worker"
+            for index in range(len(command) - 1)
+        ):
+            worker_pids.append(int(columns[0]))
+    return worker_pids
 
 
 def _engine_running() -> bool:

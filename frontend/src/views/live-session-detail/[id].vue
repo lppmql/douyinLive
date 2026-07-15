@@ -7,6 +7,7 @@ import BusinessPageHeader from '@/components/business/page-header.vue';
 import MetricsChart from './modules/metrics-chart.vue';
 import CommentGroups from './modules/comment-groups.vue';
 import AiPanel from './modules/ai-panel.vue';
+import ReviewWorkbench from './modules/review-workbench.vue';
 
 defineOptions({ name: 'LiveSessionDetail' });
 const props = defineProps<{ id: string }>();
@@ -144,6 +145,13 @@ onMounted(load);
         </NGi>
       </NGrid>
 
+      <ReviewWorkbench
+        v-if="detail"
+        :session-id="Number(id)"
+        :detail="detail"
+        @refresh-detail="load"
+      />
+
       <NGrid :x-gap="16" :y-gap="16" cols="1 l:3" responsive="screen">
         <NGi span="1 l:2">
           <NCard :bordered="false" class="card-wrapper" title="场次信息">
@@ -208,7 +216,7 @@ onMounted(load);
         </div>
       </NCard>
 
-      <NCard :bordered="false" class="card-wrapper">
+      <NCard :bordered="false" class="card-wrapper" title="原始采集数据与专项分析">
         <NTabs type="line" animated>
           <NTabPane name="metrics" tab="分钟趋势"><MetricsChart :metrics="detail?.metrics || []" /></NTabPane>
           <NTabPane name="comments" :tab="`直播评论 (${detail?.comments.length || 0})`">
@@ -222,7 +230,7 @@ onMounted(load);
               size="small"
             />
           </NTabPane>
-          <NTabPane name="ai" tab="AI 数据分析"><AiPanel :session-id="Number(id)" :detail="detail" /></NTabPane>
+          <NTabPane name="ai" tab="AI 专项分析"><AiPanel :session-id="Number(id)" :detail="detail" /></NTabPane>
         </NTabs>
       </NCard>
     </NSpace>

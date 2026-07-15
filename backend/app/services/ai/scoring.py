@@ -43,7 +43,10 @@ def score_session_transcript(session_id: int, db: Session | None = None) -> dict
             return None
 
         # 拼接话术
-        full_text = "\n".join([s.text_content or "" for s in segments])
+        full_text = "\n".join(
+            f"[{float(s.segment_start or 0):.1f}s-{float(s.segment_end or 0):.1f}s] {s.text_content or ''}"
+            for s in segments
+        )
         if len(full_text) < 50:
             logger.warning("场次 %d 话术太短（%d字），跳过评分", session_id, len(full_text))
             return None
@@ -58,7 +61,10 @@ def score_session_transcript(session_id: int, db: Session | None = None) -> dict
         user_message = prompt.replace("{transcript}", full_text[:8000])  # 限制长度
         try:
             result = chat_json(
-                system_prompt="你是一个直播话术评分专家。请严格按照要求的JSON格式返回评分结果。",
+                system_prompt=(
+                    "你是零食店开店避坑知识科普直播的复盘专家。"
+                    "只依据真实话术证据评分，并严格返回JSON；不得把本业务当成零食带货。"
+                ),
                 user_message=user_message,
                 temperature=0.3,
             )

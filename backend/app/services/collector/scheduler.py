@@ -40,6 +40,9 @@ class SchedulerManager:
             cls._instance._last_error = None
             cls._instance._paused_for_collection = False
             cls._instance._active_browser_jobs = 0
+            # 同一登录上下文可服务多个主播，但页面任务必须串行，避免一个任务恢复
+            # 浏览器时关闭其他主播正在使用的 context。
+            cls._instance._browser_job_lock = asyncio.Lock()
         return cls._instance
 
     def set_collector_factory(self, factory):
@@ -177,6 +180,11 @@ class SchedulerManager:
         ).first() is not None
 
     async def _monitor_check(self):
+        """串行执行开播探测，避免与详情/流地址页面争用登录上下文。"""
+        async with self._browser_job_lock:
+            await self._monitor_check_serialized()
+
+    async def _monitor_check_serialized(self):
         """开播检测任务"""
         from app.core.database import SessionLocal
         from app.models.live_rooms import LiveRoom
@@ -313,6 +321,11 @@ class SchedulerManager:
         self.remove_session_jobs(session.id)
 
     async def _collect_wrapper(self, session_id: int, dashboard_url: str, job_type: str):
+        """多个主播可排队采集，但同一时刻只打开一个大屏页面。"""
+        async with self._browser_job_lock:
+            await self._collect_wrapper_serialized(session_id, dashboard_url, job_type)
+
+    async def _collect_wrapper_serialized(self, session_id: int, dashboard_url: str, job_type: str):
         """统一采集包装器 — 异常处理 + 任务记录"""
         db = SessionLocal()
         task = None

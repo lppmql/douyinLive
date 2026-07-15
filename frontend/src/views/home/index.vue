@@ -24,7 +24,7 @@ const quickActions = [
   },
   {
     title: '直播场次',
-    description: '查询全部场次并查看详细经营数据',
+    description: '回看避坑科普内容、证据时间轴与私信转化',
     icon: 'mdi:video-outline',
     route: 'live-sessions'
   },
@@ -34,7 +34,7 @@ const quickActions = [
     icon: 'mdi:text-box-outline',
     route: 'transcripts'
   },
-  { title: 'AI 分析', description: '生成评分、问题诊断和优化建议', icon: 'mdi:chart-box-outline', route: 'analysis' }
+  { title: 'AI 复盘', description: '诊断知识价值、资料钩子和站内私信承接', icon: 'mdi:chart-box-outline', route: 'analysis' }
 ] as const;
 
 async function loadWorkspace() {
@@ -56,10 +56,10 @@ onMounted(loadWorkspace);
 <template>
   <NSpace vertical :size="16">
     <BusinessPageHeader
-      title="欢迎回来，今天从真实数据开始"
-      description="先确认采集账号和运行任务，再进入场次、话术与分析页面。所有数量都来自当前数据库。"
+      title="零食店避坑直播复盘工作台"
+      description="围绕选址、预算、品牌、供应链、毛利损耗和证照科普，复盘资料钩子是否带来真实站内私信。"
       icon="mdi:view-dashboard-outline"
-      eyebrow="直播经营工作台"
+      eyebrow="知识科普与私信留资"
       :status="failedTaskCount ? `${failedTaskCount} 个历史失败任务` : '系统状态已汇总'"
       :status-type="failedTaskCount ? 'error' : 'success'"
     >

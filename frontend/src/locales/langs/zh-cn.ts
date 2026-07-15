@@ -232,7 +232,7 @@ const local: App.I18n.Schema = {
     'live-sessions': '直播场次',
     'live-session-detail': '直播场次详情',
     transcripts: '主播话术',
-    analysis: 'AI 分析',
+    analysis: 'AI 复盘',
     knowledge: '知识库',
     'user-management': '用户管理'
   },
@@ -440,8 +440,8 @@ const local: App.I18n.Schema = {
       alertLeadDesc: '17:00-17:30 无新增留资',
       suggestionTitle: '优化建议',
       suggestion1: '建议在开播后 15 分钟内增加互动引导，提升留存率',
-      suggestion2: '话术中加入更多留资引导，每 5 分钟提醒一次',
-      suggestion3: '商品展示环节配合话术强调限时优惠',
+      suggestion2: '围绕观众的城市、预算、面积和租金给出具体判断，再匹配对应资料',
+      suggestion3: '资料名称和适用对象要清楚，并只引导用户主动站内私信领取',
       score: '分',
       empty: '暂无数据'
     },
@@ -456,8 +456,8 @@ const local: App.I18n.Schema = {
       summary: '摘要',
       source: '来源',
       time: '时间',
-      chatPlaceholder: '询问已同步直播中的经营问题',
-      chatDesc: '向 AI 提问，并获取带真实知识来源的回答'
+      chatPlaceholder: '询问选址、预算、品牌、资料钩子或私信转化问题',
+      chatDesc: '基于真实话术、评论和指标回答，并返回主播、场次与时间来源'
     }
   },
   form: {

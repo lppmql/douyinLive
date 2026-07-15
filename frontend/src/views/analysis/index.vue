@@ -74,16 +74,16 @@ async function runOptimize() {
 <template>
   <NSpace vertical :size="16">
     <BusinessPageHeader
-      title="AI 经营分析"
-      description="基于已采集的真实场次、评论和 ASR 话术生成评分与优化建议，不会为缺失数据编造结论。"
+      title="零食店避坑直播 AI 复盘"
+      description="基于真实场次、评论和 ASR 话术，评价知识价值、问题互动、资料钩子与站内私信承接，不为缺失数据编造结论。"
       icon="mdi:chart-box-outline"
       :status="selectedSession ? `已选择场次 #${selectedSession}` : '请先选择场次'"
       :status-type="selectedSession ? 'success' : 'warning'"
     >
       <div class="flex flex-wrap gap-x-18px gap-y-6px text-12px text-gray-500">
         <span>1. 选择已有话术的场次</span>
-        <span>2. 运行话术评分</span>
-        <span>3. 生成可执行优化建议</span>
+        <span>2. 评价避坑知识和资料钩子</span>
+        <span>3. 生成下一场可验证的改进动作</span>
       </div>
     </BusinessPageHeader>
 

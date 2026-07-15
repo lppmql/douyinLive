@@ -14,6 +14,19 @@ from app.services.ai.prompt_service import get_prompt
 logger = logging.getLogger(__name__)
 
 
+def _match_real_comment(comments: list[Comment], item: dict[str, Any]) -> Comment | None:
+    """只接受可唯一追溯的评论序号或完全一致的唯一昵称。"""
+    comment_index = item.get("comment_index", item.get("index"))
+    if isinstance(comment_index, int) and 1 <= comment_index <= len(comments):
+        return comments[comment_index - 1]
+
+    user_name = item.get("user_name", item.get("name", ""))
+    if not user_name:
+        return None
+    exact_matches = [comment for comment in comments if comment.user_nickname == user_name]
+    return exact_matches[0] if len(exact_matches) == 1 else None
+
+
 def identify_high_intent(session_id: int, db: Session | None = None) -> list[dict[str, Any]]:
     """从指定场次的评论中识别高意向用户"""
     if db is None:
@@ -35,7 +48,7 @@ def identify_high_intent(session_id: int, db: Session | None = None) -> list[dic
 
         # 拼接评论列表
         comments_text = "\n".join([
-            f"[{i+1}] {c.user_name or '匿名'}: {c.comment_content or ''}"
+            f"[{i + 1}] {c.user_nickname or '匿名'}: {c.comment_content or ''}"
             for i, c in enumerate(comments)
         ])
 
@@ -46,7 +59,11 @@ def identify_high_intent(session_id: int, db: Session | None = None) -> list[dic
 
         try:
             result = chat_json(
-                system_prompt="你是一个直播销售分析专家。请按JSON格式输出识别结果。",
+                system_prompt=(
+                    "你是零食店开店避坑知识科普直播的意向分析员。"
+                    "只根据真实评论识别选址、预算、品牌、供应链、毛利损耗、证照或资料领取意向，"
+                    "不得猜测联系方式，请按JSON格式输出。"
+                ),
                 user_message=prompt.replace("{comments}", comments_text),
                 temperature=0.3,
             )
@@ -62,20 +79,27 @@ def identify_high_intent(session_id: int, db: Session | None = None) -> list[dic
 
         saved = []
         for item in identified:
-            # 尝试匹配评论
-            matched_comment = None
+            matched_comment = _match_real_comment(comments, item)
             user_name = item.get("user_name", item.get("name", ""))
-            if user_name:
-                for c in comments:
-                    if c.user_name and user_name in c.user_name:
-                        matched_comment = c
-                        break
+
+            if not matched_comment:
+                logger.warning("场次 %d 的AI意向结果无法匹配真实评论，已跳过: %s", session_id, item)
+                continue
+
+            existing = db.query(HighIntentUser).filter(
+                HighIntentUser.session_id == session_id,
+                HighIntentUser.comment_id == matched_comment.id,
+            ).first()
+            if existing:
+                continue
+
+            user_name = matched_comment.user_nickname or user_name
 
             user = HighIntentUser(
                 session_id=session_id,
                 comment_id=matched_comment.id if matched_comment else None,
                 user_name=user_name,
-                phone=item.get("phone", ""),
+                phone=None,
                 product_interest=item.get("product_interest", item.get("product", "")),
                 intent_level=item.get("intent_level", "medium"),
                 intent_reason=item.get("reason", item.get("intent_reason", "")),

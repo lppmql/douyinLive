@@ -18,6 +18,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 from playwright.async_api import BrowserContext
 
+from app.core.database import SessionLocal
 from app.core.logger import logger
 from app.core.config import settings
 from app.models.live_rooms import LiveRoom
@@ -40,7 +41,7 @@ COMMENT_URL = f"{LEADS_BASE}/pc/analysis/live-comment"
 HOME_URL = f"{LEADS_BASE}/pc/growth/home"
 HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
 HISTORY_DETAIL_TIMEOUT_SECONDS = 45
-HISTORY_DETAIL_CONCURRENCY = 2
+HISTORY_DETAIL_CONCURRENCY = 1
 HISTORY_DETAIL_BATCH_SIZE = 20
 ENTERPRISE_PAGE_SIZE = 100
 ENTERPRISE_MAX_PAGES = 200
@@ -256,7 +257,7 @@ async def collect_all(
             enterprise_sync,
         )
         report("history_sync", 65, 0, 0, "正在同步账号历史直播场次")
-        history_sync = _sync_history_sessions(db, account, rooms[0])
+        history_sync = await _sync_history_sessions(db, account, rooms[0])
         report("history_sync", 75, history_sync, history_sync, f"历史场次同步完成，本次新增 {history_sync} 场")
 
         # 未映射只代表当前接口暂时没返回主播关系，不能在采集过程中删除真实场次。
@@ -300,7 +301,10 @@ async def collect_all(
         await browser_manager.refresh_logged_in_state()
 
         report("dataease_sync", 98, 0, 0, "正在增量同步 DataEase 分析宽表")
-        dataease_sync = sync_pending_complete_sessions(db, limit=100)
+        # DataEase 逐场聚合包含较多同步 SQL，使用独立会话在线程执行，避免卡住状态接口。
+        db.commit()
+        dataease_sync = await asyncio.to_thread(_sync_pending_dataease, 100)
+        db.expire_all()
 
         report("asr_queue", 99, 0, settings.ASR_MAX_QUEUED, "正在按安全容量补充话术转写队列")
         asr_runtime = await asyncio.to_thread(get_asr_runtime_status)
@@ -350,6 +354,15 @@ def _is_context_closed_message(value: Any) -> bool:
         "handler is closed",
         "transport closed",
     ))
+
+
+def _sync_pending_dataease(limit: int) -> dict:
+    """使用线程专属数据库会话同步 DataEase，禁止跨线程复用请求会话。"""
+    sync_db = SessionLocal()
+    try:
+        return sync_pending_complete_sessions(sync_db, limit=limit)
+    finally:
+        sync_db.close()
 
 
 def _sanitize_collector_error(value: Any, max_length: int = COLLECTOR_ERROR_MAX_LENGTH) -> str:
@@ -1105,7 +1118,13 @@ async def _scrape_home_live_card(context: BrowserContext) -> dict:
     return info
 
 
-def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom) -> int:
+def _fetch_history_payload(req: Request) -> dict:
+    """在线程中执行平台历史接口请求，避免阻塞 FastAPI 事件循环。"""
+    with urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+async def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom) -> int:
     """同步当前账号下的历史直播场次到 live_sessions。"""
     storage_path = account.storage_state_path or ""
     cookie_jar = _load_storage_cookies(storage_path)
@@ -1135,8 +1154,7 @@ def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom)
             },
         )
         try:
-            with urlopen(req, timeout=30) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+            payload = await asyncio.to_thread(_fetch_history_payload, req)
         except Exception as exc:
             # 历史接口偶发断开时不能阻断企业主播映射和逐场详情采集。
             logger.warning("历史场次接口暂时不可用，继续企业场次同步: %s", exc)
@@ -1197,6 +1215,8 @@ def _sync_history_sessions(db: Session, account: ScraperAccount, room: LiveRoom)
             session.private_message_count = _safe_int(item.get("consultation_count")) or session.private_message_count or 0
 
         page_no += 1
+        # 大账号可能有数十页历史场次，主动让出执行权以保持进度和健康接口可响应。
+        await asyncio.sleep(0)
 
     db.commit()
     return synced

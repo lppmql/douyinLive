@@ -2,7 +2,7 @@ import { backendRequest } from '../request';
 import { getServiceBaseURL } from '@/utils/service';
 
 /**
- * 抖音留资直播数据分析系统 — API 接口
+ * 零食店避坑直播运营复盘系统 — API 接口
  */
 
 const API_PREFIX = '/api/v1';
@@ -195,6 +195,81 @@ export function runTranscriptAiPipeline(sessionId: number) {
   return backendRequest<Api.Douyin.KnowledgeSyncResult & { result: Record<string, unknown> }>({
     url: `${API_PREFIX}/ai/pipeline/${sessionId}`,
     method: 'POST'
+  });
+}
+
+/* ---------- 直播复盘工作台 ---------- */
+
+export function fetchReviewWorkbench(sessionId: number, refreshFindings = false) {
+  return backendRequest<Api.Douyin.ReviewWorkbench>({
+    url: `${API_PREFIX}/reviews/${sessionId}/workbench`,
+    params: { refresh_findings: refreshFindings }
+  });
+}
+
+export function generateSessionReview(sessionId: number) {
+  return backendRequest<{ status: string; finding_count: number; workbench: Api.Douyin.ReviewWorkbench }>({
+    url: `${API_PREFIX}/reviews/${sessionId}/generate`,
+    method: 'POST'
+  });
+}
+
+export function fetchSessionComparison(sessionId: number, otherSessionId?: number) {
+  return backendRequest<Api.Douyin.SessionComparison>({
+    url: `${API_PREFIX}/reviews/${sessionId}/comparison`,
+    params: { other_session_id: otherSessionId }
+  });
+}
+
+export function updateReviewFindingStatus(
+  sessionId: number,
+  findingId: number,
+  status: Api.Douyin.ReviewFinding['status']
+) {
+  return backendRequest<Api.Douyin.ReviewFinding>({
+    url: `${API_PREFIX}/reviews/${sessionId}/findings/${findingId}`,
+    method: 'PATCH',
+    data: { status }
+  });
+}
+
+export function createReviewAction(sessionId: number, data: Api.Douyin.ReviewActionPayload) {
+  return backendRequest<Api.Douyin.ReviewAction>({
+    url: `${API_PREFIX}/reviews/${sessionId}/actions`,
+    method: 'POST',
+    data
+  });
+}
+
+export function updateReviewAction(
+  sessionId: number,
+  actionId: number,
+  data: Partial<Api.Douyin.ReviewActionPayload & Pick<Api.Douyin.ReviewAction, 'status' | 'verification_note'>>
+) {
+  return backendRequest<Api.Douyin.ReviewAction>({
+    url: `${API_PREFIX}/reviews/${sessionId}/actions/${actionId}`,
+    method: 'PATCH',
+    data
+  });
+}
+
+export function createScriptAsset(sessionId: number, data: Api.Douyin.ScriptAssetPayload) {
+  return backendRequest<Api.Douyin.ScriptAsset>({
+    url: `${API_PREFIX}/reviews/${sessionId}/script-assets`,
+    method: 'POST',
+    data
+  });
+}
+
+export function updateScriptAsset(
+  sessionId: number,
+  assetId: number,
+  data: Partial<Pick<Api.Douyin.ScriptAsset, 'category' | 'title' | 'status' | 'performance_note'>>
+) {
+  return backendRequest<Api.Douyin.ScriptAsset>({
+    url: `${API_PREFIX}/reviews/${sessionId}/script-assets/${assetId}`,
+    method: 'PATCH',
+    data
   });
 }
 

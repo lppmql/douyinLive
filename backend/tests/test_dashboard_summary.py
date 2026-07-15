@@ -13,6 +13,7 @@ class DashboardSummaryTest(unittest.TestCase):
             detail_complete_count=20,
             total_viewers=1000,
             total_comments=200,
+            total_private_messages=25,
             total_leads=10,
             total_ad_cost=125.5,
         )
@@ -21,6 +22,8 @@ class DashboardSummaryTest(unittest.TestCase):
 
         self.assertEqual(result["detail_completion_rate"], 80.0)
         self.assertEqual(result["average_lead_cost"], 12.55)
+        self.assertEqual(result["total_private_messages"], 25)
+        self.assertEqual(result["high_intent_comment_count"], 0)
 
     def test_handles_empty_database_without_division_by_zero(self):
         row = SimpleNamespace(
@@ -30,6 +33,7 @@ class DashboardSummaryTest(unittest.TestCase):
             detail_complete_count=0,
             total_viewers=0,
             total_comments=0,
+            total_private_messages=0,
             total_leads=0,
             total_ad_cost=0,
         )
@@ -38,3 +42,4 @@ class DashboardSummaryTest(unittest.TestCase):
 
         self.assertEqual(result["detail_completion_rate"], 0)
         self.assertEqual(result["average_lead_cost"], 0)
+        self.assertEqual(result["open_review_action_count"], 0)

@@ -16,7 +16,7 @@ import hashlib
 import signal
 import sys
 from time import monotonic
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from app.core.config import settings
 from app.core.logger import logger
@@ -59,6 +59,7 @@ class AsrWorker:
     def __init__(self):
         self._semaphore = asyncio.Semaphore(settings.MAX_REALTIME_ASR_TASKS or 1)
         self._active_tasks: set[asyncio.Task] = set()
+        self._active_task_ids: set[int] = set()
         self._running = False
         self._poll_interval = 5  # 秒
         self._worker_id = current_worker_id("asr")
@@ -67,7 +68,7 @@ class AsrWorker:
         """主循环"""
         self._running = True
         logger.info(f"ASR Worker 启动 (并发上限: {settings.MAX_REALTIME_ASR_TASKS})")
-        self._recover_stale_tasks()
+        self._recover_stale_tasks(recover_all=True)
 
         while self._running:
             try:
@@ -79,11 +80,17 @@ class AsrWorker:
                 logger.error(f"ASR Worker 异常: {e}")
                 await asyncio.sleep(10)
 
-    def _recover_stale_tasks(self):
-        """Worker 重启时保留已完成分片，并重新排队未完成任务。"""
+    def _recover_stale_tasks(self, recover_all: bool = False):
+        """回收重启遗留或心跳超时的任务，并保留已完成分片。"""
         db = SessionLocal()
         try:
-            stale = db.query(AsrTask).filter(AsrTask.status == "processing").all()
+            query = db.query(AsrTask).filter(AsrTask.status == "processing")
+            if not recover_all:
+                cutoff = datetime.utcnow() - timedelta(seconds=max(60, settings.TASK_HEARTBEAT_TIMEOUT_SECONDS))
+                query = query.filter(AsrTask.heartbeat_at < cutoff)
+                if self._active_task_ids:
+                    query = query.filter(~AsrTask.id.in_(self._active_task_ids))
+            stale = query.all()
             for task in stale:
                 can_retry = (task.retry_count or 0) < (task.max_retries or 3)
                 task.status = "queued" if can_retry else "failed"
@@ -112,6 +119,8 @@ class AsrWorker:
 
     async def _poll_tasks(self):
         """轮询 queued 任务"""
+        # Worker 未重启但协程被中断时，也要自动回收数据库中的旧执行状态。
+        self._recover_stale_tasks()
         max_tasks = settings.MAX_REALTIME_ASR_TASKS or 1
         available_slots = max(0, max_tasks - len(self._active_tasks))
         if available_slots == 0:
@@ -151,7 +160,13 @@ class AsrWorker:
                     continue
                 worker_task = asyncio.create_task(self._process_task(task_id))
                 self._active_tasks.add(worker_task)
-                worker_task.add_done_callback(self._active_tasks.discard)
+                self._active_task_ids.add(task_id)
+
+                def discard_finished(done_task, claimed_task_id=task_id):
+                    self._active_tasks.discard(done_task)
+                    self._active_task_ids.discard(claimed_task_id)
+
+                worker_task.add_done_callback(discard_finished)
         finally:
             db.close()
 

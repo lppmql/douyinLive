@@ -109,3 +109,27 @@ def test_enterprise_discovery_counts_as_success_when_root_room_page_warns():
     assert _collection_succeeded({"collected_rooms": 0, "enterprise_session_discovered_count": 1022}) is True
     assert _collection_succeeded({"collected_rooms": 0, "history_detail_synced_count": 20}) is True
     assert _collection_succeeded({"collected_rooms": 0}) is False
+
+
+def test_realtime_browser_jobs_are_serialized():
+    active_count = 0
+    max_active_count = 0
+
+    async def fake_collect(*_args):
+        nonlocal active_count, max_active_count
+        active_count += 1
+        max_active_count = max(max_active_count, active_count)
+        await asyncio.sleep(0.02)
+        active_count -= 1
+
+    async def scenario():
+        with patch.object(scheduler_manager, "_collect_wrapper_serialized", side_effect=fake_collect):
+            await asyncio.gather(
+                scheduler_manager._collect_wrapper(13244, "https://example.test/one", "live_detail"),
+                scheduler_manager._collect_wrapper(13245, "https://example.test/two", "live_detail"),
+                scheduler_manager._collect_wrapper(13244, "https://example.test/one", "stream_refresh"),
+            )
+
+    asyncio.run(scenario())
+
+    assert max_active_count == 1

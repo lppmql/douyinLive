@@ -33,8 +33,28 @@ async function run(type: 'score' | 'anomaly' | 'optimize' | 'intent') {
     action.value = '';
   }
 }
-function resultText(key: string) {
-  return results.value[key] ? JSON.stringify(results.value[key], null, 2) : '尚未运行此项分析';
+function resultObject(key: string): Record<string, unknown> {
+  const value = results.value[key];
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+function primitiveEntries(key: string) {
+  return Object.entries(resultObject(key)).filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value));
+}
+function arrayEntries(key: string) {
+  return Object.entries(resultObject(key)).filter(([, value]) => Array.isArray(value));
+}
+function objectEntries(key: string) {
+  return Object.entries(resultObject(key)).filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value));
+}
+function valueText(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '未提供';
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${key}：${valueText(item)}`)
+      .join('；');
+  }
+  return String(value);
 }
 </script>
 
@@ -76,24 +96,29 @@ function resultText(key: string) {
         :key="item[0]"
       >
         <NCard size="small" :title="item[1]" :bordered="true">
-          <pre class="result-panel">{{ resultText(item[0]) }}</pre>
+          <NEmpty v-if="!results[item[0]]" description="尚未运行此项分析" class="py-26px" />
+          <NSpace v-else vertical :size="12">
+            <NDescriptions v-if="primitiveEntries(item[0]).length" :column="1" bordered size="small">
+              <NDescriptionsItem v-for="entry in primitiveEntries(item[0])" :key="entry[0]" :label="entry[0]">
+                {{ valueText(entry[1]) }}
+              </NDescriptionsItem>
+            </NDescriptions>
+            <div v-for="entry in arrayEntries(item[0])" :key="entry[0]">
+              <div class="mb-6px text-13px font-700">{{ entry[0] }}</div>
+              <NList bordered size="small">
+                <NListItem v-for="(value, index) in entry[1]" :key="index">{{ valueText(value) }}</NListItem>
+              </NList>
+            </div>
+            <NCollapse v-if="objectEntries(item[0]).length">
+              <NCollapseItem v-for="entry in objectEntries(item[0])" :key="entry[0]" :title="entry[0]">
+                <div class="rounded-8px bg-gray-50 p-10px text-12px leading-20px dark:bg-dark-300">{{ valueText(entry[1]) }}</div>
+              </NCollapseItem>
+            </NCollapse>
+          </NSpace>
         </NCard>
       </NGi>
     </NGrid>
   </NSpace>
 </template>
 
-<style scoped>
-.result-panel {
-  min-height: 130px;
-  margin: 0;
-  overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  border-radius: 8px;
-  background: rgba(128, 128, 128, 0.08);
-  padding: 12px;
-  font-size: 13px;
-  line-height: 1.7;
-}
-</style>
+<style scoped></style>

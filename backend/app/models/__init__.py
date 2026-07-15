@@ -18,6 +18,7 @@ from app.models.asr_tasks import AsrTask
 from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.knowledge_time_slices import KnowledgeTimeSlice
 from app.models.user import User
+from app.models.review import ReviewFinding, ReviewActionItem, ScriptAsset, ComplianceRule
 
 __all__ = [
     "Base",
@@ -40,4 +41,8 @@ __all__ = [
     "AsrAudioChunk",
     "KnowledgeTimeSlice",
     "User",
+    "ReviewFinding",
+    "ReviewActionItem",
+    "ScriptAsset",
+    "ComplianceRule",
 ]

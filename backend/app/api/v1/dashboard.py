@@ -5,13 +5,15 @@ from sqlalchemy import case, distinct, func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.comments import Comment
 from app.models.live_sessions import LiveSession
+from app.models.review import ReviewActionItem
 
 
 router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
 
 
-def _serialize_summary(row) -> dict:
+def _serialize_summary(row, high_intent_comment_count: int = 0, open_review_action_count: int = 0) -> dict:
     session_count = int(row.session_count or 0)
     total_leads = int(row.total_leads or 0)
     total_ad_cost = float(row.total_ad_cost or 0)
@@ -24,9 +26,12 @@ def _serialize_summary(row) -> dict:
         "detail_completion_rate": round(detail_complete_count / session_count * 100, 1) if session_count else 0,
         "total_viewers": int(row.total_viewers or 0),
         "total_comments": int(row.total_comments or 0),
+        "high_intent_comment_count": int(high_intent_comment_count or 0),
+        "total_private_messages": int(row.total_private_messages or 0),
         "total_leads": total_leads,
         "total_ad_cost": round(total_ad_cost, 2),
         "average_lead_cost": round(total_ad_cost / total_leads, 2) if total_leads else 0,
+        "open_review_action_count": int(open_review_action_count or 0),
     }
 
 
@@ -41,8 +46,13 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
         func.sum(case((LiveSession.detail_collection_status == "complete", 1), else_=0)).label("detail_complete_count"),
         func.coalesce(func.sum(LiveSession.total_viewers), 0).label("total_viewers"),
         func.coalesce(func.sum(LiveSession.comments_count), 0).label("total_comments"),
+        func.coalesce(func.sum(LiveSession.private_message_count), 0).label("total_private_messages"),
         func.coalesce(func.sum(LiveSession.leads_count), 0).label("total_leads"),
         func.coalesce(func.sum(LiveSession.ad_cost), 0).label("total_ad_cost"),
     ).one()
 
-    return _serialize_summary(row)
+    high_intent_comment_count = db.query(func.count(Comment.id)).filter(Comment.is_high_intent == 1).scalar() or 0
+    open_review_action_count = db.query(func.count(ReviewActionItem.id)).filter(
+        ReviewActionItem.status.in_(("pending", "in_progress"))
+    ).scalar() or 0
+    return _serialize_summary(row, high_intent_comment_count, open_review_action_count)

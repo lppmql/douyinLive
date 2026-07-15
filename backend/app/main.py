@@ -1,5 +1,5 @@
 """
-抖音留资直播分析系统 - FastAPI 入口
+零食店避坑直播运营复盘系统 - FastAPI 入口
 """
 import asyncio
 import time

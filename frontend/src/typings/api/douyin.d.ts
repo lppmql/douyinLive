@@ -1,7 +1,7 @@
 /**
  * Api Douyin
  *
- * 抖音留资直播数据分析系统 — 业务类型定义
+ * 零食店避坑直播运营复盘系统 — 业务类型定义
  */
 declare namespace Api {
   namespace Douyin {
@@ -13,9 +13,12 @@ declare namespace Api {
       detail_completion_rate: number;
       total_viewers: number;
       total_comments: number;
+      high_intent_comment_count: number;
+      total_private_messages: number;
       total_leads: number;
       total_ad_cost: number;
       average_lead_cost: number;
+      open_review_action_count: number;
     }
 
     /* ---------- 直播间 ---------- */
@@ -315,6 +318,177 @@ declare namespace Api {
       title: string;
       desc: string;
       type: 'warning' | 'error' | 'info';
+    }
+
+    interface ReviewCompletenessComponent {
+      name: string;
+      weight: number;
+      score: number;
+      captured: number;
+      expected: number;
+      status: 'complete' | 'partial' | 'missing';
+    }
+
+    interface ReviewCompleteness {
+      score: number;
+      level: 'complete' | 'usable' | 'insufficient';
+      analysis_ready: boolean;
+      duration_seconds: number;
+      components: ReviewCompletenessComponent[];
+    }
+
+    interface ReviewTranscriptSegment {
+      id: number;
+      segment_start: number;
+      segment_end: number;
+      text_content: string | null;
+      segment_type: string | null;
+      ai_score: number | null;
+    }
+
+    interface ReviewFinding {
+      id: number;
+      session_id: number;
+      report_id: number | null;
+      finding_type: 'observation' | 'opportunity' | 'risk';
+      category: string;
+      title: string;
+      description: string | null;
+      severity: 'info' | 'warning' | 'critical';
+      start_seconds: number | null;
+      end_seconds: number | null;
+      evidence_type: 'metric' | 'comment' | 'transcript' | 'session';
+      evidence_text: string | null;
+      metric_name: string | null;
+      metric_before: number | null;
+      metric_after: number | null;
+      confidence: number;
+      source: 'rule' | 'ai' | 'manual';
+      status: 'open' | 'confirmed' | 'dismissed' | 'resolved';
+      created_at: string;
+    }
+
+    interface ReviewAction {
+      id: number;
+      session_id: number;
+      finding_id: number | null;
+      title: string;
+      description: string | null;
+      owner_name: string | null;
+      priority: 'low' | 'medium' | 'high';
+      status: 'pending' | 'in_progress' | 'completed' | 'verified';
+      due_at: string | null;
+      verification_session_id: number | null;
+      verification_note: string | null;
+      created_at: string;
+      updated_at: string;
+    }
+
+    interface ReviewActionPayload {
+      finding_id?: number | null;
+      title: string;
+      description?: string | null;
+      owner_name?: string | null;
+      priority?: 'low' | 'medium' | 'high';
+      due_at?: string | null;
+    }
+
+    interface ScriptAsset {
+      id: number;
+      session_id: number;
+      transcript_segment_id: number | null;
+      category: string;
+      title: string;
+      content: string;
+      start_seconds: number | null;
+      end_seconds: number | null;
+      performance_note: string | null;
+      status: 'candidate' | 'approved' | 'archived';
+      created_at: string;
+      updated_at: string;
+    }
+
+    interface ScriptAssetPayload {
+      transcript_segment_id?: number | null;
+      category: string;
+      title: string;
+      content: string;
+      start_seconds?: number | null;
+      end_seconds?: number | null;
+      performance_note?: string | null;
+      status?: 'candidate' | 'approved' | 'archived';
+    }
+
+    interface DomainCoverageItem {
+      category: string;
+      covered: boolean;
+      segment_count: number;
+      first_seconds: number | null;
+    }
+
+    interface ReviewLiveAlert {
+      key: string;
+      severity: 'info' | 'warning' | 'critical';
+      title: string;
+      description: string;
+      start_seconds: number | null;
+    }
+
+    interface ReviewLatestReport {
+      id: number;
+      report_type: string;
+      report_title: string | null;
+      summary: string | null;
+      report_content: Record<string, unknown> | null;
+      created_at: string;
+    }
+
+    interface ReviewWorkbench {
+      session_id: number;
+      business_context: string;
+      completeness: ReviewCompleteness;
+      transcript_segments: ReviewTranscriptSegment[];
+      domain_coverage: DomainCoverageItem[];
+      findings: ReviewFinding[];
+      actions: ReviewAction[];
+      script_assets: ScriptAsset[];
+      live_alerts: ReviewLiveAlert[];
+      latest_reports: ReviewLatestReport[];
+    }
+
+    interface ComparisonDimension {
+      key: string;
+      label: string;
+      current: number;
+      baseline: number;
+      delta: number;
+      delta_rate: number | null;
+    }
+
+    interface ComparisonSeriesPoint {
+      minute: number;
+      online_count: number;
+      comment_count: number;
+      clue_count: number;
+      follow_count: number;
+    }
+
+    interface ComparisonSession {
+      id: number;
+      anchor_name: string | null;
+      session_title: string | null;
+      live_start_time: string | null;
+      duration_seconds: number;
+      completeness: number;
+    }
+
+    interface SessionComparison {
+      current: ComparisonSession;
+      baseline: ComparisonSession;
+      dimensions: ComparisonDimension[];
+      current_series: ComparisonSeriesPoint[];
+      baseline_series: ComparisonSeriesPoint[];
+      comparison_note: string;
     }
 
     /* ---------- 知识库 ---------- */
