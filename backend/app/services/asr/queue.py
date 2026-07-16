@@ -28,6 +28,12 @@ def reset_failed_task_for_retry(task: AsrTask, failed_chunks: list[AsrAudioChunk
     task.completed_at = None
     task.worker_id = None
     task.heartbeat_at = None
+    task.postprocess_status = "pending"
+    task.postprocess_started_at = None
+    task.postprocess_completed_at = None
+    task.postprocess_error = None
+    task.postprocess_attempt_count = 0
+    task.postprocess_result = None
     ensure_task_identity(task, "asr", f"asr:session:{task.session_id}")
 
 

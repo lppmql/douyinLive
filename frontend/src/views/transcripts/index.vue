@@ -150,6 +150,18 @@ function getStatusType(status?: DisplayStatus): 'success' | 'warning' | 'error' 
     | 'info';
 }
 
+function getPostprocessLabel(status: Api.Douyin.TranscriptTask['postprocess_status']) {
+  return { pending: '待复盘', processing: '复盘入库中', completed: '已复盘入库', failed: '复盘入库失败' }[status];
+}
+
+function getPostprocessType(status: Api.Douyin.TranscriptTask['postprocess_status']) {
+  return { pending: 'info', processing: 'warning', completed: 'success', failed: 'error' }[status] as
+    | 'info'
+    | 'warning'
+    | 'success'
+    | 'error';
+}
+
 function getSessionStartTimestamp(value: string | null) {
   const timestamp = value ? Date.parse(value) : 0;
   return Number.isFinite(timestamp) ? timestamp : 0;
@@ -266,8 +278,10 @@ async function runAiPipeline() {
   try {
     const response = await runTranscriptAiPipeline(selectedSessionId.value);
     const data = response.data;
-    const saved = data ? data.live_data_saved + data.comments_saved + data.transcript_saved + data.analysis_saved : 0;
-    message.success(`AI 分析完成，知识库新增 ${saved} 条真实数据`);
+    const saved = data
+      ? data.live_data_saved + data.comments_saved + data.transcript_saved + data.analysis_saved + data.review_saved
+      : 0;
+    message.success(`AI 复盘完成，知识库新增或更新 ${saved} 条真实数据`);
   } catch {
     message.error('AI 分析失败，请确认本场已有完整话术');
   } finally {
@@ -606,6 +620,14 @@ onUnmounted(() => {
                 <div class="flex flex-wrap items-center gap-7px">
                   <strong class="text-14px">{{ task.anchor_name }}</strong>
                   <NTag size="tiny" :type="getStatusType(task.status)" :bordered="false">{{ getStatusLabel(task.status) }}</NTag>
+                  <NTag
+                    v-if="task.status === 'completed'"
+                    size="tiny"
+                    :type="getPostprocessType(task.postprocess_status)"
+                    :bordered="false"
+                  >
+                    {{ getPostprocessLabel(task.postprocess_status) }}
+                  </NTag>
                   <span class="text-11px text-gray-400">任务 #{{ task.id }}</span>
                 </div>
                 <div class="mt-5px truncate text-12px text-gray-500">{{ task.session_title }}</div>
@@ -621,6 +643,9 @@ onUnmounted(() => {
             <NAlert v-if="task.error_message" type="error" :bordered="false" class="mt-10px">
               {{ task.error_message }}
               <NButton text type="error" class="ml-6px" @click="openSessionDetail(task.session_id)">检查回放</NButton>
+            </NAlert>
+            <NAlert v-if="task.postprocess_error" type="warning" :bordered="false" class="mt-10px">
+              {{ task.postprocess_error }}
             </NAlert>
           </NCard>
         </div>

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from sqlalchemy.dialects.mysql import LONGTEXT
 
 from app.core.config import Settings
+from app.models.knowledge_base import KnowledgeBase
 from app.models.transcript_full_texts import TranscriptFullText
 from app.services.asr.queue import reset_failed_task_for_retry
 from app.services.asr.m3u8_pipe import M3u8Pipe
@@ -92,6 +93,10 @@ def test_task_event_is_written_to_redis_stream(monkeypatch):
 
 def test_complete_transcript_uses_longtext_for_long_live_sessions():
     assert isinstance(TranscriptFullText.__table__.c.full_text.type, LONGTEXT)
+
+
+def test_knowledge_content_uses_longtext_for_complete_transcripts_and_reviews():
+    assert isinstance(KnowledgeBase.__table__.c.content.type, LONGTEXT)
 
 
 def test_manual_retry_resets_failed_task_and_keeps_completed_chunks():

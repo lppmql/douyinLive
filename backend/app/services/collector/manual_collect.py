@@ -29,6 +29,7 @@ from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.stream_sources import StreamSource
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_logs import ScraperLog
+from app.models.asr_tasks import AsrTask
 from app.services.asr.control import get_asr_runtime_status
 from app.services.asr.queue import queue_auto_transcriptions
 from app.services.collector.browser import browser_manager
@@ -313,6 +314,25 @@ async def collect_all(
             if asr_runtime["enabled"]
             else {"created_count": 0, "active_count": 0, "capacity": settings.ASR_MAX_QUEUED, "session_ids": []}
         )
+        postprocess_counts = {
+            status: db.query(AsrTask).filter(
+                AsrTask.status == "completed",
+                AsrTask.postprocess_status == status,
+            ).count()
+            for status in ("pending", "processing", "completed", "failed")
+        }
+        report(
+            "post_collection",
+            99,
+            postprocess_counts["completed"],
+            sum(postprocess_counts.values()),
+            (
+                "话术转写完成后将自动生成 AI 复盘并同步知识库："
+                f"待处理 {postprocess_counts['pending']}，处理中 {postprocess_counts['processing']}，"
+                f"已完成 {postprocess_counts['completed']}，失败 {postprocess_counts['failed']}"
+            ),
+            postprocess_counts,
+        )
 
         collected = sum(1 for r in results if r.get("error") is None)
         final_result = {
@@ -334,6 +354,10 @@ async def collect_all(
             "asr_queued_count": asr_queue["created_count"],
             "asr_active_count": asr_queue["active_count"],
             "asr_queue_capacity": asr_queue["capacity"],
+            "postprocess_pending_count": postprocess_counts["pending"],
+            "postprocess_processing_count": postprocess_counts["processing"],
+            "postprocess_completed_count": postprocess_counts["completed"],
+            "postprocess_failed_count": postprocess_counts["failed"],
             "results": results,
         }
         report("completed", 100, collected, len(rooms), "刷新数据采集完成", final_result)

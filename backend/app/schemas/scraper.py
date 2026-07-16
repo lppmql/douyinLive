@@ -134,6 +134,10 @@ class AsrControlResponse(BaseModel):
     worker_running: bool
     queued_count: int = 0
     processing_count: int = 0
+    postprocess_pending_count: int = 0
+    postprocess_processing_count: int = 0
+    postprocess_completed_count: int = 0
+    postprocess_failed_count: int = 0
     message: str = ""
 
 
@@ -165,5 +169,14 @@ class CollectAllResponse(BaseModel):
     history_detail_remaining_count: int = 0
     history_detail_batch_size: int = 0
     history_detail_failed_count: int = 0
+    dataease_synced_count: int = 0
+    dataease_failed_count: int = 0
+    asr_queued_count: int = 0
+    asr_active_count: int = 0
+    asr_queue_capacity: int = 0
+    postprocess_pending_count: int = 0
+    postprocess_processing_count: int = 0
+    postprocess_completed_count: int = 0
+    postprocess_failed_count: int = 0
     results: list[CollectRoomResult] = Field(default_factory=list)
     message: Optional[str] = None

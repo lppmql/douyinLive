@@ -189,12 +189,23 @@ async def check_account_health(account_id: int, db: Session = Depends(get_db)):
 def _asr_control_response(db: Session, runtime: dict, message: str = "") -> AsrControlResponse:
     queued_count = db.query(AsrTask).filter(AsrTask.status == "queued").count()
     processing_count = db.query(AsrTask).filter(AsrTask.status == "processing").count()
+    postprocess_counts = {
+        status: db.query(AsrTask).filter(
+            AsrTask.status == "completed",
+            AsrTask.postprocess_status == status,
+        ).count()
+        for status in ("pending", "processing", "completed", "failed")
+    }
     return AsrControlResponse(
         enabled=runtime["enabled"],
         engine_running=runtime["engine_running"],
         worker_running=runtime["worker_running"],
         queued_count=queued_count,
         processing_count=processing_count,
+        postprocess_pending_count=postprocess_counts["pending"],
+        postprocess_processing_count=postprocess_counts["processing"],
+        postprocess_completed_count=postprocess_counts["completed"],
+        postprocess_failed_count=postprocess_counts["failed"],
         message=message,
     )
 

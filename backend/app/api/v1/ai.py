@@ -13,6 +13,7 @@ from app.services.ai.scoring import score_session_transcript, batch_score_recent
 from app.services.ai.analysis import analyze_trend, detect_anomalies
 from app.services.ai.high_intent_service import identify_high_intent, list_high_intent_users
 from app.services.ai.kb_service import qa_search, sync_session_to_kb
+from app.services.ai.post_collection import process_session_post_collection
 from app.models.analysis_reports import AnalysisReport
 from app.models.high_intent_users import HighIntentUser
 from app.models.live_sessions import LiveSession
@@ -79,15 +80,17 @@ def score_session(session_id: int, db: Session = Depends(get_db)):
 
 @router.post("/pipeline/{session_id}")
 def run_transcript_ai_pipeline(session_id: int, db: Session = Depends(get_db)):
-    """转写完成后执行评分，并把话术和分析结果同步到知识库。"""
-    result = score_session_transcript(session_id, db)
-    if result is None:
-        raise HTTPException(400, "没有足够的已完成话术，无法执行 AI 分析")
-    saved = sync_session_to_kb(db, session_id)
+    """手动重跑与自动链路相同的评分、复盘、知识库和 DataEase 后处理。"""
+    try:
+        result = process_session_post_collection(db, session_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not result["success"]:
+        raise HTTPException(500, f"AI复盘或知识库同步失败: {result['errors']}")
     return {
         "status": "ok",
         "result": result,
-        **saved,
+        **result["knowledge"],
     }
 
 

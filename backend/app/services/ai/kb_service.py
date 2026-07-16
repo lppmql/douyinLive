@@ -13,6 +13,7 @@ from app.models.live_sessions import LiveSession
 from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
+from app.models.review import ReviewFinding
 from app.services.ai.deepseek_client import chat
 from app.services.ai.prompt_service import get_prompt
 from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices
@@ -275,6 +276,7 @@ def sync_session_to_kb(db: Session, session_id: int) -> dict[str, int]:
         "comments_saved": save_comments_to_kb(db, session_id),
         "transcript_saved": save_transcript_to_kb(db, session_id),
         "analysis_saved": save_analysis_to_kb(db, session_id),
+        "review_saved": save_review_findings_to_kb(db, session_id),
         "time_slices_created": slice_result["created_count"],
         "time_slices_updated": slice_result["updated_count"],
         "time_slices_unchanged": slice_result["unchanged_count"],
@@ -330,23 +332,33 @@ def save_analysis_to_kb(db: Session, session_id: int) -> int:
 
     saved = 0
     for r in reports:
+        content = json.dumps(r.report_content, ensure_ascii=False, indent=2) if r.report_content else r.summary
+        if not content:
+            continue
+        title = r.report_title or f"分析 - 场次{session_id}"
+        normalized_content = str(content)[:5000]
         existing = db.query(KnowledgeBase).filter(
             KnowledgeBase.session_id == session_id,
             KnowledgeBase.source_type == "ai_analysis",
-            KnowledgeBase.title == r.report_title,
+            KnowledgeBase.title == title,
         ).first()
         if existing:
-            continue
-
-        content = json.dumps(r.report_content, ensure_ascii=False, indent=2) if r.report_content else r.summary
-        if not content:
+            changed = (
+                existing.content != normalized_content
+                or existing.category != "分析结论"
+                or existing.title != title
+            )
+            existing.title = title
+            existing.content = normalized_content
+            existing.category = "分析结论"
+            saved += int(changed)
             continue
 
         kb = KnowledgeBase(
             session_id=session_id,
             category="分析结论",
-            title=r.report_title or f"分析 - 场次{session_id}",
-            content=str(content)[:5000],
+            title=title,
+            content=normalized_content,
             source_type="ai_analysis",
         )
         db.add(kb)
@@ -356,3 +368,66 @@ def save_analysis_to_kb(db: Session, session_id: int) -> int:
         db.commit()
         logger.info("场次 %d 的 %d 条分析结果已保存到知识库", session_id, saved)
     return saved
+
+
+def save_review_findings_to_kb(db: Session, session_id: int) -> int:
+    """把结构化复盘发现整理成可检索、可回到原场次核验的知识。"""
+    session = db.get(LiveSession, session_id)
+    if not session:
+        return 0
+    findings = (
+        db.query(ReviewFinding)
+        .filter(ReviewFinding.session_id == session_id)
+        .order_by(ReviewFinding.start_seconds.asc(), ReviewFinding.severity.desc(), ReviewFinding.id.asc())
+        .all()
+    )
+    if not findings:
+        return 0
+
+    anchor = session.anchor_name or session.anchor_nickname or "未知主播"
+    title = f"直播复盘 - {anchor} - 场次{session_id}"
+    lines = [
+        f"场次ID：{session_id}",
+        f"主播：{anchor}",
+        f"标题：{session.session_title or '未命名直播'}",
+        f"复盘发现：{len(findings)}条",
+        "以下结论只来自该场次已采集的指标、评论和真实话术：",
+    ]
+    for index, finding in enumerate(findings, start=1):
+        seconds = float(finding.start_seconds) if finding.start_seconds is not None else None
+        time_label = f"{int(seconds // 60):02d}:{int(seconds % 60):02d}" if seconds is not None else "整场"
+        lines.extend(
+            [
+                f"{index}. [{finding.category or '未分类'}][{finding.severity or 'info'}][{time_label}] {finding.title}",
+                f"结论：{finding.description or '无补充说明'}",
+                f"真实证据：{finding.evidence_text or '仅有场次级指标证据'}",
+                f"证据类型：{finding.evidence_type or 'session'}；来源：{finding.source or 'rule'}",
+            ]
+        )
+    content = "\n".join(lines)
+
+    existing = db.query(KnowledgeBase).filter(
+        KnowledgeBase.session_id == session_id,
+        KnowledgeBase.source_type == "ai_analysis",
+        KnowledgeBase.title.like("直播复盘 - %"),
+    ).first()
+    if existing:
+        changed = existing.title != title or existing.content != content or existing.category != "分析结论"
+        existing.title = title
+        existing.content = content
+        existing.category = "分析结论"
+        db.commit()
+        return int(changed)
+
+    db.add(
+        KnowledgeBase(
+            session_id=session_id,
+            category="分析结论",
+            title=title,
+            content=content,
+            source_type="ai_analysis",
+        )
+    )
+    db.commit()
+    logger.info("场次 %d 的 %d 条复盘发现已保存到知识库", session_id, len(findings))
+    return 1

@@ -1,5 +1,5 @@
 """ASR 转写任务表 — 并发控制与管理"""
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
+from sqlalchemy import JSON, Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 
@@ -9,6 +9,7 @@ class AsrTask(Base, TimestampMixin):
     __tablename__ = "asr_tasks"
     __table_args__ = (
         Index("idx_asr_tasks_status_created", "status", "created_at"),
+        Index("idx_asr_tasks_postprocess_status", "postprocess_status", "postprocess_attempt_count"),
         Index("idx_asr_tasks_idempotency", "idempotency_key", unique=True),
         Index("idx_asr_tasks_trace", "trace_id"),
     )
@@ -28,3 +29,11 @@ class AsrTask(Base, TimestampMixin):
     retry_count = Column(Integer, nullable=False, default=0, comment="已执行次数")
     max_retries = Column(Integer, nullable=False, default=3, comment="最大执行次数")
     priority = Column(Integer, nullable=False, default=50, comment="优先级，数值越小越优先")
+    postprocess_status = Column(
+        String(20), nullable=False, default="pending", comment="后处理状态: pending/processing/completed/failed"
+    )
+    postprocess_started_at = Column(DateTime, nullable=True, comment="话术评分与复盘处理开始时间")
+    postprocess_completed_at = Column(DateTime, nullable=True, comment="知识库同步完成时间")
+    postprocess_error = Column(Text, nullable=True, comment="后处理失败或降级原因")
+    postprocess_attempt_count = Column(Integer, nullable=False, default=0, comment="后处理执行次数")
+    postprocess_result = Column(JSON, nullable=True, comment="话术、复盘、知识库和DataEase处理结果")

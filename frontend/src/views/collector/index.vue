@@ -357,6 +357,7 @@ function getStageLabel(stage: unknown) {
     cookie_refresh: '保存登录态',
     dataease_sync: '同步 DataEase',
     asr_queue: '排队生成话术',
+    post_collection: '话术/复盘入库',
     completed: '采集完成',
     failed: '采集失败'
   };
@@ -376,6 +377,8 @@ function getLogSummary(log: Api.Douyin.CollectorLog) {
     details.metrics_count !== undefined && `指标 ${details.metrics_count}`,
     details.comments_count !== undefined && `评论 ${details.comments_count}`,
     details.profiles_count !== undefined && `画像 ${details.profiles_count}`,
+    details.transcript_count !== undefined && `话术 ${details.transcript_count} 段`,
+    details.review_finding_count !== undefined && `复盘 ${details.review_finding_count} 条`,
     payload.progress_percent !== undefined && `进度 ${payload.progress_percent}%`
   ].filter(Boolean);
   return parts.join(' · ') || '-';
@@ -964,7 +967,7 @@ onUnmounted(() => {
                 >
                   <NStep title="账号就绪" description="Cookie 与指纹有效" />
                   <NStep title="发现与补齐" description="主播、场次和详情" />
-                  <NStep title="同步完成" description="日志与 DataEase 更新" />
+                  <NStep title="自动后处理" description="话术、AI复盘与知识库" />
                 </NSteps>
                 <div
                   class="flex flex-wrap items-center justify-between gap-12px rounded-10px bg-gray-100 p-12px dark:bg-white/5"
@@ -982,20 +985,21 @@ onUnmounted(() => {
                     </div>
                     <div>
                       <div class="flex items-center gap-8px font-600">
-                        ASR 话术生成
+                        话术、AI 复盘与知识库
                         <NTag :type="asrStatus?.enabled ? 'success' : 'default'" round size="small">
                           {{ asrStatus?.enabled ? '已开启' : '已关闭' }}
                         </NTag>
                       </div>
                       <div class="mt-3px text-12px text-gray-500">
                         <template v-if="asrStatus?.enabled">
-                          模型与 Worker 正在运行 · 排队 {{ asrStatus.queued_count }} · 处理中
-                          {{ asrStatus.processing_count }}
+                          话术排队 {{ asrStatus.queued_count }} · 话术处理中 {{ asrStatus.processing_count }} ·
+                          复盘处理中 {{ asrStatus.postprocess_processing_count }} · 已入库
+                          {{ asrStatus.postprocess_completed_count }}
                           <span v-if="!asrStatus.queued_count && !asrStatus.processing_count">
                             · 当前空闲但仍占用模型内存，不使用时建议关闭
                           </span>
                         </template>
-                        <template v-else>默认随系统启动；当前已关闭，开启后继续处理安全队列</template>
+                        <template v-else>服务已关闭；开启后按单并发继续完成话术、复盘与知识库队列</template>
                       </div>
                     </div>
                   </div>
@@ -1120,6 +1124,14 @@ onUnmounted(() => {
                     <NTag type="info" round size="small">
                       话术新增排队 {{ collectAllResult.asr_queued_count || 0 }} 场 · 当前
                       {{ collectAllResult.asr_active_count || 0 }}/{{ collectAllResult.asr_queue_capacity || 5 }}
+                    </NTag>
+                    <NTag
+                      :type="collectAllResult.postprocess_failed_count ? 'warning' : 'success'"
+                      round
+                      size="small"
+                    >
+                      AI复盘入库 {{ collectAllResult.postprocess_completed_count || 0 }} 场 · 待处理
+                      {{ collectAllResult.postprocess_pending_count || 0 }} 场
                     </NTag>
                     <span v-if="collectAllResult.message" class="text-12px text-gray-500">
                       {{ collectAllResult.message }}

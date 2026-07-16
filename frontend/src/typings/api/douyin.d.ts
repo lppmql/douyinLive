@@ -238,6 +238,10 @@ declare namespace Api {
       worker_running: boolean;
       queued_count: number;
       processing_count: number;
+      postprocess_pending_count: number;
+      postprocess_processing_count: number;
+      postprocess_completed_count: number;
+      postprocess_failed_count: number;
       message: string;
     }
 
@@ -317,6 +321,12 @@ declare namespace Api {
       live_duration_seconds: number;
       segment_count: number;
       error_message: string | null;
+      postprocess_status: 'pending' | 'processing' | 'completed' | 'failed';
+      postprocess_error: string | null;
+      postprocess_result: Record<string, unknown> | null;
+      postprocess_attempt_count: number;
+      postprocess_started_at: string | null;
+      postprocess_completed_at: string | null;
       retry_count: number;
       max_retries: number;
       started_at: string | null;
@@ -558,6 +568,7 @@ declare namespace Api {
       comments_saved: number;
       transcript_saved: number;
       analysis_saved: number;
+      review_saved: number;
       time_slices_created: number;
       time_slices_updated: number;
       time_slices_unchanged: number;
@@ -632,6 +643,10 @@ declare namespace Api {
       asr_queued_count: number;
       asr_active_count: number;
       asr_queue_capacity: number;
+      postprocess_pending_count: number;
+      postprocess_processing_count: number;
+      postprocess_completed_count: number;
+      postprocess_failed_count: number;
       results: CollectRoomResult[];
       message: string | null;
     }
