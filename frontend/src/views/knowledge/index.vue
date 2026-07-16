@@ -79,6 +79,7 @@ const suggestedQuestions = [
   '最近场次中用户最常问哪些开店预算问题？',
   '找出有明确地区和预算的高意向评论'
 ];
+const followUpQuestions = ['对应哪些主播和场次？', '给出评论或话术原文证据', '不同场次之间有什么差异？', '整理成下一场可执行动作'];
 
 const sessionById = computed(() => new Map(sessions.value.map(session => [session.id, session])));
 const anchorOptions = computed(() => {
@@ -238,10 +239,12 @@ function resetItemFilters() {
   applyItemFilters();
 }
 
-function selectSummaryEvidence(evidenceType: string) {
+async function selectSummaryEvidence(evidenceType: string) {
   activeTab.value = 'time-slices';
   sliceFilters.evidenceType = evidenceType || null;
   applySliceFilters();
+  await nextTick();
+  document.querySelector('.evidence-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function changeSlicePage(current: number) {
@@ -341,6 +344,7 @@ const assistantCategory = ref<string | null>(null);
 const chatting = ref(false);
 const messages = ref<ChatMessage[]>([]);
 const chatEndRef = ref<HTMLElement | null>(null);
+const conversationTurnCount = computed(() => messages.value.filter(item => item.role === 'user').length);
 let messageId = 0;
 
 async function scrollChatToEnd() {
@@ -351,13 +355,27 @@ async function scrollChatToEnd() {
 async function sendQuestion(preset?: string) {
   const content = (preset || question.value).trim();
   if (!content || chatting.value) return;
+  const history = messages.value
+    .filter(item => !item.error)
+    .slice(-8)
+    .map<Api.Douyin.KnowledgeChatHistory>(item => ({
+      role: item.role === 'ai' ? 'assistant' : 'user',
+      content:
+        item.role === 'ai' && item.sources?.length
+          ? `${item.content}\n引用场次：${Array.from(
+              new Set(item.sources.map(source => source.session_id).filter((id): id is number => Boolean(id)))
+            )
+              .map(id => `场次${id}`)
+              .join('、')}`
+          : item.content
+    }));
   messages.value.push({ id: ++messageId, role: 'user', content });
   question.value = '';
   chatting.value = true;
   await scrollChatToEnd();
 
   try {
-    const response = await askKnowledge(content, assistantCategory.value || undefined);
+    const response = await askKnowledge(content, assistantCategory.value || undefined, history);
     messages.value.push({
       id: ++messageId,
       role: 'ai',
@@ -442,8 +460,8 @@ onMounted(loadPage);
       有 {{ sliceStatus.unmapped_comment_count }} 条评论缺少可靠平台时间，系统已单独保留，不会错误绑定到话术片段。
     </NAlert>
 
-    <div class="grid grid-cols-[minmax(0,1fr)_390px] items-start gap-16px lt-xl:grid-cols-1">
-      <NCard :bordered="false" class="card-wrapper evidence-card">
+    <div class="flex flex-col gap-16px">
+      <NCard :bordered="false" class="card-wrapper evidence-card order-2">
         <template #header>
           <div>
             <div class="text-16px font-800">真实证据库</div>
@@ -632,126 +650,157 @@ onMounted(loadPage);
         </NTabs>
       </NCard>
 
-      <NCard :bordered="false" class="card-wrapper assistant-card xl:sticky xl:top-16px">
+      <NCard :bordered="false" class="card-wrapper assistant-card order-1">
         <template #header>
           <div>
             <div class="flex items-center gap-7px text-16px font-800">
               <SvgIcon icon="mdi:message-processing-outline" class="text-primary" />
-              证据问答
+              知识库自由问答
             </div>
-            <div class="mt-3px text-12px font-normal text-gray-500">只基于已同步的真实直播数据回答</div>
+            <div class="mt-3px text-12px font-normal text-gray-500">连续追问真实话术、评论、指标与复盘结论，每条回答都能回到原场次核验</div>
           </div>
         </template>
         <template #header-extra>
-          <NButton v-if="messages.length" text size="small" @click="clearConversation">清空</NButton>
+          <NButton v-if="messages.length" secondary size="small" @click="clearConversation">
+            <template #icon><SvgIcon icon="mdi:message-plus-outline" /></template>
+            新对话
+          </NButton>
         </template>
 
-        <div class="assistant-context">
-          <div class="flex items-center justify-between gap-8px">
-            <span class="text-12px font-700">检索范围</span>
-            <NTag size="small" round :bordered="false" type="success">{{ sliceStatus?.session_count || 0 }} 场可追溯</NTag>
+        <aside class="assistant-sidebar">
+          <div class="assistant-context">
+            <div class="flex items-center justify-between gap-8px">
+              <span class="text-12px font-700">本次检索范围</span>
+              <NTag size="small" round :bordered="false" type="success">{{ sliceStatus?.session_count || 0 }} 场可追溯</NTag>
+            </div>
+            <NSelect
+              v-model:value="assistantCategory"
+              class="mt-9px"
+              clearable
+              :options="assistantCategoryOptions"
+              placeholder="全部知识分类"
+            />
+            <div class="mt-9px grid grid-cols-2 gap-6px text-11px text-gray-500">
+              <span>{{ formatNumber(sliceStatus?.transcript_slice_count || 0) }} 个话术片段</span>
+              <span>{{ formatNumber(sliceStatus?.comment_slice_count || 0) }} 个评论片段</span>
+              <span>{{ formatNumber(sliceStatus?.metric_slice_count || 0) }} 个指标片段</span>
+              <span>{{ formatNumber(sliceStatus?.knowledge_item_count || 0) }} 条整场知识</span>
+            </div>
           </div>
-          <NSelect
-            v-model:value="assistantCategory"
-            class="mt-9px"
-            clearable
-            :options="assistantCategoryOptions"
-            placeholder="全部知识分类"
-          />
-        </div>
 
-        <div v-if="!messages.length" class="mt-14px">
-          <div class="text-12px font-700">推荐提问</div>
-          <div class="mt-8px grid gap-7px">
-            <button
-              v-for="prompt in suggestedQuestions"
-              :key="prompt"
-              type="button"
-              class="question-prompt"
-              :disabled="chatting"
-              @click="sendQuestion(prompt)"
-            >
-              <SvgIcon icon="mdi:arrow-top-right" class="mt-2px shrink-0 text-primary" />
-              <span>{{ prompt }}</span>
-            </button>
+          <div class="mt-14px">
+            <div class="flex items-center justify-between gap-8px">
+              <div class="text-12px font-700">{{ messages.length ? '继续追问' : '推荐提问' }}</div>
+              <span v-if="messages.length" class="text-11px text-gray-400">已问 {{ conversationTurnCount }} 轮</span>
+            </div>
+            <div class="mt-8px grid gap-7px">
+              <button
+                v-for="prompt in messages.length ? followUpQuestions : suggestedQuestions"
+                :key="prompt"
+                type="button"
+                class="question-prompt"
+                :disabled="chatting"
+                @click="sendQuestion(prompt)"
+              >
+                <SvgIcon icon="mdi:arrow-top-right" class="mt-2px shrink-0 text-primary" />
+                <span>{{ prompt }}</span>
+              </button>
+            </div>
           </div>
-        </div>
+          <NAlert class="mt-14px" type="info" :bordered="false" show-icon>
+            回答只使用已同步的真实数据；证据不足时不会猜测。
+          </NAlert>
+        </aside>
 
-        <NScrollbar class="mt-14px" style="max-height: 460px">
-          <div class="min-h-160px pr-6px">
-            <div v-for="chatMessage in messages" :key="chatMessage.id" class="mb-12px">
-              <div :class="chatMessage.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
-                <div
-                  class="chat-bubble"
-                  :class="[
-                    chatMessage.role === 'user' ? 'chat-bubble--user' : 'chat-bubble--ai',
-                    { 'chat-bubble--error': chatMessage.error }
-                  ]"
-                >
-                  <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
-                  <div v-if="chatMessage.role === 'ai' && !chatMessage.error" class="mt-8px flex justify-end">
-                    <NButton text size="tiny" @click="copyText(chatMessage.content)">
-                      <template #icon><SvgIcon icon="mdi:content-copy" /></template>
-                      复制
-                    </NButton>
+        <section class="assistant-main">
+          <NScrollbar class="chat-scroll" style="max-height: 520px">
+            <div class="min-h-320px pr-8px">
+              <div v-if="!messages.length" class="chat-welcome">
+                <span class="chat-welcome__icon"><SvgIcon icon="mdi:database-search-outline" /></span>
+                <div class="mt-12px text-18px font-800">从真实直播数据里找答案</div>
+                <p class="mb-0 mt-7px max-w-520px text-center text-13px leading-22px text-gray-500">
+                  可以直接询问主播话术、用户评论、开店地区与预算、高意向线索、分钟趋势或跨场次差异，也可以在回答后继续追问“对应哪些场次”。
+                </p>
+                <NTag class="mt-12px" round :bordered="false" type="success">已连接真实知识证据</NTag>
+              </div>
+              <div v-for="chatMessage in messages" :key="chatMessage.id" class="mb-12px">
+                <div :class="chatMessage.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                  <div
+                    class="chat-bubble"
+                    :class="[
+                      chatMessage.role === 'user' ? 'chat-bubble--user' : 'chat-bubble--ai',
+                      { 'chat-bubble--error': chatMessage.error }
+                    ]"
+                  >
+                    <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
+                    <div v-if="chatMessage.role === 'ai' && !chatMessage.error" class="mt-8px flex justify-end">
+                      <NButton text size="tiny" @click="copyText(chatMessage.content)">
+                        <template #icon><SvgIcon icon="mdi:content-copy" /></template>
+                        复制
+                      </NButton>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div v-if="chatMessage.sources?.length" class="mt-7px flex flex-col gap-6px">
-                <button
-                  v-for="source in chatMessage.sources"
-                  :key="`${source.source_type}-${source.id}`"
-                  type="button"
-                  class="source-card"
-                  :disabled="!source.session_id"
-                  @click="openSession(source.session_id)"
-                >
-                  <div class="flex items-start justify-between gap-8px">
-                    <div class="min-w-0 text-left">
-                      <div class="truncate text-12px font-700">{{ source.title || '未命名来源' }}</div>
-                      <div class="mt-2px text-11px text-gray-400">
-                        {{ source.anchor_name || sourceTypeLabel(source.source_type) }}
-                        <span v-if="sourceTimeLabel(source)"> · {{ sourceTimeLabel(source) }}</span>
-                      </div>
+                <NCollapse v-if="chatMessage.sources?.length" class="source-collapse" arrow-placement="right">
+                  <NCollapseItem :title="`查看 ${chatMessage.sources.length} 条真实来源`" :name="chatMessage.id">
+                    <div class="grid grid-cols-2 gap-7px lt-lg:grid-cols-1">
+                      <button
+                        v-for="source in chatMessage.sources"
+                        :key="`${source.source_type}-${source.id}`"
+                        type="button"
+                        class="source-card"
+                        :disabled="!source.session_id"
+                        @click="openSession(source.session_id)"
+                      >
+                        <div class="flex items-start justify-between gap-8px">
+                          <div class="min-w-0 text-left">
+                            <div class="truncate text-12px font-700">{{ source.title || '未命名来源' }}</div>
+                            <div class="mt-2px text-11px text-gray-400">
+                              {{ source.anchor_name || sourceTypeLabel(source.source_type) }}
+                              <span v-if="sourceTimeLabel(source)"> · {{ sourceTimeLabel(source) }}</span>
+                            </div>
+                          </div>
+                          <SvgIcon v-if="source.session_id" icon="mdi:open-in-new" class="mt-1px shrink-0 text-primary" />
+                        </div>
+                        <div v-if="source.excerpt" class="line-clamp-2 mt-5px text-left text-11px leading-18px text-gray-500">
+                          {{ source.excerpt }}
+                        </div>
+                      </button>
                     </div>
-                    <SvgIcon v-if="source.session_id" icon="mdi:open-in-new" class="mt-1px shrink-0 text-primary" />
-                  </div>
-                  <div v-if="source.excerpt" class="line-clamp-2 mt-5px text-left text-11px leading-18px text-gray-500">
-                    {{ source.excerpt }}
-                  </div>
-                </button>
+                  </NCollapseItem>
+                </NCollapse>
               </div>
-            </div>
 
-            <div v-if="chatting" class="mb-12px flex justify-start">
-              <div class="chat-bubble chat-bubble--ai flex items-center gap-7px text-gray-500">
-                <NSpin :size="14" />正在检索真实话术、评论和指标…
+              <div v-if="chatting" class="mb-12px flex justify-start">
+                <div class="chat-bubble chat-bubble--ai flex items-center gap-7px text-gray-500">
+                  <NSpin :size="14" />正在检索真实话术、评论和指标…
+                </div>
               </div>
+              <div ref="chatEndRef" />
             </div>
-            <div ref="chatEndRef" />
-          </div>
-        </NScrollbar>
+          </NScrollbar>
 
-        <div class="mt-12px border-t border-gray-100 pt-12px dark:border-dark-100">
-          <NInput
-            v-model:value="question"
-            type="textarea"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            maxlength="500"
-            show-count
-            placeholder="输入复盘问题，Enter 发送，Shift+Enter 换行"
-            :disabled="chatting"
-            @keydown="handleQuestionKeydown"
-          />
-          <div class="mt-8px flex items-center justify-between gap-8px">
-            <span class="text-11px text-gray-400">回答会附带场次与时间片来源</span>
-            <NButton type="primary" :loading="chatting" :disabled="!question.trim() || chatting" @click="sendQuestion()">
-              <template #icon><SvgIcon icon="mdi:send" /></template>
-              发送
-            </NButton>
+          <div class="chat-composer">
+            <NInput
+              v-model:value="question"
+              type="textarea"
+              :autosize="{ minRows: 2, maxRows: 4 }"
+              maxlength="500"
+              show-count
+              placeholder="输入复盘问题，Enter 发送，Shift+Enter 换行"
+              :disabled="chatting"
+              @keydown="handleQuestionKeydown"
+            />
+            <div class="mt-8px flex items-center justify-between gap-8px">
+              <span class="text-11px text-gray-400">回答会附带场次与时间片来源</span>
+              <NButton type="primary" :loading="chatting" :disabled="!question.trim() || chatting" @click="sendQuestion()">
+                <template #icon><SvgIcon icon="mdi:send" /></template>
+                发送
+              </NButton>
+            </div>
           </div>
-        </div>
+        </section>
       </NCard>
     </div>
   </div>
@@ -792,9 +841,60 @@ onMounted(loadPage);
 .summary-card--warning { --summary-tone: #f0a020; }
 .summary-card--danger { --summary-tone: #d03050; }
 
-.evidence-card :deep(.n-card__content),
-.assistant-card :deep(.n-card__content) {
+.assistant-card :deep(.n-card-content) {
   padding-top: 8px;
+}
+
+.assistant-card :deep(.n-card-content) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 18px;
+}
+
+.assistant-sidebar {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.assistant-main {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  border: 1px solid rgb(148 163 184 / 16%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card-color) 97%, rgb(var(--primary-color)) 3%);
+  overflow: hidden;
+}
+
+.chat-scroll {
+  padding: 16px 12px 8px 16px;
+}
+
+.chat-welcome {
+  display: flex;
+  min-height: 310px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 18px;
+}
+
+.chat-welcome__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  color: rgb(var(--primary-color));
+  background: linear-gradient(135deg, rgb(var(--primary-color) / 15%), rgb(24 160 88 / 10%));
+  font-size: 28px;
+}
+
+.chat-composer {
+  border-top: 1px solid rgb(148 163 184 / 14%);
+  background: var(--card-color);
+  padding: 12px 14px 14px;
 }
 
 .evidence-item,
@@ -901,6 +1001,38 @@ onMounted(loadPage);
 .source-card:not(:disabled):hover {
   border-color: rgb(var(--primary-color) / 32%);
   background: rgb(var(--primary-color) / 4%);
+}
+
+.source-collapse {
+  margin-top: 7px;
+  border-radius: 10px;
+  background: rgb(148 163 184 / 6%);
+  padding: 0 10px;
+}
+
+.source-collapse :deep(.n-collapse-item__header-main) {
+  color: rgb(var(--primary-color));
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 1024px) {
+  .assistant-card :deep(.n-card-content) {
+    grid-template-columns: 1fr;
+  }
+
+  .assistant-sidebar,
+  .assistant-main {
+    grid-column: 1;
+  }
+
+  .assistant-main {
+    grid-row: 1;
+  }
+
+  .assistant-sidebar {
+    grid-row: 2;
+  }
 }
 
 @media (max-width: 640px) {

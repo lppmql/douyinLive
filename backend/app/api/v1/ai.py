@@ -1,9 +1,10 @@
 """AI 分析 API（DeepSeek）"""
 import json
 import logging
+from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.services.ai.deepseek_client import chat
@@ -249,15 +250,22 @@ def list_high_intent(
 
 # ── 知识库问答 ──
 
+class QaHistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class QaRequest(BaseModel):
-    question: str
+    question: str = Field(min_length=1, max_length=500)
     category: str | None = None
+    history: list[QaHistoryMessage] = Field(default_factory=list, max_length=8)
 
 
 @router.post("/qa")
 def knowledge_qa(req: QaRequest, db: Session = Depends(get_db)):
     """知识库问答"""
-    result = qa_search(db, question=req.question, category=req.category)
+    history = [item.model_dump() for item in req.history[-8:]]
+    result = qa_search(db, question=req.question, category=req.category, history=history)
     return result
 
 

@@ -56,10 +56,46 @@ def _query_terms(question: str) -> list[str]:
     return sorted(terms, key=len, reverse=True)[:40]
 
 
+def _normalize_history(history: list[dict[str, str]] | None) -> list[dict[str, str]]:
+    """只保留最近的有效问答，避免无界上下文挤占模型输入。"""
+    normalized = []
+    for item in (history or [])[-8:]:
+        role = item.get("role")
+        content = str(item.get("content") or "").strip()
+        if role in {"user", "assistant"} and content:
+            normalized.append({"role": role, "content": content[:4000]})
+    return normalized
+
+
+def _contextual_question(question: str, history: list[dict[str, str]] | None = None) -> str:
+    """用最近用户问题补全“这个、还有呢”等省略式追问的检索语义。"""
+    normalized = _normalize_history(history)
+    user_questions = [item["content"] for item in normalized if item["role"] == "user"][-2:]
+    session_ids = []
+    for item in normalized:
+        if item["role"] != "assistant":
+            continue
+        for session_id in re.findall(r"场次\s*#?\s*(\d+)", item["content"], re.IGNORECASE):
+            if session_id not in session_ids:
+                session_ids.append(session_id)
+    source_context = " ".join(f"场次{session_id}" for session_id in session_ids[-5:])
+    return "\n".join([*user_questions, source_context, question.strip()])[-1200:]
+
+
+def _format_conversation(history: list[dict[str, str]] | None = None) -> str:
+    normalized = _normalize_history(history)
+    if not normalized:
+        return ""
+    labels = {"user": "用户", "assistant": "助手"}
+    lines = [f"{labels[item['role']]}：{item['content']}" for item in normalized]
+    return "历史对话（仅用于理解连续追问）：\n" + "\n".join(lines)
+
+
 def qa_search(
     db: Session,
     question: str,
     category: str | None = None,
+    history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """知识库问答 — 搜索 → 拼接上下文 → DeepSeek → 回答 + 引用来源
 
@@ -70,8 +106,14 @@ def qa_search(
     4. 返回回答 + 引用来源
     """
     # 1. 优先召回可追溯的时间片，再用原有整场知识补足上下文。
-    time_slices = search_time_slices(db, question=question, limit=5)
-    items = search_knowledge(db, keyword=question, category=category, limit=max(0, 5 - len(time_slices)))
+    retrieval_question = _contextual_question(question, history)
+    time_slices = search_time_slices(db, question=retrieval_question, limit=5)
+    items = search_knowledge(
+        db,
+        keyword=retrieval_question,
+        category=category,
+        limit=max(0, 5 - len(time_slices)),
+    )
 
     if not time_slices and not items:
         # 没有匹配的知识库内容，直接让 DeepSeek 回答
@@ -123,13 +165,18 @@ def qa_search(
         logger.error("未找到 qa 提示词模板")
         return {"answer": "系统配置错误", "sources": sources, "has_result": False}
 
+    conversation = _format_conversation(history)
+    contextual_prompt = f"{conversation}\n\n当前问题：{question}" if conversation else question
     user_message = prompt.replace("{knowledge_context}", knowledge_context).replace(
-        "{question}", question
+        "{question}", contextual_prompt
     )
 
     try:
         answer = chat(
-            system_prompt="你是一个直播数据分析助手，请基于提供的知识库内容回答问题。",
+            system_prompt=(
+                "你是零食店避坑直播运营复盘助手。只能依据本次提供的真实知识库证据回答，"
+                "需要理解历史对话中的连续追问；证据不足时必须明确说明，不得编造主播、评论、话术或指标。"
+            ),
             user_message=user_message,
             temperature=0.5,
             max_tokens=2048,

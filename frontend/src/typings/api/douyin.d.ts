@@ -547,6 +547,11 @@ declare namespace Api {
       score?: number;
     }
 
+    interface KnowledgeChatHistory {
+      role: 'user' | 'assistant';
+      content: string;
+    }
+
     interface KnowledgeSyncResult {
       status: string;
       live_data_saved: number;

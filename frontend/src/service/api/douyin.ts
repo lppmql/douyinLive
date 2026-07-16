@@ -453,12 +453,16 @@ export function detectHighIntent(sessionId: number) {
   });
 }
 
-/** 知识问答 */
-export function askKnowledge(question: string, category?: string) {
+/** 基于真实知识证据的多轮问答 */
+export function askKnowledge(
+  question: string,
+  category?: string,
+  history: Api.Douyin.KnowledgeChatHistory[] = []
+) {
   return backendRequest<{ answer: string; sources: Api.Douyin.KnowledgeSource[]; has_result: boolean }>({
     url: `${API_PREFIX}/ai/qa`,
     method: 'POST',
-    data: { question, category }
+    data: { question, category, history }
   });
 }
 

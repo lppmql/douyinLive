@@ -254,9 +254,9 @@ def _query_terms(question: str) -> list[str]:
 def search_time_slices(db: Session, question: str, limit: int = 8) -> list[dict[str, Any]]:
     """结构化过滤、关键词召回和来源丰富度重排。"""
     query = db.query(KnowledgeTimeSlice)
-    session_match = re.search(r"(?:场次|session)\s*#?\s*(\d+)", question, re.IGNORECASE)
-    if session_match:
-        query = query.filter(KnowledgeTimeSlice.session_id == int(session_match.group(1)))
+    session_matches = re.findall(r"(?:场次|session)\s*#?\s*(\d+)", question, re.IGNORECASE)
+    if session_matches:
+        query = query.filter(KnowledgeTimeSlice.session_id.in_({int(value) for value in session_matches}))
     candidates = query.order_by(KnowledgeTimeSlice.updated_at.desc()).limit(1000).all()
     terms = _query_terms(question)
     ranked: list[tuple[float, KnowledgeTimeSlice]] = []

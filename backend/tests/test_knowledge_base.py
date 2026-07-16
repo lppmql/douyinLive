@@ -1,8 +1,11 @@
 import unittest
 from types import SimpleNamespace
 
+from pydantic import ValidationError
+
+from app.api.v1.ai import QaRequest
 from app.api.v1.knowledge_base import page_knowledge, page_time_slices
-from app.services.ai.kb_service import _query_terms
+from app.services.ai.kb_service import _contextual_question, _format_conversation, _normalize_history, _query_terms
 
 
 class FakeQuery:
@@ -99,6 +102,34 @@ class KnowledgeBaseTest(unittest.TestCase):
         self.assertIn("session", terms)
         self.assertIn("7302", terms)
         self.assertIn("roi", terms)
+
+    def test_follow_up_question_reuses_recent_user_context(self):
+        history = [
+            {"role": "user", "content": "找出安徽地区有开店预算的高意向评论"},
+            {"role": "assistant", "content": "找到场次11851和场次13251的两个相关时间片"},
+        ]
+
+        contextual = _contextual_question("分别来自哪些场次？", history)
+
+        self.assertIn("安徽地区", contextual)
+        self.assertIn("场次11851", contextual)
+        self.assertIn("场次13251", contextual)
+        self.assertIn("分别来自哪些场次", contextual)
+
+    def test_history_is_bounded_and_formatted_by_role(self):
+        history = [{"role": "user", "content": f"问题{i}"} for i in range(10)]
+        normalized = _normalize_history(history)
+
+        self.assertEqual(len(normalized), 8)
+        self.assertNotIn("问题0", _format_conversation(history))
+        self.assertIn("用户：问题9", _format_conversation(history))
+
+    def test_qa_request_rejects_more_than_eight_history_messages(self):
+        with self.assertRaises(ValidationError):
+            QaRequest(
+                question="继续追问",
+                history=[{"role": "user", "content": f"问题{i}"} for i in range(9)],
+            )
 
 
 if __name__ == "__main__":
