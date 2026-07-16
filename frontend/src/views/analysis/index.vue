@@ -156,6 +156,18 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat('zh-CN').format(value || 0);
 }
 
+function getSessionStartTimestamp(value: string | null) {
+  const timestamp = value ? Date.parse(value) : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortSessionsByLatest(items: Api.Douyin.LiveSession[]) {
+  return [...items].sort((a, b) => {
+    const timeDifference = getSessionStartTimestamp(b.live_start_time) - getSessionStartTimestamp(a.live_start_time);
+    return timeDifference || b.id - a.id;
+  });
+}
+
 function scorePercent(value: number, max: number) {
   return Math.min(100, Math.max(0, (value / max) * 100));
 }
@@ -251,19 +263,11 @@ async function loadSessionContext(sessionId: number, silent = false) {
 async function initializePage() {
   loading.value = true;
   try {
-    const [sessionsResponse, reportsResponse] = await Promise.all([
-      fetchLiveSessions(),
-      fetchAnalysisReports({ limit: 500 })
-    ]);
-    sessions.value = sessionsResponse.data || [];
-    const reports = reportsResponse.data || [];
-    const reportSessionIds = new Set(reports.map(item => item.session_id));
-    const preferred =
-      sessions.value.find(item => item.live_status !== 'live' && reportSessionIds.has(item.id)) ||
-      sessions.value.find(item => item.live_status !== 'live' && item.detail_collection_status === 'complete') ||
-      sessions.value[0];
-    selectedSessionId.value = preferred?.id || null;
-    if (preferred) await loadSessionContext(preferred.id);
+    const sessionsResponse = await fetchLiveSessions();
+    sessions.value = sortSessionsByLatest(sessionsResponse.data || []);
+    const latestSession = sessions.value[0];
+    selectedSessionId.value = latestSession?.id || null;
+    if (latestSession) await loadSessionContext(latestSession.id);
   } catch (error) {
     message.error((error as { message?: string }).message || 'AI 复盘页面加载失败');
   } finally {
@@ -285,7 +289,7 @@ async function refreshPage() {
   refreshing.value = true;
   try {
     const response = await fetchLiveSessions();
-    sessions.value = response.data || [];
+    sessions.value = sortSessionsByLatest(response.data || []);
     await loadSessionContext(selectedSessionId.value, true);
     message.success('已刷新真实场次和分析报告');
   } finally {
@@ -393,7 +397,7 @@ onMounted(initializePage);
             <div class="mb-8px flex items-center justify-between gap-12px">
               <div>
                 <div class="text-15px font-700">选择复盘场次</div>
-                <div class="mt-3px text-12px text-gray-500">默认优先打开已经生成过真实报告的已结束场次</div>
+                <div class="mt-3px text-12px text-gray-500">默认打开最近开播的场次，可搜索切换历史场次</div>
               </div>
               <NTag v-if="sessions.length" round :bordered="false" type="info">{{ sessions.length }} 场可选</NTag>
             </div>

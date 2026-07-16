@@ -141,9 +141,21 @@ function getStatusType(status?: DisplayStatus): 'success' | 'warning' | 'error' 
     | 'info';
 }
 
+function getSessionStartTimestamp(value: string | null) {
+  const timestamp = value ? Date.parse(value) : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function sortSessionsByLatest(items: Api.Douyin.LiveSession[]) {
+  return [...items].sort((a, b) => {
+    const timeDifference = getSessionStartTimestamp(b.live_start_time) - getSessionStartTimestamp(a.live_start_time);
+    return timeDifference || b.id - a.id;
+  });
+}
+
 async function loadSessions() {
   const response = await fetchLiveSessions();
-  sessions.value = response.data || [];
+  sessions.value = sortSessionsByLatest(response.data || []);
 }
 
 async function loadTaskData() {
@@ -176,8 +188,8 @@ async function initializePage() {
   loading.value = true;
   try {
     await Promise.all([loadSessions(), loadTaskData()]);
-    const preferredTask = tasks.value.find(item => item.status === 'completed' && item.segment_count > 0);
-    if (preferredTask) await loadTranscript(preferredTask.session_id);
+    const latestSession = sessions.value[0];
+    if (latestSession) await loadTranscript(latestSession.id);
   } catch {
     message.error('主播话术页面加载失败');
   } finally {
