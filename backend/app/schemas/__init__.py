@@ -65,6 +65,34 @@ class LiveSessionUpdate(BaseModel):
     leads_count: Optional[int] = None
 
 
+class LiveSessionListItemResponse(BaseModel):
+    """直播场次列表的轻量字段，避免分页时序列化完整详情。"""
+
+    id: int
+    anchor_name: Optional[str] = None
+    anchor_nickname: Optional[str] = None
+    anchor_avatar_url: Optional[str] = None
+    douyin_id: Optional[str] = None
+    session_title: Optional[str] = None
+    detail_collection_status: str = "pending"
+    detail_collection_error: Optional[str] = None
+    live_start_time: Optional[datetime] = None
+    live_end_time: Optional[datetime] = None
+    live_duration_seconds: int = 0
+    live_status: str = "ended"
+    peak_online_count: int = 0
+    new_followers: int = 0
+    comments_count: int = 0
+    leads_count: int = 0
+
+
+class LiveSessionPageResponse(BaseModel):
+    records: list[LiveSessionListItemResponse]
+    total: int
+    current: int
+    size: int
+
+
 class LiveSessionResponse(LiveSessionBase):
     model_config = ConfigDict(from_attributes=True)
 

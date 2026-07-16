@@ -9,6 +9,7 @@ class LiveSession(Base, TimestampMixin):
 
     __tablename__ = "live_sessions"
     __table_args__ = (
+        Index("idx_live_sessions_start_id", "live_start_time", "id"),
         Index("idx_live_sessions_status_room", "live_status", "room_id", "id"),
         Index("idx_live_sessions_detail_time", "detail_collection_status", "live_start_time"),
     )

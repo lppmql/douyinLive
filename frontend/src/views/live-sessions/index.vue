@@ -58,7 +58,7 @@ const detailStatusMap: Record<string, { type: 'success' | 'warning' | 'info' | '
   pending: { type: 'info', label: '待采集' }
 };
 
-function renderDetailStatus(row: Api.Douyin.LiveSession) {
+function renderDetailStatus(row: Api.Douyin.LiveSessionListItem) {
   const info = detailStatusMap[row.detail_collection_status] || detailStatusMap.pending;
   return h(
     NTag,
@@ -73,30 +73,34 @@ function renderDetailStatus(row: Api.Douyin.LiveSession) {
   );
 }
 
-function openDetail(session: Api.Douyin.LiveSession) {
+function openDetail(session: Api.Douyin.LiveSessionListItem) {
   router.push({ name: 'live-session-detail', params: { id: String(session.id) } });
 }
 
-function displayCollectedNumber(row: Api.Douyin.LiveSession, value: number): number | string {
+function displayCollectedNumber(row: Api.Douyin.LiveSessionListItem, value: number): number | string {
   return value || (row.detail_collection_status === 'complete' ? 0 : '-');
 }
 
 /* ---------- 表格列 ---------- */
-function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
+function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSessionListItem>[] {
   return [
     {
       title: () => $t('page.live-sessions.anchorName'),
       key: 'anchor_name',
       width: 220,
       fixed: 'left',
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return h('div', { class: 'flex items-center gap-8px min-w-0' }, [
-          h(NAvatar, {
-            round: true,
-            size: 34,
-            src: row.anchor_avatar_url || undefined,
-            fallbackSrc: row.anchor_avatar_url || undefined
-          }),
+          h(
+            NAvatar,
+            {
+              round: true,
+              size: 34,
+              src: row.anchor_avatar_url || undefined,
+              objectFit: 'cover'
+            },
+            { default: () => row.anchor_name?.slice(0, 1) || '主' }
+          ),
           h('div', { class: 'min-w-0' }, [
             h('div', { class: 'truncate font-600' }, row.anchor_name || '-'),
             h('div', { class: 'truncate text-12px text-gray-400' }, row.douyin_id || row.anchor_nickname || '-')
@@ -109,7 +113,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       key: 'session_title',
       width: 140,
       ellipsis: { tooltip: true },
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return row.session_title || '-';
       }
     },
@@ -117,7 +121,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.sessionStatus'),
       key: 'live_status',
       width: 80,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         const info = statusMap[row.live_status] || {
           type: 'default' as const,
           labelKey: 'page.live-sessions.statusEnded' as const
@@ -133,7 +137,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: '详情采集',
       key: 'detail_collection_status',
       width: 105,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return renderDetailStatus(row);
       }
     },
@@ -141,7 +145,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.startTime'),
       key: 'live_start_time',
       width: 110,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return fmtDateTime(row.live_start_time);
       }
     },
@@ -149,7 +153,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.endTime'),
       key: 'live_end_time',
       width: 110,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return fmtDateTime(row.live_end_time);
       }
     },
@@ -157,7 +161,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.duration'),
       key: 'live_duration_seconds',
       width: 80,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return fmtSeconds(row.live_duration_seconds);
       }
     },
@@ -165,7 +169,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.onlineUsers'),
       key: 'peak_online_count',
       width: 90,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return displayCollectedNumber(row, row.peak_online_count);
       }
     },
@@ -173,7 +177,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.newFollowers'),
       key: 'new_followers',
       width: 90,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return displayCollectedNumber(row, row.new_followers);
       }
     },
@@ -181,7 +185,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.commentsCount'),
       key: 'comments_count',
       width: 80,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return displayCollectedNumber(row, row.comments_count);
       }
     },
@@ -189,7 +193,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       title: () => $t('page.live-sessions.leads'),
       key: 'leads_count',
       width: 80,
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return displayCollectedNumber(row, row.leads_count);
       }
     },
@@ -198,7 +202,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSession>[] {
       key: 'actions',
       width: 80,
       fixed: 'right',
-      render(row: Api.Douyin.LiveSession) {
+      render(row: Api.Douyin.LiveSessionListItem) {
         return h(NButton, { text: true, type: 'primary', size: 'tiny', onClick: () => openDetail(row) }, () => '详情');
       }
     }

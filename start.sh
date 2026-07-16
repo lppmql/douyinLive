@@ -47,7 +47,13 @@ alembic upgrade head
 echo "  ✅ 数据库迁移已更新到最新版本"
 python -m scripts.configure_dataease_reader
 echo "  ✅ DataEase 专用只读账号已配置"
-uvicorn app.main:app --reload --port 8000 &
+if [ "${BACKEND_RELOAD:-false}" = "true" ]; then
+  uvicorn app.main:app --reload --port 8000 &
+  echo "  ℹ️  已开启后端开发热更新"
+else
+  uvicorn app.main:app --port 8000 &
+  echo "  ℹ️  后端使用稳定单进程模式；开发时可设置 BACKEND_RELOAD=true"
+fi
 BACKEND_PID=$!
 echo "  ✅ 后端: http://localhost:8000"
 echo "  ✅ Swagger: http://localhost:8000/docs"

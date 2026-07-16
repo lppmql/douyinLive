@@ -212,6 +212,26 @@ declare namespace Api {
       updated_at: string;
     }
 
+    type LiveSessionListItem = Pick<
+      LiveSession,
+      | 'id'
+      | 'anchor_name'
+      | 'anchor_nickname'
+      | 'anchor_avatar_url'
+      | 'douyin_id'
+      | 'session_title'
+      | 'detail_collection_status'
+      | 'detail_collection_error'
+      | 'live_start_time'
+      | 'live_end_time'
+      | 'live_duration_seconds'
+      | 'live_status'
+      | 'peak_online_count'
+      | 'new_followers'
+      | 'comments_count'
+      | 'leads_count'
+    >;
+
     interface LiveMetric {
       metric_time: string;
       exposure_count: number;

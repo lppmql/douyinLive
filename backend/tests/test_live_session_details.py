@@ -3,7 +3,12 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.api.v1.live_sessions import _is_allowed_avatar_url, get_session_avatar, get_session_details
+from app.api.v1.live_sessions import (
+    LIVE_SESSION_LIST_COLUMNS,
+    _is_allowed_avatar_url,
+    get_session_avatar,
+    get_session_details,
+)
 from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
@@ -20,6 +25,15 @@ class ProfileRow:
 
 
 class LiveSessionDetailsTest(unittest.TestCase):
+    def test_list_projection_excludes_heavy_detail_fields(self):
+        field_names = {column.key for column in LIVE_SESSION_LIST_COLUMNS}
+
+        self.assertIn("anchor_name", field_names)
+        self.assertIn("comments_count", field_names)
+        self.assertNotIn("stream_url", field_names)
+        self.assertNotIn("dashboard_url", field_names)
+        self.assertNotIn("douyin_uid", field_names)
+
     def test_avatar_proxy_only_allows_douyin_image_hosts(self):
         self.assertTrue(_is_allowed_avatar_url("https://p3.douyinpic.com/avatar.webp"))
         self.assertFalse(_is_allowed_avatar_url("http://p3.douyinpic.com/avatar.webp"))

@@ -37,7 +37,7 @@ export function fetchLiveSessionPage(params: {
   live_status?: string;
   detail_status?: string;
 }) {
-  return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.LiveSession>>({
+  return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.LiveSessionListItem>>({
     url: `${API_PREFIX}/live-sessions/page`,
     params
   });

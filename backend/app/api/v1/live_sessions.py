@@ -24,12 +24,32 @@ from app.schemas import (
     LiveMetricDetailResponse,
     LiveSessionCreate,
     LiveSessionDetailResponse,
+    LiveSessionListItemResponse,
+    LiveSessionPageResponse,
     LiveSessionResponse,
     LiveSessionUpdate,
 )
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
+LIVE_SESSION_LIST_COLUMNS = (
+    LiveSession.id,
+    LiveSession.anchor_name,
+    LiveSession.anchor_nickname,
+    LiveSession.anchor_avatar_url,
+    LiveSession.douyin_id,
+    LiveSession.session_title,
+    LiveSession.detail_collection_status,
+    LiveSession.detail_collection_error,
+    LiveSession.live_start_time,
+    LiveSession.live_end_time,
+    LiveSession.live_duration_seconds,
+    LiveSession.live_status,
+    LiveSession.peak_online_count,
+    LiveSession.new_followers,
+    LiveSession.comments_count,
+    LiveSession.leads_count,
+)
 
 
 def _attach_room_profile(session: LiveSession) -> dict:
@@ -50,7 +70,7 @@ def _is_allowed_avatar_url(url: str) -> bool:
     return parsed.scheme == "https" and hostname.endswith(".douyinpic.com")
 
 
-@router.get("/page")
+@router.get("/page", response_model=LiveSessionPageResponse)
 def page_sessions(
     current: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
@@ -60,7 +80,7 @@ def page_sessions(
     db: Session = Depends(get_db),
 ):
     """按 SoybeanAdmin 分页结构返回全部直播场次。"""
-    query = db.query(LiveSession)
+    query = db.query(*LIVE_SESSION_LIST_COLUMNS)
     if anchor_name:
         query = query.filter(LiveSession.anchor_name.like(f"%{anchor_name.strip()}%"))
     if live_status:
@@ -68,7 +88,7 @@ def page_sessions(
     if detail_status:
         query = query.filter(LiveSession.detail_collection_status == detail_status)
 
-    total = query.count()
+    total = query.with_entities(LiveSession.id).order_by(None).count()
     sessions = (
         query.order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
         .offset((current - 1) * size)
@@ -76,7 +96,7 @@ def page_sessions(
         .all()
     )
     return {
-        "records": [LiveSessionResponse(**_attach_room_profile(session)) for session in sessions],
+        "records": [LiveSessionListItemResponse(**session._mapping) for session in sessions],
         "total": total,
         "current": current,
         "size": size,
