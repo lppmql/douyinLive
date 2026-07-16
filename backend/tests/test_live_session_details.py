@@ -3,7 +3,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.api.v1.live_sessions import get_session_details
+from app.api.v1.live_sessions import _is_allowed_avatar_url, get_session_avatar, get_session_details
 from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
@@ -20,6 +20,25 @@ class ProfileRow:
 
 
 class LiveSessionDetailsTest(unittest.TestCase):
+    def test_avatar_proxy_only_allows_douyin_image_hosts(self):
+        self.assertTrue(_is_allowed_avatar_url("https://p3.douyinpic.com/avatar.webp"))
+        self.assertFalse(_is_allowed_avatar_url("http://p3.douyinpic.com/avatar.webp"))
+        self.assertFalse(_is_allowed_avatar_url("https://douyinpic.com.example.test/avatar.webp"))
+
+    def test_avatar_proxy_returns_real_image_bytes(self):
+        session = SimpleNamespace(anchor_avatar_url="https://p3.douyinpic.com/avatar.webp")
+        upstream = SimpleNamespace(
+            content=b"real-webp-bytes",
+            headers={"content-type": "image/webp"},
+            raise_for_status=lambda: None,
+        )
+
+        with patch("app.api.v1.live_sessions.httpx.get", return_value=upstream):
+            response = get_session_avatar(9, db=SimpleNamespace(get=lambda *_args: session))
+
+        self.assertEqual(response.media_type, "image/webp")
+        self.assertEqual(response.body, b"real-webp-bytes")
+
     def test_profile_response_accepts_orm_rows(self):
         profile = LiveAudienceProfileResponse.model_validate(ProfileRow())
         self.assertEqual(profile.dimension_type, "age")

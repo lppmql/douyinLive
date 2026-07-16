@@ -1,6 +1,9 @@
 """直播场次 CRUD API"""
+from urllib.parse import urlparse
+
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -26,6 +29,7 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
+MAX_AVATAR_BYTES = 2 * 1024 * 1024
 
 
 def _attach_room_profile(session: LiveSession) -> dict:
@@ -38,6 +42,12 @@ def _attach_room_profile(session: LiveSession) -> dict:
     data["douyin_id"] = session.douyin_id
     data["douyin_uid"] = session.douyin_uid
     return data
+
+
+def _is_allowed_avatar_url(url: str) -> bool:
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    return parsed.scheme == "https" and hostname.endswith(".douyinpic.com")
 
 
 @router.get("/page")
@@ -133,6 +143,43 @@ def get_session_details(
         profiles=profiles,
         stream_url=latest_stream or session.stream_url,
         stream_source_count=len(stream_sources),
+    )
+
+
+@router.get("/{session_id}/avatar")
+def get_session_avatar(session_id: int, db: Session = Depends(get_db)):
+    """同源返回已采集的抖音主播头像，避免 CDN 限制浏览器跨站嵌入。"""
+    session = db.get(LiveSession, session_id)
+    if not session:
+        raise HTTPException(404, "直播场次不存在")
+
+    avatar_url = session.anchor_avatar_url
+    if not avatar_url:
+        raise HTTPException(404, "该场次暂无主播头像")
+    if not _is_allowed_avatar_url(avatar_url):
+        raise HTTPException(400, "主播头像地址不受信任")
+
+    try:
+        upstream = httpx.get(
+            avatar_url,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
+            follow_redirects=False,
+            timeout=10,
+        )
+        upstream.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "主播头像读取失败") from exc
+
+    content_type = upstream.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(502, "主播头像响应格式无效")
+    if len(upstream.content) > MAX_AVATAR_BYTES:
+        raise HTTPException(502, "主播头像文件过大")
+
+    return Response(
+        content=upstream.content,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=3600"},
     )
 
 

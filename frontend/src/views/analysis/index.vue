@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import type { TagProps } from 'naive-ui';
+import { computed, defineComponent, h, onMounted, ref, watch } from 'vue';
+import type { SelectOption, TagProps } from 'naive-ui';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import BusinessPageHeader from '@/components/business/page-header.vue';
@@ -9,6 +9,7 @@ import {
   fetchLiveSessions,
   fetchReviewWorkbench,
   generateSessionReview,
+  getLiveSessionAvatarUrl,
   optimizeSession,
   scoreSession
 } from '@/service/api/douyin';
@@ -16,6 +17,47 @@ import {
 defineOptions({ name: 'Analysis' });
 
 type ActionStage = '' | 'evidence' | 'score' | 'optimize' | 'score-only' | 'optimize-only';
+type SessionSelectOption = SelectOption & {
+  anchorName: string;
+  avatarUrl: string | null;
+};
+
+const AnchorAvatar = defineComponent({
+  name: 'AnchorAvatar',
+  props: {
+    src: { type: String, default: '' },
+    name: { type: String, default: '主播' },
+    size: { type: Number, default: 32 }
+  },
+  setup(props) {
+    const hasLoadError = ref(false);
+    watch(
+      () => props.src,
+      () => {
+        hasLoadError.value = false;
+      }
+    );
+
+    return () =>
+      h(
+        'span',
+        {
+          class: 'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-gray-500',
+          style: { width: `${props.size}px`, height: `${props.size}px` }
+        },
+        props.src && !hasLoadError.value
+          ? h('img', {
+              src: props.src,
+              alt: `${props.name}头像`,
+              class: 'size-full object-cover',
+              onError: () => {
+                hasLoadError.value = true;
+              }
+            })
+          : props.name.slice(0, 1) || '播'
+      );
+  }
+});
 
 const router = useRouter();
 const message = useMessage();
@@ -46,9 +88,11 @@ const latestReport = computed(() => sessionReports.value[0] || null);
 const actionBusy = computed(() => Boolean(actionStage.value));
 
 const sessionOptions = computed(() =>
-  sessions.value.map(session => ({
+  sessions.value.map<SessionSelectOption>(session => ({
     value: session.id,
-    label: `${session.anchor_name || '未知主播'} · ${formatDate(session.live_start_time)} · ${formatDuration(session.live_duration_seconds)} · ${session.live_status === 'live' ? '直播中' : '已结束'}`
+    label: `${session.anchor_name || '未知主播'} · ${formatDate(session.live_start_time)} · ${formatDuration(session.live_duration_seconds)} · ${session.live_status === 'live' ? '直播中' : '已结束'}`,
+    anchorName: session.anchor_name || '未知主播',
+    avatarUrl: session.anchor_avatar_url ? getLiveSessionAvatarUrl(session.id) : null
   }))
 );
 
@@ -166,6 +210,18 @@ function sortSessionsByLatest(items: Api.Douyin.LiveSession[]) {
     const timeDifference = getSessionStartTimestamp(b.live_start_time) - getSessionStartTimestamp(a.live_start_time);
     return timeDifference || b.id - a.id;
   });
+}
+
+function renderSessionLabel(option: SelectOption) {
+  const sessionOption = option as SessionSelectOption;
+  return h('div', { class: 'flex min-w-0 items-center gap-9px' }, [
+    h(AnchorAvatar, { size: 26, src: sessionOption.avatarUrl || undefined, name: sessionOption.anchorName }),
+    h('span', { class: 'min-w-0 flex-1 truncate' }, String(sessionOption.label || ''))
+  ]);
+}
+
+function getSessionAvatarUrl(session: Api.Douyin.LiveSession) {
+  return session.anchor_avatar_url ? getLiveSessionAvatarUrl(session.id) : undefined;
 }
 
 function scorePercent(value: number, max: number) {
@@ -403,17 +459,21 @@ onMounted(initializePage);
             </div>
             <NSelect
               :value="selectedSessionId"
+              size="large"
               filterable
               clearable
               :options="sessionOptions"
+              :render-label="renderSessionLabel"
               placeholder="按主播、日期或状态搜索直播场次"
               :loading="loading"
               @update:value="changeSession"
             />
             <div v-if="selectedSession" class="mt-14px flex min-w-0 items-center gap-12px">
-              <NAvatar round :size="42" :src="selectedSession.anchor_avatar_url || undefined">
-                {{ selectedSession.anchor_name?.slice(0, 1) || '播' }}
-              </NAvatar>
+              <AnchorAvatar
+                :size="42"
+                :src="getSessionAvatarUrl(selectedSession)"
+                :name="selectedSession.anchor_name || '未知主播'"
+              />
               <div class="min-w-0 flex-1">
                 <div class="truncate text-14px font-700">{{ selectedSession.session_title || '未命名直播场次' }}</div>
                 <div class="mt-4px flex flex-wrap items-center gap-x-12px gap-y-4px text-12px text-gray-500">

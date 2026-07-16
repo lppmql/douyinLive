@@ -43,6 +43,14 @@ export function fetchLiveSessionData(id: number) {
   return backendRequest<Api.Douyin.LiveSessionDetail>({ url: `${API_PREFIX}/live-sessions/${id}/details` });
 }
 
+/** 获取同源代理的真实主播头像，避免抖音 CDN 限制跨站嵌入。 */
+export function getLiveSessionAvatarUrl(id: number) {
+  const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
+  const { otherBaseURL } = getServiceBaseURL(import.meta.env, isHttpProxy);
+  const backendBaseUrl = otherBaseURL.backend || window.location.origin;
+  return `${backendBaseUrl}${API_PREFIX}/live-sessions/${id}/avatar`;
+}
+
 /** 获取低开销封装 MP4 的下载地址，开发环境自动复用 Vite 后端代理 */
 export function getLiveSessionVideoDownloadUrl(id: number) {
   const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
