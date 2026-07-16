@@ -340,6 +340,16 @@ declare namespace Api {
       type: 'warning' | 'error' | 'info';
     }
 
+    interface AnalysisReport {
+      id: number;
+      session_id: number;
+      report_type: 'speech_score' | 'optimization' | 'anomaly' | 'trend' | string;
+      report_title: string | null;
+      summary: string | null;
+      report_content: Record<string, unknown> | null;
+      created_at: string;
+    }
+
     interface ReviewCompletenessComponent {
       name: string;
       weight: number;
@@ -634,10 +644,41 @@ declare namespace Api {
       interactivity_score: number;
       lead_guidance_score: number;
       affinity_score?: number;
+      knowledge_value_score?: number;
       total_score: number;
       strengths: string[];
       weaknesses: string[];
       suggestions: string[];
+      evidence?: AiScoreEvidence[];
+    }
+
+    interface AiScoreEvidence {
+      quote: string;
+      category: string;
+      start_seconds: number | null;
+    }
+
+    interface AiOptimizationFinding {
+      category?: string;
+      title?: string;
+      evidence?: string;
+      start_seconds?: number | null;
+      severity?: 'info' | 'warning' | 'critical' | string;
+    }
+
+    interface AiNextLivePlan {
+      stage?: string;
+      action?: string;
+      success_metric?: string;
+    }
+
+    interface AiOptimizationResult {
+      summary?: string;
+      findings?: AiOptimizationFinding[];
+      suggestions?: string[];
+      next_live_plan?: AiNextLivePlan[];
+      compliance_notes?: string[];
+      [key: string]: unknown;
     }
 
     interface QaResult {

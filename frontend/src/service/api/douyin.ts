@@ -200,6 +200,18 @@ export function fetchTranscriptTasks(status?: Api.Douyin.TranscriptTask['status'
 
 /* ---------- AI 分析 ---------- */
 
+/** 获取已保存的真实 AI 分析报告。 */
+export function fetchAnalysisReports(params?: { sessionId?: number; reportType?: string; limit?: number }) {
+  return backendRequest<Api.Douyin.AnalysisReport[]>({
+    url: `${API_PREFIX}/analysis-reports/`,
+    params: {
+      session_id: params?.sessionId,
+      report_type: params?.reportType,
+      limit: params?.limit || 200
+    }
+  });
+}
+
 /** 获取 AI 评分 */
 export function fetchAnalysisScore(sessionId: number) {
   return backendRequest<Api.Douyin.AnalysisScore>({ url: `${API_PREFIX}/analysis/${sessionId}/score` });
@@ -366,7 +378,7 @@ export function testAiConnection() {
 
 /** 话术评分 */
 export function scoreSession(sessionId: number) {
-  return backendRequest<{ status: string; result: Record<string, unknown> }>({
+  return backendRequest<{ status: string; result: Api.Douyin.AiScoreResult }>({
     url: `${API_PREFIX}/ai/score/${sessionId}`,
     method: 'POST'
   });
@@ -391,7 +403,7 @@ export function detectAnomaly(sessionId: number) {
 
 /** 优化建议 */
 export function optimizeSession(sessionId: number) {
-  return backendRequest<{ status: string; result: Record<string, unknown> }>({
+  return backendRequest<{ status: string; result: Api.Douyin.AiOptimizationResult }>({
     url: `${API_PREFIX}/ai/optimize/${sessionId}`,
     method: 'POST'
   });
