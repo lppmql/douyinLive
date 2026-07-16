@@ -238,6 +238,7 @@ const local: App.I18n.Schema = {
     transcripts: 'Transcripts',
     analysis: 'AI Analysis',
     knowledge: 'Knowledge Base',
+    'anchor-schedule': 'Anchor Schedule',
     'user-management': 'User Management'
   },
   page: {

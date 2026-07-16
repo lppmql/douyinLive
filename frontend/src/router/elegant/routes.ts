@@ -52,6 +52,18 @@ export const generatedRoutes: GeneratedRoute[] = [
     }
   },
   {
+    name: 'anchor-schedule',
+    path: '/anchor-schedule',
+    component: 'layout.base$view.anchor-schedule',
+    meta: {
+      title: 'anchor-schedule',
+      i18nKey: 'route.anchor-schedule',
+      icon: 'mdi:calendar-clock-outline',
+      order: 8,
+      keepAlive: true
+    }
+  },
+  {
     name: 'collector',
     path: '/collector',
     component: 'layout.base$view.collector',
@@ -168,7 +180,7 @@ export const generatedRoutes: GeneratedRoute[] = [
       title: 'user-management',
       i18nKey: 'route.user-management',
       icon: 'mdi:account-group',
-      order: 8,
+      order: 9,
       keepAlive: true,
       roles: ['R_SUPER']
     }

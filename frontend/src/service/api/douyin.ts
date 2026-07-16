@@ -13,6 +13,16 @@ export function fetchDashboardSummary() {
   return backendRequest<Api.Douyin.DashboardSummary>({ url: `${API_PREFIX}/dashboard/summary` });
 }
 
+/* ---------- 主播排班 ---------- */
+
+/** 获取指定日期的排班、真实执行情况和提醒。 */
+export function fetchAnchorScheduleDashboard(scheduleDate: string) {
+  return backendRequest<Api.Douyin.AnchorScheduleDashboard>({
+    url: `${API_PREFIX}/anchor-schedules/dashboard`,
+    params: { schedule_date: scheduleDate }
+  });
+}
+
 /* ---------- 直播场次 ---------- */
 
 /** 获取直播场次列表 */

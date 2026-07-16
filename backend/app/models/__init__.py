@@ -7,6 +7,7 @@ from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.comments import Comment
 from app.models.leads import Lead
 from app.models.transcript_segments import TranscriptSegment
+from app.models.anchor_schedules import AnchorSchedule
 from app.models.transcript_full_texts import TranscriptFullText
 from app.models.analysis_reports import AnalysisReport
 from app.models.knowledge_base import KnowledgeBase
@@ -30,6 +31,7 @@ __all__ = [
     "Comment",
     "Lead",
     "TranscriptSegment",
+    "AnchorSchedule",
     "TranscriptFullText",
     "AnalysisReport",
     "KnowledgeBase",

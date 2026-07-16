@@ -21,6 +21,85 @@ declare namespace Api {
       open_review_action_count: number;
     }
 
+    /* ---------- 主播排班 ---------- */
+    type AnchorScheduleStatus = 'upcoming' | 'live' | 'completed' | 'missing' | 'duration_short';
+
+    interface AnchorScheduleActualSession {
+      id: number;
+      anchor_name: string | null;
+      anchor_avatar_url: string | null;
+      live_start_time: string | null;
+      live_end_time: string | null;
+      live_duration_seconds: number;
+      live_status: string;
+    }
+
+    interface AnchorScheduleRow {
+      id: number;
+      source_anchor_name: string;
+      display_name: string;
+      room_name: string;
+      network_name: string | null;
+      session_index: number;
+      planned_start_time: string;
+      planned_end_time: string;
+      expected_duration_minutes: number;
+      status: AnchorScheduleStatus;
+      warnings: string[];
+      actual_session: AnchorScheduleActualSession | null;
+    }
+
+    interface AnchorScheduleReminder {
+      type: 'missing' | 'duration' | 'cross_hour';
+      severity: 'warning' | 'error';
+      anchor_name: string;
+      session_index: number;
+      message: string;
+      planned_start_time: string;
+      session_id: number | null;
+    }
+
+    interface AnchorScheduleAnchor {
+      source_anchor_name: string;
+      display_name: string;
+      room_name: string;
+      network_name: string | null;
+      expected_count: number;
+      matched_count: number;
+      completed_count: number;
+      warning_count: number;
+      anchor_avatar_url: string | null;
+      anchor_avatar_session_id: number | null;
+      actual_anchor_name: string | null;
+    }
+
+    interface AnchorScheduleDashboard {
+      schedule_date: string;
+      generated_at: string;
+      source_name: string;
+      rule: {
+        expected_duration_minutes: number;
+        four_session_anchors: string[];
+        default_session_count: number;
+        cross_hour_definition: string;
+      };
+      summary: {
+        planned_count: number;
+        matched_count: number;
+        completed_count: number;
+        live_count: number;
+        upcoming_count: number;
+        missing_count: number;
+        duration_short_count: number;
+        cross_hour_count: number;
+        duration_compliant_count: number;
+        reminder_count: number;
+      };
+      anchors: AnchorScheduleAnchor[];
+      rows: AnchorScheduleRow[];
+      reminders: AnchorScheduleReminder[];
+    }
+
     /* ---------- 直播间 ---------- */
     interface LiveRoom {
       id: number;

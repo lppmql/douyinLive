@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.services.collector.browser import BROWSER_ARGS, BrowserManager
+from app.services.collector.browser import BROWSER_ARGS, BROWSER_CHANNEL, BrowserManager
 from app.services.collector.monitor import CluerichLiveDetector, LiveStatusResult
 from app.services.collector.manual_collect import _is_context_closed_message, _sanitize_collector_error
 
@@ -38,8 +38,10 @@ class ContextClosedMessageTest(unittest.TestCase):
         self.assertLessEqual(len(compact), 500)
 
     def test_browser_disables_graphics_acceleration(self):
+        self.assertEqual(BROWSER_CHANNEL, "chromium")
         self.assertIn("--disable-gpu", BROWSER_ARGS)
         self.assertIn("--disable-webgl", BROWSER_ARGS)
+        self.assertNotIn("--disable-software-rasterizer", BROWSER_ARGS)
 
 
 class ClosedContext:
@@ -53,6 +55,26 @@ class HealthyContext:
 
     async def new_page(self):
         return self.page
+
+
+class ContextWithPageCounter:
+    def __init__(self):
+        self.page_count = 0
+
+    async def add_init_script(self, _script):
+        return None
+
+    async def new_page(self):
+        self.page_count += 1
+        return FakePage()
+
+
+class BrowserWithContextCounter:
+    def __init__(self, context):
+        self.context = context
+
+    async def new_context(self, **_options):
+        return self.context
 
 
 class LoginCheckPage(FakePage):
@@ -94,6 +116,15 @@ class RecoveringDetector(CluerichLiveDetector):
 
 
 class MonitorContextRecoveryTest(unittest.IsolatedAsyncioTestCase):
+    async def test_create_context_keeps_one_blank_page_alive(self):
+        manager = BrowserManager()
+        context = ContextWithPageCounter()
+        with patch.object(manager, "ensure_browser", return_value=BrowserWithContextCounter(context)):
+            result = await manager.create_context()
+
+        self.assertIs(result, context)
+        self.assertEqual(context.page_count, 1)
+
     async def test_serializes_logged_in_context_recovery(self):
         manager = BrowserManager()
         active_calls = 0

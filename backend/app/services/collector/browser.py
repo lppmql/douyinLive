@@ -41,14 +41,14 @@ DEFAULT_FINGERPRINT = {
 }
 
 # 浏览器启动参数
+BROWSER_CHANNEL = "chromium"
 BROWSER_ARGS = [
     "--headless=new",
     "--no-sandbox",
     "--disable-setuid-sandbox",
-    # 采集只依赖接口与 DOM。关闭图形加速可规避 macOS 无头 Chromium 的
-    # EGL 驱动循环报错及 SIGSEGV，同时减少长期采集的 GPU 资源占用。
+    # 采集只依赖接口与 DOM，关闭硬件 GPU 和 WebGL 以降低资源占用；必须保留
+    # Chromium 软件光栅器作为无头渲染后备，否则 macOS 图形进程可能 SIGSEGV。
     "--disable-gpu",
-    "--disable-software-rasterizer",
     "--disable-webgl",
     "--disable-accelerated-2d-canvas",
     "--log-level=3",
@@ -113,9 +113,10 @@ class BrowserManager:
                 self._playwright = await async_playwright().start()
                 self._browser = await self._playwright.chromium.launch(
                     headless=True,
+                    channel=BROWSER_CHANNEL,
                     args=BROWSER_ARGS,
                 )
-                logger.info("浏览器实例已创建（图形加速已关闭）")
+                logger.info("浏览器实例已创建（Chromium 新版无头模式，图形加速已关闭）")
             return self._browser
 
     def _make_context_opts(
@@ -223,6 +224,9 @@ class BrowserManager:
         context = await browser.new_context(**opts)
         # 注入反检测脚本
         await context.add_init_script(FINGERPRINT_SCRIPT)
+        # 完整 Chromium 的新版无头模式在上下文零页面时可能退出。保留一个不访问
+        # 网络的空白页，业务页面仍按任务创建和关闭，避免下一轮采集拿到关闭的上下文。
+        await context.new_page()
         return context
 
     async def get_logged_in_context(self) -> tuple[Optional[BrowserContext], bool, str]:
@@ -389,6 +393,7 @@ class BrowserManager:
             playwright = await async_playwright().start()
             browser = await playwright.chromium.launch(
                 headless=True,
+                channel=BROWSER_CHANNEL,
                 args=BROWSER_ARGS,
             )
 

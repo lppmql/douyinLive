@@ -21,6 +21,7 @@ declare module "@elegant-router/types" {
     "404": "/404";
     "500": "/500";
     "analysis": "/analysis";
+    "anchor-schedule": "/anchor-schedule";
     "collector": "/collector";
     "dashboard": "/dashboard";
     "home": "/home";
@@ -66,6 +67,7 @@ declare module "@elegant-router/types" {
     | "404"
     | "500"
     | "analysis"
+    | "anchor-schedule"
     | "collector"
     | "dashboard"
     | "home"
@@ -98,6 +100,7 @@ declare module "@elegant-router/types" {
     | "iframe-page"
     | "login"
     | "analysis"
+    | "anchor-schedule"
     | "collector"
     | "dashboard"
     | "home"

@@ -234,6 +234,7 @@ const local: App.I18n.Schema = {
     transcripts: '主播话术',
     analysis: 'AI 复盘',
     knowledge: '知识库',
+    'anchor-schedule': '主播排班',
     'user-management': '用户管理'
   },
   page: {
