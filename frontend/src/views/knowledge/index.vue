@@ -410,8 +410,9 @@ onMounted(loadPage);
 </script>
 
 <template>
-  <div class="flex flex-col gap-16px">
+  <div class="knowledge-page flex flex-col gap-16px">
     <BusinessPageHeader
+      class="order-1"
       title="直播经营知识库"
       description="把真实场次拆成可检索证据，统一关联主播话术、用户评论和分钟指标，为零食店避坑直播复盘提供可追溯依据。"
       icon="mdi:book-open-page-variant-outline"
@@ -435,7 +436,7 @@ onMounted(loadPage);
       </div>
     </BusinessPageHeader>
 
-    <div class="grid grid-cols-2 gap-12px xl:grid-cols-5">
+    <div class="order-3 grid grid-cols-2 gap-12px xl:grid-cols-5">
       <button
         v-for="card in summaryCards"
         :key="card.key"
@@ -456,12 +457,12 @@ onMounted(loadPage);
       </button>
     </div>
 
-    <NAlert v-if="sliceStatus?.unmapped_comment_count" type="warning" :bordered="false" show-icon>
+    <NAlert v-if="sliceStatus?.unmapped_comment_count" class="order-4" type="warning" :bordered="false" show-icon>
       有 {{ sliceStatus.unmapped_comment_count }} 条评论缺少可靠平台时间，系统已单独保留，不会错误绑定到话术片段。
     </NAlert>
 
-    <div class="flex flex-col gap-16px">
-      <NCard :bordered="false" class="card-wrapper evidence-card order-2">
+    <div class="contents">
+      <NCard :bordered="false" class="card-wrapper evidence-card order-5">
         <template #header>
           <div>
             <div class="text-16px font-800">真实证据库</div>
@@ -650,7 +651,7 @@ onMounted(loadPage);
         </NTabs>
       </NCard>
 
-      <NCard :bordered="false" class="card-wrapper assistant-card order-1">
+      <NCard :bordered="false" class="card-wrapper assistant-card order-2">
         <template #header>
           <div>
             <div class="flex items-center gap-7px text-16px font-800">
@@ -713,7 +714,7 @@ onMounted(loadPage);
         </aside>
 
         <section class="assistant-main">
-          <NScrollbar class="chat-scroll" style="max-height: 520px">
+          <NScrollbar class="chat-scroll">
             <div class="min-h-320px pr-8px">
               <div v-if="!messages.length" class="chat-welcome">
                 <span class="chat-welcome__icon"><SvgIcon icon="mdi:database-search-outline" /></span>
@@ -782,10 +783,17 @@ onMounted(loadPage);
           </NScrollbar>
 
           <div class="chat-composer">
+            <div class="mb-8px flex items-center justify-between gap-8px">
+              <span class="flex items-center gap-5px text-12px font-700">
+                <SvgIcon icon="mdi:pencil-outline" class="text-primary" />
+                在这里输入你的问题
+              </span>
+              <span class="text-11px text-gray-400">Enter 发送</span>
+            </div>
             <NInput
               v-model:value="question"
               type="textarea"
-              :autosize="{ minRows: 2, maxRows: 4 }"
+              :autosize="{ minRows: 1, maxRows: 4 }"
               maxlength="500"
               show-count
               placeholder="输入复盘问题，Enter 发送，Shift+Enter 换行"
@@ -842,13 +850,10 @@ onMounted(loadPage);
 .summary-card--danger { --summary-tone: #d03050; }
 
 .assistant-card :deep(.n-card-content) {
-  padding-top: 8px;
-}
-
-.assistant-card :deep(.n-card-content) {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
   gap: 18px;
+  padding-top: 8px;
 }
 
 .assistant-sidebar {
@@ -857,9 +862,12 @@ onMounted(loadPage);
 }
 
 .assistant-main {
+  display: flex;
   grid-column: 1;
   grid-row: 1;
+  height: 410px;
   min-width: 0;
+  flex-direction: column;
   border: 1px solid rgb(148 163 184 / 16%);
   border-radius: 14px;
   background: color-mix(in srgb, var(--card-color) 97%, rgb(var(--primary-color)) 3%);
@@ -867,6 +875,8 @@ onMounted(loadPage);
 }
 
 .chat-scroll {
+  min-height: 0;
+  flex: 1;
   padding: 16px 12px 8px 16px;
 }
 
@@ -892,6 +902,9 @@ onMounted(loadPage);
 }
 
 .chat-composer {
+  position: relative;
+  z-index: 1;
+  flex: none;
   border-top: 1px solid rgb(148 163 184 / 14%);
   background: var(--card-color);
   padding: 12px 14px 14px;
@@ -1032,6 +1045,22 @@ onMounted(loadPage);
 
   .assistant-sidebar {
     grid-row: 2;
+  }
+}
+
+@media (min-width: 1025px) and (max-height: 800px) {
+  .assistant-sidebar,
+  .assistant-main {
+    height: 270px;
+  }
+
+  .assistant-sidebar {
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+
+  .chat-welcome {
+    min-height: 230px;
   }
 }
 
