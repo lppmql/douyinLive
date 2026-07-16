@@ -97,9 +97,8 @@ def build_browser_playback_command(
         command.extend(["-headers", "\r\n".join(safe_headers) + "\r\n"])
     if start_seconds > 0:
         command.extend(["-ss", f"{start_seconds:.3f}"])
-    # 按原始时间速率读取，避免 ffmpeg 为追求最快转码而占满 CPU/GPU。
+    # M 芯片硬件编码器效率极高，全速转码让前端获得充足缓冲，播放更流畅。
     command.extend([
-        "-re",
         "-i",
         stream_url,
         "-map",
