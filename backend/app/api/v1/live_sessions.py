@@ -267,7 +267,7 @@ def playback_session_video(
         raise HTTPException(400, str(exc)) from exc
 
     return StreamingResponse(
-        stream_browser_playback(stream_url, headers, start_seconds),
+        stream_browser_playback(stream_url, headers, start_seconds, session_id),
         media_type="video/mp4",
         headers={
             "Content-Disposition": f'inline; filename="live-session-{session_id}.mp4"',
