@@ -42,7 +42,8 @@ const statusMap: Record<
   live: { label: '直播中', type: 'success' },
   completed: { label: '已达标', type: 'success' },
   missing: { label: '缺少场次', type: 'error' },
-  duration_short: { label: '时长不足', type: 'warning' }
+  duration_short: { label: '时长不足', type: 'warning' },
+  extra: { label: '加场', type: 'info' }
 };
 
 function formatClock(value: string | null) {
@@ -70,6 +71,20 @@ function formatMissingSummary(anchor: Api.Douyin.AnchorScheduleAnchor) {
 
 function formatMissingSessions(sessionIndexes: number[]) {
   return sessionIndexes.map(index => `第 ${index} 场`).join('、');
+}
+
+function formatExtraSummary(anchor: Api.Douyin.AnchorScheduleAnchor) {
+  if (!anchor.extra_count) return '加场：无';
+  const visibleDates = anchor.extra_by_date
+    .slice(0, 2)
+    .map(item => `${dayjs(item.schedule_date).format('MM-DD')}（${item.count} 场）`)
+    .join('、');
+  const remaining = anchor.extra_by_date.length - 2;
+  return `加场：${visibleDates}${remaining > 0 ? ` 等 ${anchor.extra_by_date.length} 天` : ''}`;
+}
+
+function formatExtraStartTimes(liveStartTimes: string[]) {
+  return liveStartTimes.map(value => dayjs(value).format('HH:mm')).join('、');
 }
 
 function setDateOffset(offset: number) {
@@ -154,7 +169,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       title: '场次',
       key: 'session_index',
       width: 76,
-      render: row => `第 ${row.session_index} 场`
+      render: row => (row.status === 'extra' ? `加场 ${row.extra_index}` : `第 ${row.session_index} 场`)
     },
     {
       title: '直播间 / 网络',
@@ -171,13 +186,16 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       title: '计划时间',
       key: 'planned_start_time',
       width: 135,
-      render: row => `${formatClock(row.planned_start_time)} - ${formatClock(row.planned_end_time)}`
+      render: row =>
+        row.status === 'extra'
+          ? '计划外加场'
+          : `${formatClock(row.planned_start_time)} - ${formatClock(row.planned_end_time)}`
     },
     {
       title: '标准时长',
       key: 'expected_duration_minutes',
       width: 90,
-      render: row => `${row.expected_duration_minutes} 分钟`
+      render: row => (row.status === 'extra' ? '-' : `${row.expected_duration_minutes} 分钟`)
     },
     {
       title: '实际开播',
@@ -206,6 +224,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       minWidth: 260,
       ellipsis: { tooltip: true },
       render(row) {
+        if (row.status === 'extra') return h('span', { class: 'text-info' }, '超过当天规定场次，标记为加场');
         if (!row.warnings.length) return row.status === 'upcoming' ? '等待计划时间' : '无异常';
         return h('span', { class: row.status === 'missing' ? 'text-error' : 'text-warning' }, row.warnings.join('；'));
       }
@@ -314,7 +333,9 @@ onBeforeUnmount(() => {
           <NCard :bordered="false" class="schedule-kpi schedule-kpi-match" size="small">
             <div class="text-13px text-gray-500">已匹配真实场次</div>
             <div class="mt-8px text-30px font-700 text-success">{{ dashboard?.summary.matched_count || 0 }}</div>
-            <div class="mt-4px text-12px text-gray-400">直播中 {{ dashboard?.summary.live_count || 0 }} 场</div>
+            <div class="mt-4px text-12px text-gray-400">
+              直播中 {{ dashboard?.summary.live_count || 0 }} 场 · 加场 {{ dashboard?.summary.extra_count || 0 }} 场
+            </div>
           </NCard>
         </NGi>
         <NGi>
@@ -390,6 +411,21 @@ onBeforeUnmount(() => {
               </div>
             </NTooltip>
             <div v-else class="mt-10px text-left text-11px text-success">缺场：无</div>
+            <NTooltip v-if="anchor.extra_count" placement="bottom" :delay="200">
+              <template #trigger>
+                <div class="mt-6px truncate text-left text-11px text-info">
+                  {{ formatExtraSummary(anchor) }}
+                </div>
+              </template>
+              <div class="max-h-240px overflow-y-auto py-2px">
+                <div class="mb-6px font-600">加场明细</div>
+                <div v-for="item in anchor.extra_by_date" :key="item.schedule_date" class="py-2px text-12px">
+                  {{ dayjs(item.schedule_date).format('YYYY-MM-DD') }}：加 {{ item.count }} 场（开播
+                  {{ formatExtraStartTimes(item.live_start_times) }}）
+                </div>
+              </div>
+            </NTooltip>
+            <div v-else class="mt-6px text-left text-11px text-gray-400">加场：无</div>
           </button>
         </NGi>
       </NGrid>
@@ -476,7 +512,7 @@ onBeforeUnmount(() => {
 
 .anchor-card {
   width: 100%;
-  min-height: 150px;
+  min-height: 170px;
   padding: 14px;
   color: inherit;
   cursor: pointer;
@@ -503,7 +539,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 640px) {
   .anchor-card {
-    min-height: 138px;
+    min-height: 158px;
   }
 }
 </style>

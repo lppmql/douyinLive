@@ -22,7 +22,7 @@ declare namespace Api {
     }
 
     /* ---------- 主播排班 ---------- */
-    type AnchorScheduleStatus = 'upcoming' | 'live' | 'completed' | 'missing' | 'duration_short';
+    type AnchorScheduleStatus = 'upcoming' | 'live' | 'completed' | 'missing' | 'duration_short' | 'extra';
 
     interface AnchorScheduleActualSession {
       id: number;
@@ -42,8 +42,9 @@ declare namespace Api {
       room_name: string;
       network_name: string | null;
       session_index: number;
-      planned_start_time: string;
-      planned_end_time: string;
+      extra_index: number | null;
+      planned_start_time: string | null;
+      planned_end_time: string | null;
       expected_duration_minutes: number;
       status: AnchorScheduleStatus;
       warnings: string[];
@@ -76,6 +77,13 @@ declare namespace Api {
         count: number;
         session_indexes: number[];
       }>;
+      extra_count: number;
+      extra_by_date: Array<{
+        schedule_date: string;
+        count: number;
+        session_ids: number[];
+        live_start_times: string[];
+      }>;
       anchor_avatar_url: string | null;
       anchor_avatar_session_id: number | null;
       actual_anchor_name: string | null;
@@ -102,6 +110,7 @@ declare namespace Api {
         upcoming_count: number;
         missing_count: number;
         duration_short_count: number;
+        extra_count: number;
         cross_hour_count: number;
         duration_compliant_count: number;
         reminder_count: number;

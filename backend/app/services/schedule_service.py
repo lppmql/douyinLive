@@ -206,6 +206,8 @@ def build_schedule_dashboard(
                 "warning_count": 0,
                 "missing_count": 0,
                 "missing_by_date": [],
+                "extra_count": 0,
+                "extra_by_date": [],
                 "anchor_avatar_url": None,
                 "anchor_avatar_session_id": None,
                 "actual_anchor_name": None,
@@ -250,6 +252,7 @@ def build_schedule_dashboard(
                 "room_name": schedule.room_name,
                 "network_name": schedule.network_name,
                 "session_index": schedule.session_index,
+                "extra_index": None,
                 "planned_start_time": planned_start.isoformat(),
                 "planned_end_time": planned_end.isoformat(),
                 "expected_duration_minutes": schedule.expected_duration_minutes,
@@ -259,6 +262,82 @@ def build_schedule_dashboard(
             }
         )
 
+    matched_session_ids = {session.id for session in matched.values()}
+    assigned_extra_ids: set[int] = set()
+    schedules_by_anchor: dict[str, list[AnchorSchedule]] = defaultdict(list)
+    for schedule in schedules:
+        schedules_by_anchor[schedule.source_anchor_name].append(schedule)
+
+    for source_anchor_name, anchor_schedules in schedules_by_anchor.items():
+        representative = anchor_schedules[0]
+        candidates = [item for item in sessions if _matches_anchor(item, representative.match_keywords or [])]
+        overflow_count = max(len(candidates) - len(anchor_schedules), 0)
+        if overflow_count == 0:
+            continue
+        planned_starts = [_planned_range(schedule_date, item)[0] for item in anchor_schedules]
+        unmatched_candidates = [
+            item
+            for item in candidates
+            if item.id not in matched_session_ids and item.id not in assigned_extra_ids and item.live_start_time
+        ]
+        extra_sessions = sorted(
+            sorted(
+                unmatched_candidates,
+                key=lambda item: min(
+                    abs((item.live_start_time - planned_start).total_seconds()) for planned_start in planned_starts
+                ),
+                reverse=True,
+            )[:overflow_count],
+            key=lambda item: (item.live_start_time, item.id),
+        )
+        stat = anchor_stats[source_anchor_name]
+        for extra_index, actual in enumerate(extra_sessions, start=1):
+            assigned_extra_ids.add(actual.id)
+            actual_payload = _serialize_actual(actual, now)
+            stat["extra_count"] += 1
+            extra_date = schedule_date.isoformat()
+            extra_item = next(
+                (item for item in stat["extra_by_date"] if item["schedule_date"] == extra_date),
+                None,
+            )
+            if extra_item is None:
+                extra_item = {
+                    "schedule_date": extra_date,
+                    "count": 0,
+                    "session_ids": [],
+                    "live_start_times": [],
+                }
+                stat["extra_by_date"].append(extra_item)
+            extra_item["count"] += 1
+            extra_item["session_ids"].append(actual.id)
+            extra_item["live_start_times"].append(actual_payload["live_start_time"])
+            stat["anchor_avatar_url"] = actual.anchor_avatar_url or stat["anchor_avatar_url"]
+            stat["anchor_avatar_session_id"] = actual.id if actual.anchor_avatar_url else stat["anchor_avatar_session_id"]
+            stat["actual_anchor_name"] = actual.anchor_name or stat["actual_anchor_name"]
+            rows.append(
+                {
+                    "id": actual.id,
+                    "schedule_date": extra_date,
+                    "source_anchor_name": source_anchor_name,
+                    "display_name": representative.display_name,
+                    "room_name": representative.room_name,
+                    "network_name": representative.network_name,
+                    "session_index": extra_index,
+                    "extra_index": extra_index,
+                    "planned_start_time": None,
+                    "planned_end_time": None,
+                    "expected_duration_minutes": representative.expected_duration_minutes,
+                    "status": "extra",
+                    "warnings": [],
+                    "actual_session": actual_payload,
+                }
+            )
+
+    rows.sort(
+        key=lambda row: row["planned_start_time"]
+        or (row["actual_session"] or {}).get("live_start_time")
+        or f"{schedule_date.isoformat()}T23:59:59"
+    )
     matched_count = len(matched)
     return {
         "schedule_date": schedule_date.isoformat(),
@@ -277,10 +356,13 @@ def build_schedule_dashboard(
             "planned_count": len(schedules),
             "matched_count": matched_count,
             "completed_count": sum(1 for row in rows if row["status"] == "completed"),
-            "live_count": sum(1 for row in rows if row["status"] == "live"),
+            "live_count": sum(
+                1 for row in rows if row["actual_session"] and row["actual_session"]["live_status"] == "live"
+            ),
             "upcoming_count": sum(1 for row in rows if row["status"] == "upcoming"),
             "missing_count": sum(1 for row in rows if row["status"] == "missing"),
             "duration_short_count": sum(1 for row in rows if row["status"] == "duration_short"),
+            "extra_count": sum(1 for row in rows if row["status"] == "extra"),
             "cross_hour_count": sum(1 for item in reminders if item["type"] == "cross_hour"),
             "duration_compliant_count": compliant_duration_count,
             "reminder_count": len(reminders),
@@ -335,9 +417,18 @@ def build_schedule_range_dashboard(
                     "warning_count": 0,
                     "missing_count": 0,
                     "missing_by_date": [],
+                    "extra_count": 0,
+                    "extra_by_date": [],
                 },
             )
-            for key in ("expected_count", "matched_count", "completed_count", "warning_count", "missing_count"):
+            for key in (
+                "expected_count",
+                "matched_count",
+                "completed_count",
+                "warning_count",
+                "missing_count",
+                "extra_count",
+            ):
                 stat[key] += anchor[key]
             for missing_item in anchor["missing_by_date"]:
                 existing_item = next(
@@ -355,6 +446,27 @@ def build_schedule_range_dashboard(
                 else:
                     existing_item["count"] += missing_item["count"]
                     existing_item["session_indexes"].extend(missing_item["session_indexes"])
+            for extra_item in anchor["extra_by_date"]:
+                existing_extra_item = next(
+                    (
+                        item
+                        for item in stat["extra_by_date"]
+                        if item["schedule_date"] == extra_item["schedule_date"]
+                    ),
+                    None,
+                )
+                if existing_extra_item is None:
+                    stat["extra_by_date"].append(
+                        {
+                            **extra_item,
+                            "session_ids": list(extra_item["session_ids"]),
+                            "live_start_times": list(extra_item["live_start_times"]),
+                        }
+                    )
+                else:
+                    existing_extra_item["count"] += extra_item["count"]
+                    existing_extra_item["session_ids"].extend(extra_item["session_ids"])
+                    existing_extra_item["live_start_times"].extend(extra_item["live_start_times"])
             if anchor["anchor_avatar_url"]:
                 stat["anchor_avatar_url"] = anchor["anchor_avatar_url"]
                 stat["anchor_avatar_session_id"] = anchor["anchor_avatar_session_id"]
@@ -362,6 +474,7 @@ def build_schedule_range_dashboard(
 
     for stat in anchor_stats.values():
         stat["missing_by_date"].sort(key=lambda item: item["schedule_date"])
+        stat["extra_by_date"].sort(key=lambda item: item["schedule_date"])
 
     return {
         "schedule_date": start_date.isoformat(),

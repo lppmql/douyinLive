@@ -62,7 +62,42 @@ class AnchorScheduleTest(unittest.TestCase):
         self.assertEqual(result["summary"]["matched_count"], 1)
         self.assertEqual(result["summary"]["duration_compliant_count"], 1)
         self.assertEqual(result["summary"]["cross_hour_count"], 0)
+        self.assertEqual(result["summary"]["extra_count"], 0)
         self.assertEqual(result["rows"][0]["status"], "completed")
+
+    def test_sessions_over_daily_limit_are_marked_extra(self):
+        self.add_session(datetime(2026, 7, 16, 9, 52), 80 * 60)
+        extra_session = self.add_session(datetime(2026, 7, 16, 14, 20), 65 * 60)
+
+        result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 16, 0))
+
+        self.assertEqual(result["summary"]["matched_count"], 1)
+        self.assertEqual(result["summary"]["extra_count"], 1)
+        self.assertEqual(result["summary"]["reminder_count"], 0)
+        self.assertEqual([row["status"] for row in result["rows"]], ["completed", "extra"])
+        self.assertEqual(result["rows"][1]["actual_session"]["id"], extra_session.id)
+        self.assertEqual(result["anchors"][0]["extra_count"], 1)
+        self.assertEqual(
+            result["anchors"][0]["extra_by_date"],
+            [
+                {
+                    "schedule_date": "2026-07-16",
+                    "count": 1,
+                    "session_ids": [extra_session.id],
+                    "live_start_times": ["2026-07-16T14:20:00"],
+                }
+            ],
+        )
+
+    def test_unmatched_session_within_daily_limit_is_not_marked_extra(self):
+        self.add_session(datetime(2026, 7, 16, 14, 20), 65 * 60)
+
+        result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 16, 0))
+
+        self.assertEqual(result["summary"]["matched_count"], 0)
+        self.assertEqual(result["summary"]["missing_count"], 1)
+        self.assertEqual(result["summary"]["extra_count"], 0)
+        self.assertEqual(result["anchors"][0]["extra_by_date"], [])
 
     def test_short_duration_and_late_cross_hour_are_both_reminded(self):
         self.add_session(datetime(2026, 7, 16, 10, 1), 70 * 60)
@@ -108,6 +143,7 @@ class AnchorScheduleTest(unittest.TestCase):
 
     def test_date_range_aggregates_each_day_and_keeps_row_dates(self):
         self.add_session(datetime(2026, 7, 16, 9, 52), 80 * 60)
+        extra_session = self.add_session(datetime(2026, 7, 16, 14, 20), 65 * 60)
 
         result = build_schedule_range_dashboard(
             self.db,
@@ -120,13 +156,28 @@ class AnchorScheduleTest(unittest.TestCase):
         self.assertEqual(result["summary"]["planned_count"], 2)
         self.assertEqual(result["summary"]["matched_count"], 1)
         self.assertEqual(result["summary"]["missing_count"], 1)
+        self.assertEqual(result["summary"]["extra_count"], 1)
         self.assertEqual(result["anchors"][0]["expected_count"], 2)
         self.assertEqual(result["anchors"][0]["missing_count"], 1)
         self.assertEqual(
             result["anchors"][0]["missing_by_date"],
             [{"schedule_date": "2026-07-17", "count": 1, "session_indexes": [1]}],
         )
-        self.assertEqual([row["schedule_date"] for row in result["rows"]], ["2026-07-16", "2026-07-17"])
+        self.assertEqual(
+            result["anchors"][0]["extra_by_date"],
+            [
+                {
+                    "schedule_date": "2026-07-16",
+                    "count": 1,
+                    "session_ids": [extra_session.id],
+                    "live_start_times": ["2026-07-16T14:20:00"],
+                }
+            ],
+        )
+        self.assertEqual(
+            [row["schedule_date"] for row in result["rows"]],
+            ["2026-07-16", "2026-07-16", "2026-07-17"],
+        )
 
     def test_date_range_rejects_invalid_or_oversized_ranges(self):
         with self.assertRaisesRegex(ValueError, "结束日期"):
