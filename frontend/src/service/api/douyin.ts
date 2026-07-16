@@ -351,6 +351,20 @@ export function fetchKnowledgeItems(params?: { category?: string }) {
   return backendRequest<Api.Douyin.KnowledgeItem[]>({ url: `${API_PREFIX}/knowledge-base/`, params });
 }
 
+/** 分页筛选整场知识。 */
+export function fetchKnowledgeItemPage(params: {
+  current: number;
+  size: number;
+  keyword?: string;
+  category?: string;
+  source_type?: string;
+}) {
+  return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.KnowledgeItem>>({
+    url: `${API_PREFIX}/knowledge-base/page`,
+    params
+  });
+}
+
 /** 获取知识时间片覆盖状态 */
 export function fetchKnowledgeTimeSliceStatus() {
   return backendRequest<Api.Douyin.KnowledgeTimeSliceStatus>({
@@ -362,6 +376,20 @@ export function fetchKnowledgeTimeSliceStatus() {
 export function fetchKnowledgeTimeSlices(params?: { session_id?: number; limit?: number }) {
   return backendRequest<Api.Douyin.KnowledgeTimeSlice[]>({
     url: `${API_PREFIX}/knowledge-base/time-slices`,
+    params
+  });
+}
+
+/** 分页筛选真实知识时间片。 */
+export function fetchKnowledgeTimeSlicePage(params: {
+  current: number;
+  size: number;
+  keyword?: string;
+  anchor_name?: string;
+  evidence_type?: string;
+}) {
+  return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.KnowledgeTimeSlice>>({
+    url: `${API_PREFIX}/knowledge-base/time-slices/page`,
     params
   });
 }

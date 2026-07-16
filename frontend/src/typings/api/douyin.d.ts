@@ -566,7 +566,10 @@ declare namespace Api {
       transcript_slice_count: number;
       comment_slice_count: number;
       metric_slice_count: number;
+      high_intent_slice_count: number;
       unmapped_comment_count: number;
+      knowledge_item_count: number;
+      latest_updated_at: string | null;
       slice_seconds: number;
       parser_version: string;
     }
