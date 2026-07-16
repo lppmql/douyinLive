@@ -94,6 +94,14 @@ export function fetchCollectorLogs(params?: { taskId?: number; level?: string; l
   return backendRequest<Api.Douyin.CollectorLog[]>({ url: `${API_PREFIX}/collector/logs`, params });
 }
 
+/** 清空现有采集日志，不影响采集任务和业务数据 */
+export function clearCollectorLogs() {
+  return backendRequest<{ message: string; deleted_count: number }>({
+    url: `${API_PREFIX}/collector/logs`,
+    method: 'DELETE'
+  });
+}
+
 /** 获取采集任务列表 */
 export function fetchCollectorTasks(params?: { status?: string; taskType?: string }) {
   return backendRequest<Api.Douyin.CollectorTask[]>({ url: `${API_PREFIX}/collector/tasks`, params });

@@ -350,6 +350,18 @@ def list_logs(
     return q.order_by(ScraperLog.id.desc()).limit(limit).all()
 
 
+@router.delete("/logs")
+def clear_logs(db: Session = Depends(get_db)):
+    """清空现有采集日志，不删除采集任务和业务数据。"""
+    try:
+        deleted_count = db.query(ScraperLog).delete(synchronize_session=False)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(500, "清空采集日志失败，请稍后重试") from exc
+    return {"message": "采集日志已清空", "deleted_count": deleted_count}
+
+
 # ===== 采集任务 =====
 @router.get("/tasks", response_model=list[ScraperTaskResponse])
 def list_tasks(

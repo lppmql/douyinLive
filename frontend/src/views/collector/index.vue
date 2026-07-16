@@ -7,6 +7,7 @@ import {
   fetchCollectorStatus,
   fetchCollectorAccounts,
   fetchCollectorLogs,
+  clearCollectorLogs,
   startCollectorLogin,
   fetchLoginQR,
   fetchLoginStatus,
@@ -51,6 +52,7 @@ const silentRefreshing = ref(false);
 const accountHealthLoadingId = ref<number | null>(null);
 const logDetailVisible = ref(false);
 const selectedLog = ref<Api.Douyin.CollectorLog | null>(null);
+const clearLogsLoading = ref(false);
 const asrStatus = ref<Api.Douyin.AsrControlStatus | null>(null);
 const asrControlLoading = ref(false);
 const dataEaseStatus = ref<Api.Douyin.DataEaseStatus | null>(null);
@@ -283,6 +285,32 @@ async function viewTaskLogs(taskId: number) {
 async function clearTaskLogFilter() {
   logTaskId.value = null;
   await loadData(true);
+}
+
+function handleClearLogs() {
+  dialog.warning({
+    title: '清空采集日志',
+    content:
+      '确定清空数据库中现有的全部采集日志吗？此操作不会删除采集任务、账号、主播或直播场次；正在运行的任务后续产生的新日志仍会继续显示。',
+    positiveText: '确认清空日志',
+    negativeText: $t('common.cancel'),
+    onPositiveClick: async () => {
+      clearLogsLoading.value = true;
+      try {
+        const response = await clearCollectorLogs();
+        const deletedCount = response.data?.deleted_count || 0;
+        logs.value = [];
+        selectedLog.value = null;
+        logDetailVisible.value = false;
+        message.success(`已清空 ${deletedCount} 条采集日志`);
+        await loadData(true);
+      } catch {
+        message.error('清空采集日志失败，请稍后重试');
+      } finally {
+        clearLogsLoading.value = false;
+      }
+    }
+  });
 }
 
 function scrollToSection(section: typeof accountSectionRef, highlight: typeof accountHighlight) {
@@ -696,6 +724,7 @@ const logColumns = [
     title: '详情',
     key: 'detail',
     width: 70,
+    fixed: 'right' as const,
     render(row: Api.Douyin.CollectorLog) {
       return h(
         NButton,
@@ -1330,14 +1359,20 @@ onUnmounted(() => {
                   <template #icon><SvgIcon icon="mdi:refresh" /></template>
                   {{ $t('common.refresh') }}
                 </NButton>
+                <NButton size="small" type="error" secondary :loading="clearLogsLoading" @click="handleClearLogs">
+                  <template #icon><SvgIcon icon="mdi:delete-sweep-outline" /></template>
+                  清空日志
+                </NButton>
               </NSpace>
             </template>
             <NDataTable
+              class="collector-log-table"
               :loading="loading"
               :columns="logColumns"
               :data="logs"
               :row-key="getLogRowKey"
               :scroll-x="1260"
+              flex-height
               :bordered="false"
               size="small"
             />
@@ -1436,4 +1471,14 @@ onUnmounted(() => {
   </div>
 </template>
 
-<style scoped></style>
+<style scoped>
+.collector-log-table {
+  height: 420px;
+}
+
+@media (max-width: 640px) {
+  .collector-log-table {
+    height: 360px;
+  }
+}
+</style>
