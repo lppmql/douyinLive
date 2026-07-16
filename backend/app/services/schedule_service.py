@@ -12,6 +12,7 @@ from app.models.live_sessions import LiveSession
 
 MATCH_WINDOW_MINUTES = 120
 MAX_SCHEDULE_RANGE_DAYS = 31
+MIN_VALID_DURATION_MINUTES = 45
 
 
 def _load_schedules(db: Session) -> list[AnchorSchedule]:
@@ -78,6 +79,31 @@ def _serialize_actual(session: LiveSession, now: datetime) -> dict:
         "live_duration_seconds": _effective_duration_seconds(session, now),
         "live_status": session.live_status,
     }
+
+
+def _append_invalid_stat(stat: dict, schedule_date: date, actual_payload: dict, is_extra: bool) -> None:
+    """按日期归集无效场次，保留真实场次和时长供前端穿透展示。"""
+    invalid_date = schedule_date.isoformat()
+    invalid_item = next(
+        (item for item in stat["invalid_by_date"] if item["schedule_date"] == invalid_date),
+        None,
+    )
+    if invalid_item is None:
+        invalid_item = {
+            "schedule_date": invalid_date,
+            "count": 0,
+            "session_ids": [],
+            "live_start_times": [],
+            "durations_seconds": [],
+            "extra_flags": [],
+        }
+        stat["invalid_by_date"].append(invalid_item)
+    stat["invalid_count"] += 1
+    invalid_item["count"] += 1
+    invalid_item["session_ids"].append(actual_payload["id"])
+    invalid_item["live_start_times"].append(actual_payload["live_start_time"])
+    invalid_item["durations_seconds"].append(actual_payload["live_duration_seconds"])
+    invalid_item["extra_flags"].append(is_extra)
 
 
 def _match_sessions(
@@ -155,13 +181,24 @@ def build_schedule_dashboard(
             actual_payload = _serialize_actual(actual, now)
             duration_seconds = actual_payload["live_duration_seconds"]
             is_live = actual.live_status == "live"
-            duration_short = not is_live and duration_seconds < schedule.expected_duration_minutes * 60
+            invalid_duration = not is_live and duration_seconds < MIN_VALID_DURATION_MINUTES * 60
+            duration_short = (
+                not is_live
+                and not invalid_duration
+                and duration_seconds < schedule.expected_duration_minutes * 60
+            )
             crossed_hour = bool(
                 actual.live_start_time
                 and (actual.live_start_time < planned_hour_start or actual.live_start_time >= due_at)
             )
             if is_live:
                 status = "live"
+            elif invalid_duration:
+                status = "invalid"
+                warnings.append(
+                    f"实际直播不足 {MIN_VALID_DURATION_MINUTES} 分钟，标记为无效场次"
+                    f"（实际 {duration_seconds // 60} 分 {duration_seconds % 60} 秒）"
+                )
             elif duration_short:
                 status = "duration_short"
                 short_minutes = max(schedule.expected_duration_minutes - round(duration_seconds / 60), 0)
@@ -179,17 +216,25 @@ def build_schedule_dashboard(
             warnings.append("计划场次已到期，尚未匹配到真实开播记录")
 
         for warning in warnings:
-            reminder_type = "missing" if status == "missing" else "duration" if "不足" in warning else "cross_hour"
+            if status == "missing":
+                reminder_type = "missing"
+            elif "无效场次" in warning:
+                reminder_type = "invalid"
+            elif "不足" in warning:
+                reminder_type = "duration"
+            else:
+                reminder_type = "cross_hour"
             reminders.append(
                 {
                     "type": reminder_type,
-                    "severity": "error" if reminder_type == "missing" else "warning",
+                    "severity": "error" if reminder_type in {"missing", "invalid"} else "warning",
                     "anchor_name": schedule.display_name,
                     "session_index": schedule.session_index,
                     "message": warning,
                     "schedule_date": schedule_date.isoformat(),
                     "planned_start_time": planned_start.isoformat(),
                     "session_id": actual.id if actual else None,
+                    "is_extra": False,
                 }
             )
 
@@ -206,6 +251,8 @@ def build_schedule_dashboard(
                 "warning_count": 0,
                 "missing_count": 0,
                 "missing_by_date": [],
+                "invalid_count": 0,
+                "invalid_by_date": [],
                 "extra_count": 0,
                 "extra_by_date": [],
                 "anchor_avatar_url": None,
@@ -238,6 +285,8 @@ def build_schedule_dashboard(
                 stat["missing_by_date"].append(missing_item)
             missing_item["count"] += 1
             missing_item["session_indexes"].append(schedule.session_index)
+        if status == "invalid" and actual_payload:
+            _append_invalid_stat(stat, schedule_date, actual_payload, False)
         if actual:
             stat["anchor_avatar_url"] = actual.anchor_avatar_url or stat["anchor_avatar_url"]
             stat["anchor_avatar_session_id"] = actual.id if actual.anchor_avatar_url else stat["anchor_avatar_session_id"]
@@ -253,6 +302,7 @@ def build_schedule_dashboard(
                 "network_name": schedule.network_name,
                 "session_index": schedule.session_index,
                 "extra_index": None,
+                "is_extra": False,
                 "planned_start_time": planned_start.isoformat(),
                 "planned_end_time": planned_end.isoformat(),
                 "expected_duration_minutes": schedule.expected_duration_minutes,
@@ -294,6 +344,32 @@ def build_schedule_dashboard(
         for extra_index, actual in enumerate(extra_sessions, start=1):
             assigned_extra_ids.add(actual.id)
             actual_payload = _serialize_actual(actual, now)
+            is_live = actual.live_status == "live"
+            invalid_duration = (
+                not is_live and actual_payload["live_duration_seconds"] < MIN_VALID_DURATION_MINUTES * 60
+            )
+            extra_warnings: list[str] = []
+            if invalid_duration:
+                duration_seconds = actual_payload["live_duration_seconds"]
+                extra_warnings.append(
+                    f"实际直播不足 {MIN_VALID_DURATION_MINUTES} 分钟，标记为无效加场"
+                    f"（实际 {duration_seconds // 60} 分 {duration_seconds % 60} 秒）"
+                )
+                _append_invalid_stat(stat, schedule_date, actual_payload, True)
+                stat["warning_count"] += 1
+                reminders.append(
+                    {
+                        "type": "invalid",
+                        "severity": "error",
+                        "anchor_name": representative.display_name,
+                        "session_index": extra_index,
+                        "message": extra_warnings[0],
+                        "schedule_date": schedule_date.isoformat(),
+                        "planned_start_time": actual_payload["live_start_time"],
+                        "session_id": actual.id,
+                        "is_extra": True,
+                    }
+                )
             stat["extra_count"] += 1
             extra_date = schedule_date.isoformat()
             extra_item = next(
@@ -324,11 +400,12 @@ def build_schedule_dashboard(
                     "network_name": representative.network_name,
                     "session_index": extra_index,
                     "extra_index": extra_index,
+                    "is_extra": True,
                     "planned_start_time": None,
                     "planned_end_time": None,
                     "expected_duration_minutes": representative.expected_duration_minutes,
-                    "status": "extra",
-                    "warnings": [],
+                    "status": "invalid" if invalid_duration else "extra",
+                    "warnings": extra_warnings,
                     "actual_session": actual_payload,
                 }
             )
@@ -348,6 +425,7 @@ def build_schedule_dashboard(
         "source_name": schedules[0].source_name if schedules else "排班.xls",
         "rule": {
             "expected_duration_minutes": 80,
+            "minimum_valid_duration_minutes": MIN_VALID_DURATION_MINUTES,
             "four_session_anchors": ["刘文豪", "王路权（大全）"],
             "default_session_count": 3,
             "cross_hour_definition": "实际开播须在计划时间所在自然小时内，提前或延后跨出该小时均提醒",
@@ -362,7 +440,8 @@ def build_schedule_dashboard(
             "upcoming_count": sum(1 for row in rows if row["status"] == "upcoming"),
             "missing_count": sum(1 for row in rows if row["status"] == "missing"),
             "duration_short_count": sum(1 for row in rows if row["status"] == "duration_short"),
-            "extra_count": sum(1 for row in rows if row["status"] == "extra"),
+            "invalid_count": sum(1 for row in rows if row["status"] == "invalid"),
+            "extra_count": sum(1 for row in rows if row["is_extra"]),
             "cross_hour_count": sum(1 for item in reminders if item["type"] == "cross_hour"),
             "duration_compliant_count": compliant_duration_count,
             "reminder_count": len(reminders),
@@ -417,6 +496,8 @@ def build_schedule_range_dashboard(
                     "warning_count": 0,
                     "missing_count": 0,
                     "missing_by_date": [],
+                    "invalid_count": 0,
+                    "invalid_by_date": [],
                     "extra_count": 0,
                     "extra_by_date": [],
                 },
@@ -427,6 +508,7 @@ def build_schedule_range_dashboard(
                 "completed_count",
                 "warning_count",
                 "missing_count",
+                "invalid_count",
                 "extra_count",
             ):
                 stat[key] += anchor[key]
@@ -446,6 +528,31 @@ def build_schedule_range_dashboard(
                 else:
                     existing_item["count"] += missing_item["count"]
                     existing_item["session_indexes"].extend(missing_item["session_indexes"])
+            for invalid_item in anchor["invalid_by_date"]:
+                existing_invalid_item = next(
+                    (
+                        item
+                        for item in stat["invalid_by_date"]
+                        if item["schedule_date"] == invalid_item["schedule_date"]
+                    ),
+                    None,
+                )
+                if existing_invalid_item is None:
+                    stat["invalid_by_date"].append(
+                        {
+                            **invalid_item,
+                            "session_ids": list(invalid_item["session_ids"]),
+                            "live_start_times": list(invalid_item["live_start_times"]),
+                            "durations_seconds": list(invalid_item["durations_seconds"]),
+                            "extra_flags": list(invalid_item["extra_flags"]),
+                        }
+                    )
+                else:
+                    existing_invalid_item["count"] += invalid_item["count"]
+                    existing_invalid_item["session_ids"].extend(invalid_item["session_ids"])
+                    existing_invalid_item["live_start_times"].extend(invalid_item["live_start_times"])
+                    existing_invalid_item["durations_seconds"].extend(invalid_item["durations_seconds"])
+                    existing_invalid_item["extra_flags"].extend(invalid_item["extra_flags"])
             for extra_item in anchor["extra_by_date"]:
                 existing_extra_item = next(
                     (
@@ -474,6 +581,7 @@ def build_schedule_range_dashboard(
 
     for stat in anchor_stats.values():
         stat["missing_by_date"].sort(key=lambda item: item["schedule_date"])
+        stat["invalid_by_date"].sort(key=lambda item: item["schedule_date"])
         stat["extra_by_date"].sort(key=lambda item: item["schedule_date"])
 
     return {

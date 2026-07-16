@@ -22,7 +22,7 @@ declare namespace Api {
     }
 
     /* ---------- 主播排班 ---------- */
-    type AnchorScheduleStatus = 'upcoming' | 'live' | 'completed' | 'missing' | 'duration_short' | 'extra';
+    type AnchorScheduleStatus = 'upcoming' | 'live' | 'completed' | 'missing' | 'duration_short' | 'invalid' | 'extra';
 
     interface AnchorScheduleActualSession {
       id: number;
@@ -43,6 +43,7 @@ declare namespace Api {
       network_name: string | null;
       session_index: number;
       extra_index: number | null;
+      is_extra: boolean;
       planned_start_time: string | null;
       planned_end_time: string | null;
       expected_duration_minutes: number;
@@ -52,14 +53,15 @@ declare namespace Api {
     }
 
     interface AnchorScheduleReminder {
-      type: 'missing' | 'duration' | 'cross_hour';
+      type: 'missing' | 'invalid' | 'duration' | 'cross_hour';
       severity: 'warning' | 'error';
       anchor_name: string;
       session_index: number;
       message: string;
       schedule_date: string;
-      planned_start_time: string;
+      planned_start_time: string | null;
       session_id: number | null;
+      is_extra: boolean;
     }
 
     interface AnchorScheduleAnchor {
@@ -76,6 +78,15 @@ declare namespace Api {
         schedule_date: string;
         count: number;
         session_indexes: number[];
+      }>;
+      invalid_count: number;
+      invalid_by_date: Array<{
+        schedule_date: string;
+        count: number;
+        session_ids: number[];
+        live_start_times: Array<string | null>;
+        durations_seconds: number[];
+        extra_flags: boolean[];
       }>;
       extra_count: number;
       extra_by_date: Array<{
@@ -98,6 +109,7 @@ declare namespace Api {
       source_name: string;
       rule: {
         expected_duration_minutes: number;
+        minimum_valid_duration_minutes: number;
         four_session_anchors: string[];
         default_session_count: number;
         cross_hour_definition: string;
@@ -110,6 +122,7 @@ declare namespace Api {
         upcoming_count: number;
         missing_count: number;
         duration_short_count: number;
+        invalid_count: number;
         extra_count: number;
         cross_hour_count: number;
         duration_compliant_count: number;

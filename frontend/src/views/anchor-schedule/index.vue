@@ -43,6 +43,7 @@ const statusMap: Record<
   completed: { label: '已达标', type: 'success' },
   missing: { label: '缺少场次', type: 'error' },
   duration_short: { label: '时长不足', type: 'warning' },
+  invalid: { label: '无效场次', type: 'error' },
   extra: { label: '加场', type: 'info' }
 };
 
@@ -52,7 +53,10 @@ function formatClock(value: string | null) {
 
 function formatDuration(seconds: number) {
   if (!seconds) return '0 分钟';
-  return `${Math.round(seconds / 60)} 分钟`;
+  const totalSeconds = Math.max(Math.floor(seconds), 0);
+  const minutes = Math.floor(totalSeconds / 60);
+  const remainingSeconds = totalSeconds % 60;
+  return remainingSeconds ? `${minutes} 分 ${remainingSeconds} 秒` : `${minutes} 分钟`;
 }
 
 function getAnchorAvatarUrl(anchor: Api.Douyin.AnchorScheduleAnchor | undefined) {
@@ -71,6 +75,26 @@ function formatMissingSummary(anchor: Api.Douyin.AnchorScheduleAnchor) {
 
 function formatMissingSessions(sessionIndexes: number[]) {
   return sessionIndexes.map(index => `第 ${index} 场`).join('、');
+}
+
+function formatInvalidSummary(anchor: Api.Douyin.AnchorScheduleAnchor) {
+  if (!anchor.invalid_count) return '无效：无';
+  const visibleDates = anchor.invalid_by_date
+    .slice(0, 2)
+    .map(item => `${dayjs(item.schedule_date).format('MM-DD')}（${item.count} 场）`)
+    .join('、');
+  const remaining = anchor.invalid_by_date.length - 2;
+  return `无效：${visibleDates}${remaining > 0 ? ` 等 ${anchor.invalid_by_date.length} 天` : ''}`;
+}
+
+function formatInvalidSessions(item: Api.Douyin.AnchorScheduleAnchor['invalid_by_date'][number]) {
+  return item.session_ids
+    .map((_, index) => {
+      const startTime = item.live_start_times[index];
+      const extraLabel = item.extra_flags[index] ? '加场 · ' : '';
+      return `${extraLabel}${startTime ? dayjs(startTime).format('HH:mm') : '时间未知'} · ${formatDuration(item.durations_seconds[index] || 0)}`;
+    })
+    .join('；');
 }
 
 function formatExtraSummary(anchor: Api.Douyin.AnchorScheduleAnchor) {
@@ -169,7 +193,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       title: '场次',
       key: 'session_index',
       width: 76,
-      render: row => (row.status === 'extra' ? `加场 ${row.extra_index}` : `第 ${row.session_index} 场`)
+      render: row => (row.is_extra ? `加场 ${row.extra_index}` : `第 ${row.session_index} 场`)
     },
     {
       title: '直播间 / 网络',
@@ -187,7 +211,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       key: 'planned_start_time',
       width: 135,
       render: row =>
-        row.status === 'extra'
+        row.is_extra
           ? '计划外加场'
           : `${formatClock(row.planned_start_time)} - ${formatClock(row.planned_end_time)}`
     },
@@ -195,7 +219,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       title: '标准时长',
       key: 'expected_duration_minutes',
       width: 90,
-      render: row => (row.status === 'extra' ? '-' : `${row.expected_duration_minutes} 分钟`)
+      render: row => (row.is_extra ? '-' : `${row.expected_duration_minutes} 分钟`)
     },
     {
       title: '实际开播',
@@ -215,7 +239,8 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       width: 100,
       render(row) {
         const info = statusMap[row.status];
-        return h(NTag, { type: info.type, size: 'small', round: true, bordered: false }, () => info.label);
+        const label = row.is_extra && row.status === 'invalid' ? '无效加场' : info.label;
+        return h(NTag, { type: info.type, size: 'small', round: true, bordered: false }, () => label);
       }
     },
     {
@@ -224,9 +249,15 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       minWidth: 260,
       ellipsis: { tooltip: true },
       render(row) {
-        if (row.status === 'extra') return h('span', { class: 'text-info' }, '超过当天规定场次，标记为加场');
+        if (row.is_extra && row.status !== 'invalid') {
+          return h('span', { class: 'text-info' }, '超过当天规定场次，标记为加场');
+        }
         if (!row.warnings.length) return row.status === 'upcoming' ? '等待计划时间' : '无异常';
-        return h('span', { class: row.status === 'missing' ? 'text-error' : 'text-warning' }, row.warnings.join('；'));
+        return h(
+          'span',
+          { class: ['missing', 'invalid'].includes(row.status) ? 'text-error' : 'text-warning' },
+          row.warnings.join('；')
+        );
       }
     },
     {
@@ -267,7 +298,7 @@ onBeforeUnmount(() => {
   <NSpace vertical :size="16">
     <BusinessPageHeader
       title="主播排班"
-      description="依据真实排班表核对每天的开播场次、80 分钟时长和开播整点；提醒只使用已采集直播场次，不会用模拟数据补齐。"
+      description="依据真实排班表核对每天的开播场次、有效时长和开播整点；提醒只使用已采集直播场次，不会用模拟数据补齐。"
       icon="mdi:calendar-clock-outline"
       :status="
         dashboard
@@ -294,6 +325,7 @@ onBeforeUnmount(() => {
       </template>
       <div class="flex flex-wrap items-center gap-x-18px gap-y-6px text-12px text-gray-500">
         <span>标准时长：{{ dashboard?.rule.expected_duration_minutes || 80 }} 分钟/场</span>
+        <span>有效门槛：已结束场次至少 {{ dashboard?.rule.minimum_valid_duration_minutes || 45 }} 分钟</span>
         <span>文豪、大全：每天 4 场</span>
         <span>其他排班主播：每天 3 场</span>
         <span>
@@ -306,15 +338,15 @@ onBeforeUnmount(() => {
 
     <NAlert
       v-if="dashboard?.summary.reminder_count"
-      type="warning"
+      :type="dashboard.summary.invalid_count ? 'error' : 'warning'"
       :bordered="false"
       show-icon
       class="cursor-pointer"
       @click="reminderDrawerVisible = true"
     >
       {{ selectedDateLabel }} 共有 {{ dashboard.summary.reminder_count }} 条排班提醒：缺少
-      {{ dashboard.summary.missing_count }} 场、时长不足 {{ dashboard.summary.duration_short_count }} 场、跨整点开播
-      {{ dashboard.summary.cross_hour_count }} 场。点击查看明细。
+      {{ dashboard.summary.missing_count }} 场、无效 {{ dashboard.summary.invalid_count }} 场、时长不足
+      {{ dashboard.summary.duration_short_count }} 场、跨整点开播 {{ dashboard.summary.cross_hour_count }} 场。点击查看明细。
     </NAlert>
     <NAlert v-else-if="dashboard" type="success" :bordered="false" show-icon>
       当前已到期班次没有发现异常；未来班次不会提前提示缺场。
@@ -334,7 +366,8 @@ onBeforeUnmount(() => {
             <div class="text-13px text-gray-500">已匹配真实场次</div>
             <div class="mt-8px text-30px font-700 text-success">{{ dashboard?.summary.matched_count || 0 }}</div>
             <div class="mt-4px text-12px text-gray-400">
-              直播中 {{ dashboard?.summary.live_count || 0 }} 场 · 加场 {{ dashboard?.summary.extra_count || 0 }} 场
+              直播中 {{ dashboard?.summary.live_count || 0 }} 场 · 加场 {{ dashboard?.summary.extra_count || 0 }} 场 ·
+              无效 {{ dashboard?.summary.invalid_count || 0 }} 场
             </div>
           </NCard>
         </NGi>
@@ -411,6 +444,22 @@ onBeforeUnmount(() => {
               </div>
             </NTooltip>
             <div v-else class="mt-10px text-left text-11px text-success">缺场：无</div>
+            <NTooltip v-if="anchor.invalid_count" placement="bottom" :delay="200">
+              <template #trigger>
+                <div class="mt-6px truncate text-left text-11px text-error">
+                  {{ formatInvalidSummary(anchor) }}
+                </div>
+              </template>
+              <div class="max-h-240px overflow-y-auto py-2px">
+                <div class="mb-6px font-600">无效场次明细（不足 45 分钟）</div>
+                <div v-for="item in anchor.invalid_by_date" :key="item.schedule_date" class="py-2px text-12px">
+                  {{ dayjs(item.schedule_date).format('YYYY-MM-DD') }}：无效 {{ item.count }} 场（{{
+                    formatInvalidSessions(item)
+                  }}）
+                </div>
+              </div>
+            </NTooltip>
+            <div v-else class="mt-6px text-left text-11px text-success">无效：无</div>
             <NTooltip v-if="anchor.extra_count" placement="bottom" :delay="200">
               <template #trigger>
                 <div class="mt-6px truncate text-left text-11px text-info">
@@ -471,13 +520,24 @@ onBeforeUnmount(() => {
                 class="size-36px flex-center rounded-10px"
                 :class="item.severity === 'error' ? 'bg-error-50 text-error' : 'bg-warning-50 text-warning'"
               >
-                <SvgIcon :icon="item.type === 'missing' ? 'mdi:calendar-alert' : 'mdi:clock-alert-outline'" />
+                <SvgIcon
+                  :icon="
+                    item.type === 'missing'
+                      ? 'mdi:calendar-alert'
+                      : item.type === 'invalid'
+                        ? 'mdi:close-octagon-outline'
+                        : 'mdi:clock-alert-outline'
+                  "
+                />
               </div>
             </template>
-            <div class="font-600">{{ item.anchor_name }} · 第 {{ item.session_index }} 场</div>
+            <div class="font-600">
+              {{ item.anchor_name }} · {{ item.is_extra ? `加场 ${item.session_index}` : `第 ${item.session_index} 场` }}
+            </div>
             <div class="mt-4px text-13px text-gray-500">{{ item.message }}</div>
             <div class="mt-5px text-11px text-gray-400">
-              计划开播 {{ dayjs(item.schedule_date).format('MM-DD') }} {{ formatClock(item.planned_start_time) }}
+              {{ item.is_extra ? '实际开播' : '计划开播' }} {{ dayjs(item.schedule_date).format('MM-DD') }}
+              {{ formatClock(item.planned_start_time) }}
             </div>
           </NListItem>
         </NList>
@@ -512,7 +572,7 @@ onBeforeUnmount(() => {
 
 .anchor-card {
   width: 100%;
-  min-height: 170px;
+  min-height: 190px;
   padding: 14px;
   color: inherit;
   cursor: pointer;
@@ -539,7 +599,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 640px) {
   .anchor-card {
-    min-height: 158px;
+    min-height: 178px;
   }
 }
 </style>

@@ -1,5 +1,5 @@
 import unittest
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -46,7 +46,7 @@ class AnchorScheduleTest(unittest.TestCase):
             room_id=self.room.id,
             anchor_name="文豪聊零食店天准",
             live_start_time=start,
-            live_end_time=start if status == "live" else start.replace(hour=11, minute=10),
+            live_end_time=start if status == "live" else start + timedelta(seconds=duration_seconds),
             live_duration_seconds=duration_seconds,
             live_status=status,
         )
@@ -64,6 +64,48 @@ class AnchorScheduleTest(unittest.TestCase):
         self.assertEqual(result["summary"]["cross_hour_count"], 0)
         self.assertEqual(result["summary"]["extra_count"], 0)
         self.assertEqual(result["rows"][0]["status"], "completed")
+
+    def test_ended_session_under_45_minutes_is_invalid(self):
+        session = self.add_session(datetime(2026, 7, 16, 9, 52), 45 * 60 - 1)
+
+        result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 12, 0))
+
+        self.assertEqual(result["rows"][0]["status"], "invalid")
+        self.assertEqual(result["summary"]["invalid_count"], 1)
+        self.assertEqual(result["summary"]["duration_short_count"], 0)
+        self.assertEqual([item["type"] for item in result["reminders"]], ["invalid"])
+        self.assertEqual(result["anchors"][0]["invalid_count"], 1)
+        self.assertEqual(
+            result["anchors"][0]["invalid_by_date"],
+            [
+                {
+                    "schedule_date": "2026-07-16",
+                    "count": 1,
+                    "session_ids": [session.id],
+                    "live_start_times": ["2026-07-16T09:52:00"],
+                    "durations_seconds": [45 * 60 - 1],
+                    "extra_flags": [False],
+                }
+            ],
+        )
+
+    def test_exact_45_minutes_is_short_but_valid(self):
+        self.add_session(datetime(2026, 7, 16, 9, 52), 45 * 60)
+
+        result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 12, 0))
+
+        self.assertEqual(result["rows"][0]["status"], "duration_short")
+        self.assertEqual(result["summary"]["invalid_count"], 0)
+        self.assertEqual(result["summary"]["duration_short_count"], 1)
+
+    def test_live_session_under_45_minutes_is_not_marked_invalid(self):
+        self.add_session(datetime(2026, 7, 16, 9, 52), 10 * 60, status="live")
+
+        result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 10, 2))
+
+        self.assertEqual(result["rows"][0]["status"], "live")
+        self.assertEqual(result["summary"]["invalid_count"], 0)
+        self.assertEqual(result["anchors"][0]["invalid_count"], 0)
 
     def test_sessions_over_daily_limit_are_marked_extra(self):
         self.add_session(datetime(2026, 7, 16, 9, 52), 80 * 60)
@@ -88,6 +130,24 @@ class AnchorScheduleTest(unittest.TestCase):
                 }
             ],
         )
+
+    def test_invalid_extra_keeps_both_invalid_and_extra_attributes(self):
+        self.add_session(datetime(2026, 7, 16, 9, 52), 80 * 60)
+        invalid_extra = self.add_session(datetime(2026, 7, 16, 14, 20), 20 * 60)
+
+        result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 16, 0))
+
+        extra_row = result["rows"][1]
+        self.assertEqual(extra_row["status"], "invalid")
+        self.assertTrue(extra_row["is_extra"])
+        self.assertEqual(result["summary"]["extra_count"], 1)
+        self.assertEqual(result["summary"]["invalid_count"], 1)
+        self.assertEqual(result["anchors"][0]["extra_count"], 1)
+        self.assertEqual(result["anchors"][0]["invalid_count"], 1)
+        self.assertEqual(result["anchors"][0]["invalid_by_date"][0]["session_ids"], [invalid_extra.id])
+        self.assertEqual(result["anchors"][0]["invalid_by_date"][0]["extra_flags"], [True])
+        self.assertEqual(result["reminders"][0]["type"], "invalid")
+        self.assertTrue(result["reminders"][0]["is_extra"])
 
     def test_unmatched_session_within_daily_limit_is_not_marked_extra(self):
         self.add_session(datetime(2026, 7, 16, 14, 20), 65 * 60)
