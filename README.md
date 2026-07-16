@@ -200,6 +200,17 @@ PATCH /api/v1/reviews/{session_id}/script-assets/{asset_id}
 GET   /api/v1/reviews/compliance/rules
 ```
 
+### 视频回放优化
+
+回放链路：抖音 CDN (H.265) → 后端 ffmpeg 转 H.264 → 浏览器 `<video>`。
+
+使用 M 芯片 macOS 的 VideoToolbox 硬件编码器，**本地分片缓存**避免每次播放都重新下载抖音 CDN 的 ts 片段：
+
+- 首次播放时下载全部 ts 分片到 `/tmp/douyin-live-playback/{session_id}/`
+- 后续播放直接喂本地文件给 ffmpeg，磁盘读取无 CDN 瓶颈
+- seek 和跨场对比同样走缓存
+- 任意分片下载失败自动回退直连 CDN 流，不影响主功能
+
 合规规则参考[抖音电商食品宣传治理](https://school.jinritemai.com/doudian/wap/article/aJkzdMC7vUSV)与[抖音开放平台企业号线索授权说明](https://open.douyin.com/platform/resource/docs/ability/enterprise-account-open-ability/enterprise-user-solution/)。站内私信与线索数据只在账号已授权且页面真实返回时保存。
 
 ## 前端交互规范
