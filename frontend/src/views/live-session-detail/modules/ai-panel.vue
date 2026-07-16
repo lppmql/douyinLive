@@ -38,13 +38,17 @@ function resultObject(key: string): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 function primitiveEntries(key: string) {
-  return Object.entries(resultObject(key)).filter(([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value));
+  return Object.entries(resultObject(key)).filter(
+    ([, value]) => value === null || ['string', 'number', 'boolean'].includes(typeof value)
+  );
 }
 function arrayEntries(key: string) {
   return Object.entries(resultObject(key)).filter(([, value]) => Array.isArray(value));
 }
 function objectEntries(key: string) {
-  return Object.entries(resultObject(key)).filter(([, value]) => value && typeof value === 'object' && !Array.isArray(value));
+  return Object.entries(resultObject(key)).filter(
+    ([, value]) => value && typeof value === 'object' && !Array.isArray(value)
+  );
 }
 function valueText(value: unknown): string {
   if (value === null || value === undefined || value === '') return '未提供';
@@ -60,22 +64,26 @@ function valueText(value: unknown): string {
 
 <template>
   <NSpace vertical :size="16">
-    <NGrid :x-gap="14" :y-gap="14" cols="1 s:2 m:4" responsive="screen">
-      <NGi>
-        <NStatistic label="分钟趋势" :value="detail?.metrics.length || 0"><template #suffix>条</template></NStatistic>
-      </NGi>
-      <NGi>
-        <NStatistic label="评论语料" :value="detail?.comments.length || 0"><template #suffix>条</template></NStatistic>
-      </NGi>
-      <NGi>
-        <NStatistic label="画像分布" :value="detail?.profiles.length || 0"><template #suffix>项</template></NStatistic>
-      </NGi>
-      <NGi>
-        <div class="text-13px text-gray-500">数据完备度</div>
-        <div class="my-6px text-24px font-700">{{ readiness }}%</div>
-        <NProgress :percentage="readiness" :height="6" />
-      </NGi>
-    </NGrid>
+    <div
+      class="flex items-center gap-14px rounded-10px bg-gray-50 px-14px py-12px lt-sm:flex-col lt-sm:items-stretch dark:bg-dark-300"
+    >
+      <div class="min-w-0 flex-1">
+        <div class="flex flex-wrap items-center justify-between gap-8px text-12px text-gray-500">
+          <span>
+            AI 输入：趋势 {{ detail?.metrics.length || 0 }} · 评论 {{ detail?.comments.length || 0 }} · 画像
+            {{ detail?.profiles.length || 0 }}
+          </span>
+          <NTag
+            :type="readiness >= 75 ? 'success' : readiness >= 50 ? 'info' : 'warning'"
+            size="small"
+            :bordered="false"
+          >
+            完备度 {{ readiness }}%
+          </NTag>
+        </div>
+        <NProgress class="mt-8px" :percentage="readiness" :height="6" :show-indicator="false" />
+      </div>
+    </div>
     <NAlert v-if="readiness < 50" type="warning" show-icon>
       当前可分析数据较少，建议先执行刷新采集；ASR 未开启时，话术评分可能无法运行。
     </NAlert>
@@ -111,7 +119,9 @@ function valueText(value: unknown): string {
             </div>
             <NCollapse v-if="objectEntries(item[0]).length">
               <NCollapseItem v-for="entry in objectEntries(item[0])" :key="entry[0]" :title="entry[0]">
-                <div class="rounded-8px bg-gray-50 p-10px text-12px leading-20px dark:bg-dark-300">{{ valueText(entry[1]) }}</div>
+                <div class="rounded-8px bg-gray-50 p-10px text-12px leading-20px dark:bg-dark-300">
+                  {{ valueText(entry[1]) }}
+                </div>
               </NCollapseItem>
             </NCollapse>
           </NSpace>

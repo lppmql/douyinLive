@@ -10,7 +10,6 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{
   generate: [];
-  createAction: [finding: Api.Douyin.ReviewFinding];
   updateStatus: [finding: Api.Douyin.ReviewFinding, status: Api.Douyin.ReviewFinding['status']];
 }>();
 const reviewStore = useReviewStore();
@@ -112,9 +111,6 @@ function formatSecond(value: number | null) {
           {{ item.evidence_text }}
         </div>
         <div v-if="item.description" class="mt-7px text-12px leading-19px text-gray-500">{{ item.description }}</div>
-        <div class="mt-9px flex justify-end">
-          <NButton size="tiny" secondary type="primary" @click.stop="emit('createAction', item)">创建整改任务</NButton>
-        </div>
       </div>
     </div>
   </div>

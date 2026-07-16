@@ -5,7 +5,7 @@ import { useEcharts } from '@/hooks/common/echarts';
 import { fetchSessionComparison } from '@/service/api/douyin';
 
 defineOptions({ name: 'SessionComparison' });
-const props = defineProps<{ sessionId: number; sessions: Api.Douyin.LiveSession[] }>();
+const props = defineProps<{ sessionId: number; sessions: Api.Douyin.LiveSessionListItem[] }>();
 const message = useMessage();
 const loading = ref(false);
 const selectedId = ref<number | null>(null);

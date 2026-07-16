@@ -3,12 +3,10 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useReviewStore } from '@/store/modules/review';
 import {
-  createReviewAction,
   createScriptAsset,
-  fetchLiveSessions,
+  fetchLiveSessionPage,
   fetchReviewWorkbench,
   generateSessionReview,
-  updateReviewAction,
   updateReviewFindingStatus,
   updateScriptAsset
 } from '@/service/api/douyin';
@@ -17,7 +15,6 @@ import ReviewVideoPlayer from './review-video-player.vue';
 import ReviewTimeline from './review-timeline.vue';
 import ReviewFindings from './review-findings.vue';
 import SessionComparison from './session-comparison.vue';
-import ReviewActions from './review-actions.vue';
 import ScriptAssetsPanel from './script-assets-panel.vue';
 
 defineOptions({ name: 'LiveReviewWorkbench' });
@@ -28,23 +25,12 @@ const reviewStore = useReviewStore();
 const loading = ref(false);
 const generating = ref(false);
 const workbench = ref<Api.Douyin.ReviewWorkbench | null>(null);
-const sessions = ref<Api.Douyin.LiveSession[]>([]);
-const actionModalVisible = ref(false);
-const actionSaving = ref(false);
-const updatingActionId = ref<number | null>(null);
+const sessions = ref<Api.Douyin.LiveSessionListItem[]>([]);
 const assetModalVisible = ref(false);
 const assetSaving = ref(false);
 const updatingAssetId = ref<number | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-const actionForm = reactive<{
-  finding_id: number | null;
-  title: string;
-  description: string;
-  owner_name: string;
-  priority: 'low' | 'medium' | 'high';
-  due_at: number | null;
-}>({ finding_id: null, title: '', description: '', owner_name: '', priority: 'medium', due_at: null });
 const assetForm = reactive<{
   transcript_segment_id: number | null;
   category: string;
@@ -64,7 +50,10 @@ const assetForm = reactive<{
 });
 const assetCategories = ['开场留人', '选址避坑', '预算测算', '品牌判断', '供应链', '毛利损耗', '资料钩子', '私信承接'];
 const openFindingCount = computed(() => workbench.value?.findings.filter(item => item.status === 'open').length || 0);
-const criticalCount = computed(() => workbench.value?.findings.filter(item => item.severity === 'critical' && item.status !== 'dismissed').length || 0);
+const criticalCount = computed(
+  () =>
+    workbench.value?.findings.filter(item => item.severity === 'critical' && item.status !== 'dismissed').length || 0
+);
 
 async function loadWorkbench(autoGenerate = true) {
   loading.value = true;
@@ -102,54 +91,6 @@ async function updateFinding(item: Api.Douyin.ReviewFinding, status: Api.Douyin.
     message.success('复盘发现状态已更新');
   } catch {
     message.error('状态更新失败');
-  }
-}
-
-function openActionModal(finding?: Api.Douyin.ReviewFinding) {
-  actionForm.finding_id = finding?.id || null;
-  actionForm.title = finding ? `整改：${finding.title}` : '';
-  actionForm.description = finding?.description || '';
-  actionForm.owner_name = '';
-  actionForm.priority = finding?.severity === 'critical' ? 'high' : 'medium';
-  actionForm.due_at = null;
-  actionModalVisible.value = true;
-}
-
-async function saveAction() {
-  if (!actionForm.title.trim()) return message.warning('请填写整改任务标题');
-  actionSaving.value = true;
-  try {
-    const response = await createReviewAction(props.sessionId, {
-      finding_id: actionForm.finding_id,
-      title: actionForm.title.trim(),
-      description: actionForm.description.trim() || null,
-      owner_name: actionForm.owner_name.trim() || null,
-      priority: actionForm.priority,
-      due_at: actionForm.due_at ? new Date(actionForm.due_at).toISOString() : null
-    });
-    if (response.data && workbench.value) workbench.value.actions.unshift(response.data);
-    actionModalVisible.value = false;
-    message.success('整改任务已创建');
-  } catch (error) {
-    message.error((error as { message?: string }).message || '整改任务创建失败');
-  } finally {
-    actionSaving.value = false;
-  }
-}
-
-async function advanceAction(item: Api.Douyin.ReviewAction, status: Api.Douyin.ReviewAction['status']) {
-  updatingActionId.value = item.id;
-  try {
-    const response = await updateReviewAction(props.sessionId, item.id, { status });
-    if (response.data && workbench.value) {
-      const index = workbench.value.actions.findIndex(action => action.id === item.id);
-      if (index >= 0) workbench.value.actions[index] = response.data;
-    }
-    message.success('整改进度已更新');
-  } catch {
-    message.error('整改进度更新失败');
-  } finally {
-    updatingActionId.value = null;
   }
 }
 
@@ -205,8 +146,8 @@ async function changeAssetStatus(item: Api.Douyin.ScriptAsset, status: Api.Douyi
 
 onMounted(async () => {
   reviewStore.initialize(props.sessionId);
-  const [, sessionsResponse] = await Promise.all([loadWorkbench(), fetchLiveSessions()]);
-  sessions.value = sessionsResponse.data || [];
+  const [, sessionsResponse] = await Promise.all([loadWorkbench(), fetchLiveSessionPage({ current: 1, size: 100 })]);
+  sessions.value = sessionsResponse.data?.records || [];
   if (props.detail.session.live_status === 'live') {
     pollTimer = setInterval(() => loadWorkbench(false), 15_000);
   }
@@ -224,19 +165,35 @@ onBeforeUnmount(() => {
           <div>
             <div class="text-12px text-gray-500">复盘数据可信度</div>
             <div class="mt-4px flex items-end gap-5px">
-              <span class="text-31px font-800">{{ workbench.completeness.score }}</span><span class="mb-4px text-13px text-gray-400">%</span>
+              <span class="text-31px font-800">{{ workbench.completeness.score }}</span>
+              <span class="mb-4px text-13px text-gray-400">%</span>
             </div>
             <NProgress
               :percentage="workbench.completeness.score"
               :height="7"
-              :status="workbench.completeness.score >= 85 ? 'success' : workbench.completeness.score >= 60 ? 'default' : 'warning'"
+              :status="
+                workbench.completeness.score >= 85
+                  ? 'success'
+                  : workbench.completeness.score >= 60
+                    ? 'default'
+                    : 'warning'
+              "
               :show-indicator="false"
             />
           </div>
           <div class="grid grid-cols-3 gap-8px sm:grid-cols-4 lg:grid-cols-7">
             <NTooltip v-for="item in workbench.completeness.components" :key="item.name">
               <template #trigger>
-                <div class="rounded-8px px-8px py-7px text-center" :class="item.status === 'complete' ? 'bg-success-50 dark:bg-success-900/20' : item.status === 'partial' ? 'bg-warning-50 dark:bg-warning-900/20' : 'bg-error-50 dark:bg-error-900/20'">
+                <div
+                  class="rounded-8px px-8px py-7px text-center"
+                  :class="
+                    item.status === 'complete'
+                      ? 'bg-success-50 dark:bg-success-900/20'
+                      : item.status === 'partial'
+                        ? 'bg-warning-50 dark:bg-warning-900/20'
+                        : 'bg-error-50 dark:bg-error-900/20'
+                  "
+                >
                   <div class="text-11px text-gray-500">{{ item.name }}</div>
                   <div class="mt-3px text-13px font-700">{{ item.score.toFixed(0) }}%</div>
                 </div>
@@ -245,8 +202,10 @@ onBeforeUnmount(() => {
             </NTooltip>
           </div>
           <div class="flex items-center gap-8px lt-md:justify-start">
-            <NTag :type="criticalCount ? 'error' : 'success'" round :bordered="false">重点复核 {{ criticalCount }}</NTag>
-            <NTag type="info" round :bordered="false">待处理 {{ openFindingCount }}</NTag>
+            <NTag :type="criticalCount ? 'error' : 'success'" round :bordered="false">
+              重点复核 {{ criticalCount }}
+            </NTag>
+            <NTag type="info" round :bordered="false">待判断 {{ openFindingCount }}</NTag>
           </div>
         </div>
       </NCard>
@@ -287,7 +246,6 @@ onBeforeUnmount(() => {
               :alerts="workbench.live_alerts"
               :generating="generating"
               @generate="generateReview"
-              @create-action="openActionModal"
               @update-status="updateFinding"
             />
           </NCard>
@@ -296,18 +254,10 @@ onBeforeUnmount(() => {
 
       <NCard :bordered="false" class="card-wrapper">
         <NTabs type="line" animated>
-          <NTabPane name="comparison" tab="跨场对比">
+          <NTabPane name="comparison" tab="跨场对比" display-directive="if">
             <SessionComparison :session-id="sessionId" :sessions="sessions" />
           </NTabPane>
-          <NTabPane name="actions" :tab="`整改任务 (${workbench.actions.length})`">
-            <ReviewActions
-              :actions="workbench.actions"
-              :updating-id="updatingActionId"
-              @create="openActionModal()"
-              @update="advanceAction"
-            />
-          </NTabPane>
-          <NTabPane name="assets" :tab="`话术资产与合规 (${workbench.script_assets.length})`">
+          <NTabPane name="assets" :tab="`话术资产与合规 (${workbench.script_assets.length})`" display-directive="if">
             <ScriptAssetsPanel
               :assets="workbench.script_assets"
               :coverage="workbench.domain_coverage"
@@ -322,38 +272,41 @@ onBeforeUnmount(() => {
 
     <NResult v-else status="info" title="复盘工作台正在准备" description="请稍候，系统正在读取真实场次数据。" />
 
-    <NModal v-model:show="actionModalVisible" preset="card" title="创建整改任务" class="w-620px max-w-[calc(100vw-32px)]">
-      <NForm label-placement="top">
-        <NFormItem label="任务标题" required><NInput v-model:value="actionForm.title" /></NFormItem>
-        <NFormItem label="整改要求"><NInput v-model:value="actionForm.description" type="textarea" :rows="3" /></NFormItem>
-        <NGrid :x-gap="12" cols="1 s:3" responsive="screen">
-          <NGi><NFormItem label="负责人"><NInput v-model:value="actionForm.owner_name" placeholder="主播或运营" /></NFormItem></NGi>
-          <NGi>
-            <NFormItem label="优先级">
-              <NSelect v-model:value="actionForm.priority" :options="[{ label: '高', value: 'high' }, { label: '中', value: 'medium' }, { label: '低', value: 'low' }]" />
-            </NFormItem>
-          </NGi>
-          <NGi><NFormItem label="截止时间"><NDatePicker v-model:value="actionForm.due_at" type="datetime" clearable class="w-full" /></NFormItem></NGi>
-        </NGrid>
-      </NForm>
-      <template #footer>
-        <div class="flex justify-end gap-10px"><NButton @click="actionModalVisible = false">取消</NButton><NButton type="primary" :loading="actionSaving" @click="saveAction">创建任务</NButton></div>
-      </template>
-    </NModal>
-
-    <NModal v-model:show="assetModalVisible" preset="card" title="收录真实话术" class="w-680px max-w-[calc(100vw-32px)]">
+    <NModal
+      v-model:show="assetModalVisible"
+      preset="card"
+      title="收录真实话术"
+      class="w-680px max-w-[calc(100vw-32px)]"
+    >
       <NForm label-placement="top">
         <NGrid :x-gap="12" cols="1 s:2" responsive="screen">
-          <NGi><NFormItem label="话术分类"><NSelect v-model:value="assetForm.category" :options="assetCategories.map(item => ({ label: item, value: item }))" /></NFormItem></NGi>
-          <NGi><NFormItem label="资产标题"><NInput v-model:value="assetForm.title" /></NFormItem></NGi>
+          <NGi>
+            <NFormItem label="话术分类">
+              <NSelect
+                v-model:value="assetForm.category"
+                :options="assetCategories.map(item => ({ label: item, value: item }))"
+              />
+            </NFormItem>
+          </NGi>
+          <NGi>
+            <NFormItem label="资产标题"><NInput v-model:value="assetForm.title" /></NFormItem>
+          </NGi>
         </NGrid>
         <NFormItem label="真实话术原文（来自 ASR，不可修改）">
           <NInput v-model:value="assetForm.content" type="textarea" :rows="5" readonly />
         </NFormItem>
-        <NFormItem label="效果说明"><NInput v-model:value="assetForm.performance_note" placeholder="例如：该时间点后出现3条预算问题，需人工核对" /></NFormItem>
+        <NFormItem label="效果说明">
+          <NInput
+            v-model:value="assetForm.performance_note"
+            placeholder="例如：该时间点后出现3条预算问题，需人工核对"
+          />
+        </NFormItem>
       </NForm>
       <template #footer>
-        <div class="flex justify-end gap-10px"><NButton @click="assetModalVisible = false">取消</NButton><NButton type="primary" :loading="assetSaving" @click="saveAsset">加入候选库</NButton></div>
+        <div class="flex justify-end gap-10px">
+          <NButton @click="assetModalVisible = false">取消</NButton>
+          <NButton type="primary" :loading="assetSaving" @click="saveAsset">加入候选库</NButton>
+        </div>
       </template>
     </NModal>
   </NSpin>

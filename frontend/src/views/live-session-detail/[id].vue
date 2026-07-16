@@ -4,7 +4,6 @@ import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { fetchLiveSessionData, getLiveSessionVideoDownloadUrl } from '@/service/api/douyin';
 import BusinessPageHeader from '@/components/business/page-header.vue';
-import MetricsChart from './modules/metrics-chart.vue';
 import CommentGroups from './modules/comment-groups.vue';
 import AiPanel from './modules/ai-panel.vue';
 import ReviewWorkbench from './modules/review-workbench.vue';
@@ -145,12 +144,7 @@ onMounted(load);
         </NGi>
       </NGrid>
 
-      <ReviewWorkbench
-        v-if="detail"
-        :session-id="Number(id)"
-        :detail="detail"
-        @refresh-detail="load"
-      />
+      <ReviewWorkbench v-if="detail" :session-id="Number(id)" :detail="detail" @refresh-detail="load" />
 
       <NGrid :x-gap="16" :y-gap="16" cols="1 l:3" responsive="screen">
         <NGi span="1 l:2">
@@ -168,61 +162,48 @@ onMounted(load);
           </NCard>
         </NGi>
         <NGi>
-          <NCard :bordered="false" class="card-wrapper h-full" title="数据资产">
-            <NList>
-              <NListItem><NThing title="分钟趋势" :description="`${detail?.metrics.length || 0} 条采样`" /></NListItem>
-              <NListItem>
-                <NThing title="直播评论" :description="`${detail?.comments.length || 0} 条去重评论`" />
-              </NListItem>
-              <NListItem>
-                <NThing title="观众画像" :description="`${detail?.profiles.length || 0} 个分布项`" />
-              </NListItem>
-              <NListItem>
-                <NThing title="直播流" :description="detail?.stream_url ? '已保存可用流地址' : '暂无可用流地址'" />
-              </NListItem>
-            </NList>
+          <NCard :bordered="false" class="card-wrapper h-full" title="回放源与下载">
+            <NAlert v-if="!detail?.stream_url" type="warning" :show-icon="true">
+              尚未采集到 m3u8 地址，请先到“数据采集”刷新该场次。
+            </NAlert>
+            <div v-else class="flex h-full flex-col gap-12px">
+              <NInput
+                :value="detail.stream_url"
+                readonly
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 3 }"
+                placeholder="m3u8 原始地址"
+              />
+              <div class="flex flex-wrap gap-8px">
+                <NButton secondary @click="copyStreamUrl">复制 m3u8</NButton>
+                <NTooltip :disabled="session?.live_status !== 'live'">
+                  <template #trigger>
+                    <NButton
+                      type="primary"
+                      :loading="videoDownloading"
+                      :disabled="session?.live_status === 'live'"
+                      @click="downloadVideo"
+                    >
+                      下载 MP4
+                    </NButton>
+                  </template>
+                  当前仍在直播，请下播后下载完整视频
+                </NTooltip>
+              </div>
+              <div class="text-12px leading-20px text-gray-500">
+                使用原码流低开销封装，同一时间仅下载 1 场；播放器已在上方复盘工作台中展示。
+              </div>
+            </div>
           </NCard>
         </NGi>
       </NGrid>
 
-      <NCard :bordered="false" class="card-wrapper" title="直播回放与下载">
-        <NAlert v-if="!detail?.stream_url" type="warning" :show-icon="true">
-          该场次尚未采集到 m3u8 地址，请先到“数据采集”页面刷新场次详情。
-        </NAlert>
-        <div v-else class="flex flex-col gap-12px">
-          <div class="text-13px text-gray-500">m3u8 原始地址</div>
-          <div class="flex items-center gap-10px lt-sm:flex-col lt-sm:items-stretch">
-            <NInput :value="detail.stream_url" readonly type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" />
-            <NButton secondary @click="copyStreamUrl">复制地址</NButton>
-          </div>
-          <div class="flex flex-wrap items-center justify-between gap-12px">
-            <span class="text-12px text-gray-500">
-              下载采用原码流封装为 MP4，不重新编码；同一时间仅允许下载 1 场，直播结束后才能保存完整视频。
-            </span>
-            <NTooltip :disabled="session?.live_status !== 'live'">
-              <template #trigger>
-                <NButton
-                  type="primary"
-                  :loading="videoDownloading"
-                  :disabled="session?.live_status === 'live'"
-                  @click="downloadVideo"
-                >
-                  选择位置并下载 MP4
-                </NButton>
-              </template>
-              当前仍在直播，请下播后下载完整视频
-            </NTooltip>
-          </div>
-        </div>
-      </NCard>
-
-      <NCard :bordered="false" class="card-wrapper" title="原始采集数据与专项分析">
-        <NTabs type="line" animated>
-          <NTabPane name="metrics" tab="分钟趋势"><MetricsChart :metrics="detail?.metrics || []" /></NTabPane>
-          <NTabPane name="comments" :tab="`直播评论 (${detail?.comments.length || 0})`">
+      <NCard :bordered="false" class="card-wrapper" title="评论、画像与 AI 分析">
+        <NTabs type="line" animated default-value="comments">
+          <NTabPane name="comments" :tab="`直播评论 (${detail?.comments.length || 0})`" display-directive="if">
             <CommentGroups :comments="detail?.comments || []" />
           </NTabPane>
-          <NTabPane name="profiles" :tab="`观众画像 (${detail?.profiles.length || 0})`">
+          <NTabPane name="profiles" :tab="`观众画像 (${detail?.profiles.length || 0})`" display-directive="if">
             <NDataTable
               :columns="profilesColumns"
               :data="detail?.profiles || []"
@@ -230,7 +211,9 @@ onMounted(load);
               size="small"
             />
           </NTabPane>
-          <NTabPane name="ai" tab="AI 专项分析"><AiPanel :session-id="Number(id)" :detail="detail" /></NTabPane>
+          <NTabPane name="ai" tab="AI 分析" display-directive="if">
+            <AiPanel :session-id="Number(id)" :detail="detail" />
+          </NTabPane>
         </NTabs>
       </NCard>
     </NSpace>
