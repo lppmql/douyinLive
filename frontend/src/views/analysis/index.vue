@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue';
+import { computed, h, onMounted, ref } from 'vue';
 import type { SelectOption, TagProps } from 'naive-ui';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
+import AnchorAvatar from '@/components/business/anchor-avatar.vue';
 import BusinessPageHeader from '@/components/business/page-header.vue';
 import {
   fetchAnalysisReports,
@@ -21,43 +22,6 @@ type SessionSelectOption = SelectOption & {
   anchorName: string;
   avatarUrl: string | null;
 };
-
-const AnchorAvatar = defineComponent({
-  name: 'AnchorAvatar',
-  props: {
-    src: { type: String, default: '' },
-    name: { type: String, default: '主播' },
-    size: { type: Number, default: 32 }
-  },
-  setup(props) {
-    const hasLoadError = ref(false);
-    watch(
-      () => props.src,
-      () => {
-        hasLoadError.value = false;
-      }
-    );
-
-    return () =>
-      h(
-        'span',
-        {
-          class: 'inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full bg-gray-200 text-gray-500',
-          style: { width: `${props.size}px`, height: `${props.size}px` }
-        },
-        props.src && !hasLoadError.value
-          ? h('img', {
-              src: props.src,
-              alt: `${props.name}头像`,
-              class: 'size-full object-cover',
-              onError: () => {
-                hasLoadError.value = true;
-              }
-            })
-          : props.name.slice(0, 1) || '播'
-      );
-  }
-});
 
 const router = useRouter();
 const message = useMessage();

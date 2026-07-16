@@ -12,6 +12,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AnchorAvatar: typeof import('./../components/business/anchor-avatar.vue')['default']
     AppHelp: typeof import('./../components/business/app-help.vue')['default']
     AppProvider: typeof import('./../components/common/app-provider.vue')['default']
     BetterScroll: typeof import('./../components/custom/better-scroll.vue')['default']
@@ -116,6 +117,7 @@ declare module 'vue' {
 
 // For TSX support
 declare global {
+  const AnchorAvatar: typeof import('./../components/business/anchor-avatar.vue')['default']
   const AppHelp: typeof import('./../components/business/app-help.vue')['default']
   const AppProvider: typeof import('./../components/common/app-provider.vue')['default']
   const BetterScroll: typeof import('./../components/custom/better-scroll.vue')['default']

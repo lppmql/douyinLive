@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useIntervalFn, useWebSocket } from '@vueuse/core';
+import type { SelectOption } from 'naive-ui';
 import { useMessage } from 'naive-ui';
+import AnchorAvatar from '@/components/business/anchor-avatar.vue';
 import BusinessPageHeader from '@/components/business/page-header.vue';
 import {
   fetchLiveSessions,
@@ -10,6 +12,7 @@ import {
   fetchTranscriptSegments,
   fetchTranscriptTasks,
   fetchTranscriptTaskStatus,
+  getLiveSessionAvatarUrl,
   queueTranscript,
   queueTranscriptsByAnchor,
   runTranscriptAiPipeline
@@ -19,6 +22,10 @@ defineOptions({ name: 'Transcripts' });
 
 type TaskStatus = Api.Douyin.TranscriptTask['status'];
 type DisplayStatus = TaskStatus | Api.Douyin.TranscriptSegment['asr_status'];
+type SessionSelectOption = SelectOption & {
+  anchorName: string;
+  avatarUrl: string | null;
+};
 
 const router = useRouter();
 const message = useMessage();
@@ -67,8 +74,10 @@ const sessionOptions = computed(() =>
     const date = session.live_start_time ? formatDate(session.live_start_time) : '时间未知';
     return {
       value: session.id,
-      label: `${session.anchor_name || '未知主播'} · ${date} · ${formatDuration(session.live_duration_seconds)} · ${getStatusLabel(task?.status)}`
-    };
+      label: `${session.anchor_name || '未知主播'} · ${date} · ${formatDuration(session.live_duration_seconds)} · ${getStatusLabel(task?.status)}`,
+      anchorName: session.anchor_name || '未知主播',
+      avatarUrl: session.anchor_avatar_url ? getLiveSessionAvatarUrl(session.id) : null
+    } satisfies SessionSelectOption;
   })
 );
 const categoryStats = computed(() => {
@@ -151,6 +160,18 @@ function sortSessionsByLatest(items: Api.Douyin.LiveSession[]) {
     const timeDifference = getSessionStartTimestamp(b.live_start_time) - getSessionStartTimestamp(a.live_start_time);
     return timeDifference || b.id - a.id;
   });
+}
+
+function renderSessionLabel(option: SelectOption) {
+  const sessionOption = option as SessionSelectOption;
+  return h('div', { class: 'flex min-w-0 items-center gap-9px' }, [
+    h(AnchorAvatar, { size: 26, src: sessionOption.avatarUrl || undefined, name: sessionOption.anchorName }),
+    h('span', { class: 'min-w-0 flex-1 truncate' }, String(sessionOption.label || ''))
+  ]);
+}
+
+function getSessionAvatarUrl(session: Api.Douyin.LiveSession) {
+  return session.anchor_avatar_url ? getLiveSessionAvatarUrl(session.id) : undefined;
 }
 
 async function loadSessions() {
@@ -384,13 +405,19 @@ onUnmounted(() => {
           <div class="mb-7px text-12px font-600 text-gray-500">当前复盘场次</div>
           <NSelect
             v-model:value="selectedSessionId"
+            size="large"
             filterable
             :options="sessionOptions"
+            :render-label="renderSessionLabel"
             placeholder="搜索主播、日期或场次"
             @update:value="loadTranscript"
           />
           <div v-if="selectedSession" class="mt-10px flex flex-wrap items-center gap-8px text-12px text-gray-500">
-            <NAvatar v-if="selectedSession.anchor_avatar_url" round size="small" :src="selectedSession.anchor_avatar_url" />
+            <AnchorAvatar
+              :size="28"
+              :src="getSessionAvatarUrl(selectedSession)"
+              :name="selectedSession.anchor_name || '未知主播'"
+            />
             <strong class="text-gray-700 dark:text-gray-200">{{ selectedSession.anchor_name || '未知主播' }}</strong>
             <span>{{ formatDate(selectedSession.live_start_time) }}</span>
             <span>{{ formatDuration(selectedSession.live_duration_seconds) }}</span>
