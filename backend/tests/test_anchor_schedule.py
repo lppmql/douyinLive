@@ -61,15 +61,33 @@ class AnchorScheduleTest(unittest.TestCase):
 
         self.assertEqual(result["summary"]["matched_count"], 1)
         self.assertEqual(result["summary"]["duration_compliant_count"], 1)
+        self.assertEqual(result["summary"]["cross_hour_count"], 0)
         self.assertEqual(result["rows"][0]["status"], "completed")
 
-    def test_short_duration_and_cross_hour_are_both_reminded(self):
+    def test_short_duration_and_late_cross_hour_are_both_reminded(self):
         self.add_session(datetime(2026, 7, 16, 10, 1), 70 * 60)
 
         result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 12, 0))
 
         self.assertEqual(result["rows"][0]["status"], "duration_short")
         self.assertEqual({item["type"] for item in result["reminders"]}, {"duration", "cross_hour"})
+
+    def test_early_cross_hour_is_reminded(self):
+        self.add_session(datetime(2026, 7, 16, 8, 59), 80 * 60)
+
+        result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 12, 0))
+
+        self.assertEqual(result["rows"][0]["status"], "completed")
+        self.assertEqual(result["summary"]["cross_hour_count"], 1)
+        self.assertEqual([item["type"] for item in result["reminders"]], ["cross_hour"])
+
+    def test_early_start_within_planned_hour_is_not_cross_hour(self):
+        self.add_session(datetime(2026, 7, 16, 9, 1), 80 * 60)
+
+        result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 12, 0))
+
+        self.assertEqual(result["summary"]["cross_hour_count"], 0)
+        self.assertEqual(result["reminders"], [])
 
     def test_future_slot_is_not_reported_missing(self):
         result = build_schedule_dashboard(self.db, date(2026, 7, 16), datetime(2026, 7, 16, 9, 55))

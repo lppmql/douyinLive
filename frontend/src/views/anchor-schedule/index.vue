@@ -229,7 +229,11 @@ onBeforeUnmount(() => {
         <span>标准时长：{{ dashboard?.rule.expected_duration_minutes || 80 }} 分钟/场</span>
         <span>文豪、大全：每天 4 场</span>
         <span>其他排班主播：每天 3 场</span>
-        <span>跨整点：{{ dashboard?.rule.cross_hour_definition || '实际开播晚于计划后的下一个整点' }}</span>
+        <span>
+          跨整点：{{
+            dashboard?.rule.cross_hour_definition || '实际开播须在计划时间所在自然小时内，提前或延后跨出均提醒'
+          }}
+        </span>
       </div>
     </BusinessPageHeader>
 

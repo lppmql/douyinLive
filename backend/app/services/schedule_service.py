@@ -128,6 +128,7 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
 
     for schedule in schedules:
         planned_start, planned_end = _planned_range(schedule_date, schedule)
+        planned_hour_start = planned_start.replace(minute=0, second=0, microsecond=0)
         due_at = _next_whole_hour(planned_start)
         actual = matched.get(schedule.id)
         warnings: list[str] = []
@@ -139,7 +140,10 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
             duration_seconds = actual_payload["live_duration_seconds"]
             is_live = actual.live_status == "live"
             duration_short = not is_live and duration_seconds < schedule.expected_duration_minutes * 60
-            crossed_hour = bool(actual.live_start_time and actual.live_start_time >= due_at)
+            crossed_hour = bool(
+                actual.live_start_time
+                and (actual.live_start_time < planned_hour_start or actual.live_start_time >= due_at)
+            )
             if is_live:
                 status = "live"
             elif duration_short:
@@ -150,7 +154,10 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
                 status = "completed"
                 compliant_duration_count += 1
             if crossed_hour:
-                warnings.append(f"实际开播已跨过 {due_at.strftime('%H:%M')} 整点")
+                warnings.append(
+                    "实际开播不在计划所在整点时段"
+                    f"（{planned_hour_start.strftime('%H:%M')}-{(due_at - timedelta(minutes=1)).strftime('%H:%M')}）"
+                )
         elif now >= due_at:
             status = "missing"
             warnings.append("计划场次已到期，尚未匹配到真实开播记录")
@@ -229,7 +236,7 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
             "expected_duration_minutes": 80,
             "four_session_anchors": ["刘文豪", "王路权（大全）"],
             "default_session_count": 3,
-            "cross_hour_definition": "实际开播晚于计划时间后的下一个整点",
+            "cross_hour_definition": "实际开播须在计划时间所在自然小时内，提前或延后跨出该小时均提醒",
         },
         "summary": {
             "planned_count": len(schedules),
