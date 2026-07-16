@@ -8,7 +8,7 @@ from app.models.anchor_schedules import AnchorSchedule
 from app.models.base import Base
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
-from app.services.schedule_service import build_schedule_dashboard
+from app.services.schedule_service import build_schedule_dashboard, build_schedule_range_dashboard
 
 
 class AnchorScheduleTest(unittest.TestCase):
@@ -100,6 +100,29 @@ class AnchorScheduleTest(unittest.TestCase):
 
         self.assertEqual(result["rows"][0]["status"], "missing")
         self.assertEqual(result["summary"]["missing_count"], 1)
+
+    def test_date_range_aggregates_each_day_and_keeps_row_dates(self):
+        self.add_session(datetime(2026, 7, 16, 9, 52), 80 * 60)
+
+        result = build_schedule_range_dashboard(
+            self.db,
+            date(2026, 7, 16),
+            date(2026, 7, 17),
+            datetime(2026, 7, 17, 12, 0),
+        )
+
+        self.assertEqual(result["day_count"], 2)
+        self.assertEqual(result["summary"]["planned_count"], 2)
+        self.assertEqual(result["summary"]["matched_count"], 1)
+        self.assertEqual(result["summary"]["missing_count"], 1)
+        self.assertEqual(result["anchors"][0]["expected_count"], 2)
+        self.assertEqual([row["schedule_date"] for row in result["rows"]], ["2026-07-16", "2026-07-17"])
+
+    def test_date_range_rejects_invalid_or_oversized_ranges(self):
+        with self.assertRaisesRegex(ValueError, "结束日期"):
+            build_schedule_range_dashboard(self.db, date(2026, 7, 17), date(2026, 7, 16))
+        with self.assertRaisesRegex(ValueError, "最多支持 31 天"):
+            build_schedule_range_dashboard(self.db, date(2026, 7, 1), date(2026, 8, 1))
 
 
 if __name__ == "__main__":

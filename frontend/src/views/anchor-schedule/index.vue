@@ -12,13 +12,23 @@ const router = useRouter();
 const message = useMessage();
 const loading = ref(false);
 const dashboard = ref<Api.Douyin.AnchorScheduleDashboard | null>(null);
-const selectedTimestamp = ref(dayjs().startOf('day').valueOf());
+const todayTimestamp = dayjs().startOf('day').valueOf();
+const selectedRange = ref<[number, number]>([todayTimestamp, todayTimestamp]);
 const selectedAnchor = ref<string | null>(null);
 const reminderDrawerVisible = ref(false);
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
-const selectedDate = computed(() => dayjs(selectedTimestamp.value).format('YYYY-MM-DD'));
-const isToday = computed(() => selectedDate.value === dayjs().format('YYYY-MM-DD'));
+const selectedStartDate = computed(() => dayjs(selectedRange.value[0]).format('YYYY-MM-DD'));
+const selectedEndDate = computed(() => dayjs(selectedRange.value[1]).format('YYYY-MM-DD'));
+const selectedDateLabel = computed(() =>
+  selectedStartDate.value === selectedEndDate.value
+    ? selectedStartDate.value
+    : `${selectedStartDate.value} 至 ${selectedEndDate.value}`
+);
+const includesToday = computed(() => {
+  const today = dayjs().format('YYYY-MM-DD');
+  return selectedStartDate.value <= today && selectedEndDate.value >= today;
+});
 const visibleRows = computed(() => {
   if (!selectedAnchor.value) return dashboard.value?.rows || [];
   return (dashboard.value?.rows || []).filter(item => item.source_anchor_name === selectedAnchor.value);
@@ -49,13 +59,26 @@ function getAnchorAvatarUrl(anchor: Api.Douyin.AnchorScheduleAnchor | undefined)
 }
 
 function setDateOffset(offset: number) {
-  selectedTimestamp.value = dayjs().add(offset, 'day').startOf('day').valueOf();
+  const timestamp = dayjs().add(offset, 'day').startOf('day').valueOf();
+  selectedRange.value = [timestamp, timestamp];
+  selectedAnchor.value = null;
   void loadSchedule();
 }
 
-function handleDateChange(value: number | null) {
+function setRecentDays(dayCount: number) {
+  const endTimestamp = dayjs().startOf('day').valueOf();
+  selectedRange.value = [dayjs(endTimestamp).subtract(dayCount - 1, 'day').valueOf(), endTimestamp];
+  selectedAnchor.value = null;
+  void loadSchedule();
+}
+
+function handleDateChange(value: [number, number] | null) {
   if (value === null) return;
-  selectedTimestamp.value = value;
+  if (dayjs(value[1]).diff(dayjs(value[0]), 'day') >= 31) {
+    message.warning('单次最多查询连续 31 天，请缩短起止日期范围');
+    return;
+  }
+  selectedRange.value = value;
   selectedAnchor.value = null;
   void loadSchedule();
 }
@@ -72,7 +95,7 @@ function openSession(sessionId: number | null) {
 async function loadSchedule(silent = false) {
   if (!silent) loading.value = true;
   try {
-    const response = await fetchAnchorScheduleDashboard(selectedDate.value);
+    const response = await fetchAnchorScheduleDashboard(selectedStartDate.value, selectedEndDate.value);
     if (response.data) dashboard.value = response.data;
   } catch {
     if (!silent) message.error('排班数据加载失败，请检查后端服务和数据库迁移');
@@ -84,7 +107,7 @@ async function loadSchedule(silent = false) {
 function startAutoRefresh() {
   if (refreshTimer) clearInterval(refreshTimer);
   refreshTimer = setInterval(() => {
-    if (isToday.value && document.visibilityState === 'visible') void loadSchedule(true);
+    if (includesToday.value && document.visibilityState === 'visible') void loadSchedule(true);
   }, 60_000);
 }
 
@@ -106,6 +129,12 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
           ])
         ]);
       }
+    },
+    {
+      title: '日期',
+      key: 'schedule_date',
+      width: 112,
+      render: row => dayjs(row.schedule_date).format('YYYY-MM-DD')
     },
     {
       title: '场次',
@@ -207,17 +236,22 @@ onBeforeUnmount(() => {
       title="主播排班"
       description="依据真实排班表核对每天的开播场次、80 分钟时长和开播整点；提醒只使用已采集直播场次，不会用模拟数据补齐。"
       icon="mdi:calendar-clock-outline"
-      :status="dashboard ? `${dashboard.source_name} · ${dashboard.summary.planned_count} 场计划` : '正在读取排班'"
+      :status="
+        dashboard
+          ? `${dashboard.source_name} · ${dashboard.day_count} 天 · ${dashboard.summary.planned_count} 场计划`
+          : '正在读取排班'
+      "
       :status-type="dashboard ? 'success' : 'info'"
     >
       <template #actions>
         <NButton secondary @click="setDateOffset(-1)">昨天</NButton>
         <NButton secondary @click="setDateOffset(0)">今天</NButton>
+        <NButton secondary @click="setRecentDays(7)">近 7 天</NButton>
         <NDatePicker
-          :value="selectedTimestamp"
-          type="date"
+          :value="selectedRange"
+          type="daterange"
           :clearable="false"
-          class="w-150px"
+          class="w-260px"
           @update:value="handleDateChange"
         />
         <NButton type="primary" :loading="loading" @click="loadSchedule()">
@@ -245,7 +279,7 @@ onBeforeUnmount(() => {
       class="cursor-pointer"
       @click="reminderDrawerVisible = true"
     >
-      {{ selectedDate }} 共有 {{ dashboard.summary.reminder_count }} 条排班提醒：缺少
+      {{ selectedDateLabel }} 共有 {{ dashboard.summary.reminder_count }} 条排班提醒：缺少
       {{ dashboard.summary.missing_count }} 场、时长不足 {{ dashboard.summary.duration_short_count }} 场、跨整点开播
       {{ dashboard.summary.cross_hour_count }} 场。点击查看明细。
     </NAlert>
@@ -259,7 +293,7 @@ onBeforeUnmount(() => {
           <NCard :bordered="false" class="schedule-kpi schedule-kpi-plan" size="small">
             <div class="text-13px text-gray-500">计划场次</div>
             <div class="mt-8px text-30px font-700">{{ dashboard?.summary.planned_count || 0 }}</div>
-            <div class="mt-4px text-12px text-gray-400">5 位排班主播</div>
+            <div class="mt-4px text-12px text-gray-400">5 位排班主播 · {{ dashboard?.day_count || 1 }} 天</div>
           </NCard>
         </NGi>
         <NGi>
@@ -334,21 +368,23 @@ onBeforeUnmount(() => {
     <NCard :bordered="false" class="card-wrapper">
       <template #header>
         <div class="flex flex-wrap items-center gap-10px">
-          <span class="text-16px font-700">{{ selectedDate }} 班次明细</span>
+          <span class="text-16px font-700">{{ selectedDateLabel }} 班次明细</span>
           <NTag v-if="selectedAnchor" round closable @close="selectedAnchor = null">
             {{ selectedAnchor }}
           </NTag>
         </div>
       </template>
       <template #header-extra>
-        <span class="text-12px text-gray-400">今天每 60 秒静默刷新</span>
+        <span class="text-12px text-gray-400">
+          {{ includesToday ? '范围包含今天，每 60 秒静默刷新' : '历史范围按需刷新' }}
+        </span>
       </template>
       <NDataTable
         :columns="columns"
         :data="visibleRows"
         :loading="loading"
-        :row-key="row => row.id"
-        :scroll-x="1450"
+        :row-key="row => `${row.schedule_date}-${row.id}`"
+        :scroll-x="1560"
         :max-height="560"
         size="small"
         striped
@@ -374,7 +410,9 @@ onBeforeUnmount(() => {
             </template>
             <div class="font-600">{{ item.anchor_name }} · 第 {{ item.session_index }} 场</div>
             <div class="mt-4px text-13px text-gray-500">{{ item.message }}</div>
-            <div class="mt-5px text-11px text-gray-400">计划开播 {{ formatClock(item.planned_start_time) }}</div>
+            <div class="mt-5px text-11px text-gray-400">
+              计划开播 {{ dayjs(item.schedule_date).format('MM-DD') }} {{ formatClock(item.planned_start_time) }}
+            </div>
           </NListItem>
         </NList>
       </NDrawerContent>

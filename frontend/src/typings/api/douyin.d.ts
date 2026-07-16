@@ -36,6 +36,7 @@ declare namespace Api {
 
     interface AnchorScheduleRow {
       id: number;
+      schedule_date: string;
       source_anchor_name: string;
       display_name: string;
       room_name: string;
@@ -55,6 +56,7 @@ declare namespace Api {
       anchor_name: string;
       session_index: number;
       message: string;
+      schedule_date: string;
       planned_start_time: string;
       session_id: number | null;
     }
@@ -75,6 +77,9 @@ declare namespace Api {
 
     interface AnchorScheduleDashboard {
       schedule_date: string;
+      start_date: string;
+      end_date: string;
+      day_count: number;
       generated_at: string;
       source_name: string;
       rule: {

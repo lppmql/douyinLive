@@ -15,11 +15,11 @@ export function fetchDashboardSummary() {
 
 /* ---------- 主播排班 ---------- */
 
-/** 获取指定日期的排班、真实执行情况和提醒。 */
-export function fetchAnchorScheduleDashboard(scheduleDate: string) {
+/** 获取起止日期内的排班、真实执行情况和提醒，日期范围包含首尾两天。 */
+export function fetchAnchorScheduleDashboard(startDate: string, endDate = startDate) {
   return backendRequest<Api.Douyin.AnchorScheduleDashboard>({
     url: `${API_PREFIX}/anchor-schedules/dashboard`,
-    params: { schedule_date: scheduleDate }
+    params: { start_date: startDate, end_date: endDate }
   });
 }
 

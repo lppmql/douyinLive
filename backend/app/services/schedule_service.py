@@ -11,6 +11,29 @@ from app.models.live_sessions import LiveSession
 
 
 MATCH_WINDOW_MINUTES = 120
+MAX_SCHEDULE_RANGE_DAYS = 31
+
+
+def _load_schedules(db: Session) -> list[AnchorSchedule]:
+    return (
+        db.query(AnchorSchedule)
+        .filter(AnchorSchedule.active.is_(True))
+        .order_by(AnchorSchedule.planned_start_time.asc(), AnchorSchedule.session_index.asc())
+        .all()
+    )
+
+
+def _load_profile_sessions(db: Session, schedules: list[AnchorSchedule]) -> list[LiveSession]:
+    all_keywords = sorted({keyword for item in schedules for keyword in (item.match_keywords or []) if keyword})
+    if not all_keywords:
+        return []
+    return (
+        db.query(LiveSession)
+        .filter(or_(*(LiveSession.anchor_name.like(f"%{keyword}%") for keyword in all_keywords)))
+        .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .limit(500)
+        .all()
+    )
 
 
 def _combine(schedule_date: date, value: time) -> datetime:
@@ -89,15 +112,16 @@ def _match_sessions(
     return matched
 
 
-def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | None = None) -> dict:
+def build_schedule_dashboard(
+    db: Session,
+    schedule_date: date,
+    now: datetime | None = None,
+    schedules: list[AnchorSchedule] | None = None,
+    profile_sessions: list[LiveSession] | None = None,
+) -> dict:
     """返回指定日期的计划、真实执行情况和已到期提醒。"""
     now = now or datetime.now()
-    schedules = (
-        db.query(AnchorSchedule)
-        .filter(AnchorSchedule.active.is_(True))
-        .order_by(AnchorSchedule.planned_start_time.asc(), AnchorSchedule.session_index.asc())
-        .all()
-    )
+    schedules = schedules if schedules is not None else _load_schedules(db)
     day_start = datetime.combine(schedule_date, time.min)
     day_end = day_start + timedelta(days=1)
     all_keywords = sorted({keyword for item in schedules for keyword in (item.match_keywords or []) if keyword})
@@ -110,15 +134,7 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
             or_(*(LiveSession.anchor_name.like(f"%{keyword}%") for keyword in all_keywords))
         )
     sessions = session_query.order_by(LiveSession.live_start_time.asc(), LiveSession.id.asc()).all()
-    profile_sessions: list[LiveSession] = []
-    if all_keywords:
-        profile_sessions = (
-            db.query(LiveSession)
-            .filter(or_(*(LiveSession.anchor_name.like(f"%{keyword}%") for keyword in all_keywords)))
-            .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
-            .limit(500)
-            .all()
-        )
+    profile_sessions = profile_sessions if profile_sessions is not None else _load_profile_sessions(db, schedules)
     matched = _match_sessions(schedules, sessions, schedule_date)
 
     rows: list[dict] = []
@@ -171,6 +187,7 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
                     "anchor_name": schedule.display_name,
                     "session_index": schedule.session_index,
                     "message": warning,
+                    "schedule_date": schedule_date.isoformat(),
                     "planned_start_time": planned_start.isoformat(),
                     "session_id": actual.id if actual else None,
                 }
@@ -213,6 +230,7 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
         rows.append(
             {
                 "id": schedule.id,
+                "schedule_date": schedule_date.isoformat(),
                 "source_anchor_name": schedule.source_anchor_name,
                 "display_name": schedule.display_name,
                 "room_name": schedule.room_name,
@@ -230,6 +248,9 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
     matched_count = len(matched)
     return {
         "schedule_date": schedule_date.isoformat(),
+        "start_date": schedule_date.isoformat(),
+        "end_date": schedule_date.isoformat(),
+        "day_count": 1,
         "generated_at": now.isoformat(),
         "source_name": schedules[0].source_name if schedules else "排班.xls",
         "rule": {
@@ -253,4 +274,70 @@ def build_schedule_dashboard(db: Session, schedule_date: date, now: datetime | N
         "anchors": list(anchor_stats.values()),
         "rows": rows,
         "reminders": reminders,
+    }
+
+
+def build_schedule_range_dashboard(
+    db: Session,
+    start_date: date,
+    end_date: date,
+    now: datetime | None = None,
+) -> dict:
+    """汇总起止日期内的每日排班，日期范围包含首尾两天。"""
+    if end_date < start_date:
+        raise ValueError("结束日期不能早于开始日期")
+    day_count = (end_date - start_date).days + 1
+    if day_count > MAX_SCHEDULE_RANGE_DAYS:
+        raise ValueError(f"日期范围最多支持 {MAX_SCHEDULE_RANGE_DAYS} 天")
+
+    now = now or datetime.now()
+    schedules = _load_schedules(db)
+    profile_sessions = _load_profile_sessions(db, schedules)
+    dashboards = [
+        build_schedule_dashboard(
+            db,
+            start_date + timedelta(days=offset),
+            now,
+            schedules=schedules,
+            profile_sessions=profile_sessions,
+        )
+        for offset in range(day_count)
+    ]
+    if not dashboards:
+        return {}
+
+    summary_keys = dashboards[0]["summary"].keys()
+    summary = {key: sum(item["summary"][key] for item in dashboards) for key in summary_keys}
+    anchor_stats: dict[str, dict] = {}
+    for dashboard in dashboards:
+        for anchor in dashboard["anchors"]:
+            stat = anchor_stats.setdefault(
+                anchor["source_anchor_name"],
+                {
+                    **anchor,
+                    "expected_count": 0,
+                    "matched_count": 0,
+                    "completed_count": 0,
+                    "warning_count": 0,
+                },
+            )
+            for key in ("expected_count", "matched_count", "completed_count", "warning_count"):
+                stat[key] += anchor[key]
+            if anchor["anchor_avatar_url"]:
+                stat["anchor_avatar_url"] = anchor["anchor_avatar_url"]
+                stat["anchor_avatar_session_id"] = anchor["anchor_avatar_session_id"]
+                stat["actual_anchor_name"] = anchor["actual_anchor_name"]
+
+    return {
+        "schedule_date": start_date.isoformat(),
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "day_count": day_count,
+        "generated_at": now.isoformat(),
+        "source_name": dashboards[0]["source_name"],
+        "rule": dashboards[0]["rule"],
+        "summary": summary,
+        "anchors": list(anchor_stats.values()),
+        "rows": [row for dashboard in dashboards for row in dashboard["rows"]],
+        "reminders": [reminder for dashboard in dashboards for reminder in dashboard["reminders"]],
     }
