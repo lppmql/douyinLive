@@ -97,9 +97,9 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSessionListItem>[] 
               round: true,
               size: 34,
               src: row.anchor_avatar_url || undefined,
-              objectFit: 'cover'
-            },
-            { default: () => row.anchor_name?.slice(0, 1) || '主' }
+              objectFit: 'cover',
+              renderFallback: () => row.anchor_name?.slice(0, 1) || '主'
+            }
           ),
           h('div', { class: 'min-w-0' }, [
             h('div', { class: 'truncate font-600' }, row.anchor_name || '-'),
