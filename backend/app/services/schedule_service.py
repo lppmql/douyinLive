@@ -204,6 +204,8 @@ def build_schedule_dashboard(
                 "matched_count": 0,
                 "completed_count": 0,
                 "warning_count": 0,
+                "missing_count": 0,
+                "missing_by_date": [],
                 "anchor_avatar_url": None,
                 "anchor_avatar_session_id": None,
                 "actual_anchor_name": None,
@@ -222,6 +224,18 @@ def build_schedule_dashboard(
         stat["matched_count"] += int(actual is not None)
         stat["completed_count"] += int(status == "completed")
         stat["warning_count"] += len(warnings)
+        if status == "missing":
+            stat["missing_count"] += 1
+            missing_date = schedule_date.isoformat()
+            missing_item = next(
+                (item for item in stat["missing_by_date"] if item["schedule_date"] == missing_date),
+                None,
+            )
+            if missing_item is None:
+                missing_item = {"schedule_date": missing_date, "count": 0, "session_indexes": []}
+                stat["missing_by_date"].append(missing_item)
+            missing_item["count"] += 1
+            missing_item["session_indexes"].append(schedule.session_index)
         if actual:
             stat["anchor_avatar_url"] = actual.anchor_avatar_url or stat["anchor_avatar_url"]
             stat["anchor_avatar_session_id"] = actual.id if actual.anchor_avatar_url else stat["anchor_avatar_session_id"]
@@ -319,14 +333,35 @@ def build_schedule_range_dashboard(
                     "matched_count": 0,
                     "completed_count": 0,
                     "warning_count": 0,
+                    "missing_count": 0,
+                    "missing_by_date": [],
                 },
             )
-            for key in ("expected_count", "matched_count", "completed_count", "warning_count"):
+            for key in ("expected_count", "matched_count", "completed_count", "warning_count", "missing_count"):
                 stat[key] += anchor[key]
+            for missing_item in anchor["missing_by_date"]:
+                existing_item = next(
+                    (
+                        item
+                        for item in stat["missing_by_date"]
+                        if item["schedule_date"] == missing_item["schedule_date"]
+                    ),
+                    None,
+                )
+                if existing_item is None:
+                    stat["missing_by_date"].append(
+                        {**missing_item, "session_indexes": list(missing_item["session_indexes"])}
+                    )
+                else:
+                    existing_item["count"] += missing_item["count"]
+                    existing_item["session_indexes"].extend(missing_item["session_indexes"])
             if anchor["anchor_avatar_url"]:
                 stat["anchor_avatar_url"] = anchor["anchor_avatar_url"]
                 stat["anchor_avatar_session_id"] = anchor["anchor_avatar_session_id"]
                 stat["actual_anchor_name"] = anchor["actual_anchor_name"]
+
+    for stat in anchor_stats.values():
+        stat["missing_by_date"].sort(key=lambda item: item["schedule_date"])
 
     return {
         "schedule_date": start_date.isoformat(),

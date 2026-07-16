@@ -70,6 +70,12 @@ declare namespace Api {
       matched_count: number;
       completed_count: number;
       warning_count: number;
+      missing_count: number;
+      missing_by_date: Array<{
+        schedule_date: string;
+        count: number;
+        session_indexes: number[];
+      }>;
       anchor_avatar_url: string | null;
       anchor_avatar_session_id: number | null;
       actual_anchor_name: string | null;

@@ -100,6 +100,11 @@ class AnchorScheduleTest(unittest.TestCase):
 
         self.assertEqual(result["rows"][0]["status"], "missing")
         self.assertEqual(result["summary"]["missing_count"], 1)
+        self.assertEqual(result["anchors"][0]["missing_count"], 1)
+        self.assertEqual(
+            result["anchors"][0]["missing_by_date"],
+            [{"schedule_date": "2026-07-16", "count": 1, "session_indexes": [1]}],
+        )
 
     def test_date_range_aggregates_each_day_and_keeps_row_dates(self):
         self.add_session(datetime(2026, 7, 16, 9, 52), 80 * 60)
@@ -116,6 +121,11 @@ class AnchorScheduleTest(unittest.TestCase):
         self.assertEqual(result["summary"]["matched_count"], 1)
         self.assertEqual(result["summary"]["missing_count"], 1)
         self.assertEqual(result["anchors"][0]["expected_count"], 2)
+        self.assertEqual(result["anchors"][0]["missing_count"], 1)
+        self.assertEqual(
+            result["anchors"][0]["missing_by_date"],
+            [{"schedule_date": "2026-07-17", "count": 1, "session_indexes": [1]}],
+        )
         self.assertEqual([row["schedule_date"] for row in result["rows"]], ["2026-07-16", "2026-07-17"])
 
     def test_date_range_rejects_invalid_or_oversized_ranges(self):

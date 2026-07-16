@@ -58,6 +58,20 @@ function getAnchorAvatarUrl(anchor: Api.Douyin.AnchorScheduleAnchor | undefined)
   return anchor?.anchor_avatar_session_id ? getLiveSessionAvatarUrl(anchor.anchor_avatar_session_id) : undefined;
 }
 
+function formatMissingSummary(anchor: Api.Douyin.AnchorScheduleAnchor) {
+  if (!anchor.missing_count) return '缺场：无';
+  const visibleDates = anchor.missing_by_date
+    .slice(0, 2)
+    .map(item => `${dayjs(item.schedule_date).format('MM-DD')}（${item.count} 场）`)
+    .join('、');
+  const remaining = anchor.missing_by_date.length - 2;
+  return `缺场：${visibleDates}${remaining > 0 ? ` 等 ${anchor.missing_by_date.length} 天` : ''}`;
+}
+
+function formatMissingSessions(sessionIndexes: number[]) {
+  return sessionIndexes.map(index => `第 ${index} 场`).join('、');
+}
+
 function setDateOffset(offset: number) {
   const timestamp = dayjs().add(offset, 'day').startOf('day').valueOf();
   selectedRange.value = [timestamp, timestamp];
@@ -360,6 +374,22 @@ onBeforeUnmount(() => {
               </NTag>
               <NTag v-else type="success" size="small" round :bordered="false">正常</NTag>
             </div>
+            <NTooltip v-if="anchor.missing_count" placement="bottom" :delay="200">
+              <template #trigger>
+                <div class="mt-10px truncate text-left text-11px text-error">
+                  {{ formatMissingSummary(anchor) }}
+                </div>
+              </template>
+              <div class="max-h-240px overflow-y-auto py-2px">
+                <div class="mb-6px font-600">缺少场次明细</div>
+                <div v-for="item in anchor.missing_by_date" :key="item.schedule_date" class="py-2px text-12px">
+                  {{ dayjs(item.schedule_date).format('YYYY-MM-DD') }}：缺 {{ item.count }} 场（{{
+                    formatMissingSessions(item.session_indexes)
+                  }}）
+                </div>
+              </div>
+            </NTooltip>
+            <div v-else class="mt-10px text-left text-11px text-success">缺场：无</div>
           </button>
         </NGi>
       </NGrid>
@@ -446,7 +476,7 @@ onBeforeUnmount(() => {
 
 .anchor-card {
   width: 100%;
-  min-height: 126px;
+  min-height: 150px;
   padding: 14px;
   color: inherit;
   cursor: pointer;
@@ -473,7 +503,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 640px) {
   .anchor-card {
-    min-height: 112px;
+    min-height: 138px;
   }
 }
 </style>
