@@ -95,6 +95,12 @@ def configure_logging() -> None:
     root.handlers.clear()
     root.addHandler(handler)
 
+    # WebSocket 音频帧和逐条 SQL 会让长场次日志快速膨胀，只保留业务进度与异常。
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(
+        logging.INFO if settings.DATABASE_ECHO else logging.WARNING
+    )
+
 
 def new_trace_id(incoming: str | None = None) -> str:
     candidate = (incoming or "").strip()

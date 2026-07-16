@@ -18,6 +18,8 @@ import sys
 from time import monotonic
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import DataError
+
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.database import SessionLocal, engine
@@ -51,6 +53,11 @@ def build_chunk_ranges(duration_seconds: int, chunk_seconds: int) -> list[tuple[
         (float(start), float(min(duration, start + size)))
         for start in range(0, duration, size)
     ]
+
+
+def is_full_text_too_long_error(exc: DataError) -> bool:
+    """识别迁移前 MySQL TEXT 容量不足错误。"""
+    return bool(getattr(exc, "orig", None) and getattr(exc.orig, "args", ()) and exc.orig.args[0] == 1406)
 
 
 class AsrWorker:
@@ -236,14 +243,20 @@ class AsrWorker:
 
             except Exception as exc:
                 logger.error("任务 %s 失败: %s", task_id, exc)
-                task = db.get(AsrTask, task_id)
-                if task:
-                    task.status = "failed"
-                    task.error_message = str(exc)[:500]
-                    task.completed_at = datetime.utcnow()
-                    touch_task(task, self._worker_id)
-                    db.commit()
-                    publish_task_event("asr", task, "failed", {"error": task.error_message})
+                # flush/commit 失败后 Session 会进入回滚状态，必须先恢复再记录任务结果。
+                db.rollback()
+                try:
+                    task = db.get(AsrTask, task_id)
+                    if task:
+                        task.status = "failed"
+                        task.error_message = str(exc)[:500]
+                        task.completed_at = datetime.utcnow()
+                        touch_task(task, self._worker_id)
+                        db.commit()
+                        publish_task_event("asr", task, "failed", {"error": task.error_message})
+                except Exception as persist_exc:
+                    db.rollback()
+                    logger.exception("任务 %s 失败状态保存异常: %s", task_id, persist_exc)
             finally:
                 db.close()
 
@@ -356,6 +369,12 @@ class AsrWorker:
                 {"chunk_index": chunk.chunk_index, "segment_count": segment_count},
             )
         except Exception as exc:
+            # 分片写入若触发数据库异常，先恢复事务再保存可重试状态。
+            db.rollback()
+            chunk = db.get(AsrAudioChunk, chunk.id)
+            task = db.get(AsrTask, task.id)
+            if not chunk or not task:
+                raise
             chunk.status = "failed"
             chunk.error_message = str(exc)[:500]
             chunk.completed_at = datetime.utcnow()
@@ -380,8 +399,8 @@ class AsrWorker:
             await pipe.close()
             await client.close()
 
-    def _save_full_text(self, db, task: AsrTask, chunks: list[AsrAudioChunk]) -> None:
-        """只使用当前任务分片生成完整话术，避免跨任务重复拼接。"""
+    def _save_full_text(self, db, task: AsrTask, chunks: list[AsrAudioChunk]) -> bool:
+        """保存全文缓存；迁移前字段过短时保留真实分段并允许任务完成。"""
         chunk_ids = [chunk.id for chunk in chunks]
         segments = (
             db.query(TranscriptSegment)
@@ -401,7 +420,20 @@ class AsrWorker:
             existing.full_text = full_text
         else:
             db.add(TranscriptFullText(session_id=task.session_id, full_text=full_text))
-        db.commit()
+        try:
+            # 与任务 completed 状态在同一事务提交，避免全文成功但任务状态未更新。
+            db.flush()
+            return True
+        except DataError as exc:
+            db.rollback()
+            if not is_full_text_too_long_error(exc):
+                raise
+            logger.warning(
+                "任务 %s 全文超过旧 TEXT 容量，保留 %s 个真实分段并等待 LONGTEXT 迁移",
+                task.id,
+                len(segments),
+            )
+            return False
 
     async def _consume_transcription(self, db, task, chunk, client, pipe) -> int:
         """消费一个分片的 ASR 结果，并换算为整场绝对时间。"""

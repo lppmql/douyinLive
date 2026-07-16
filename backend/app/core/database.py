@@ -4,7 +4,7 @@ from .config import settings
 
 engine = create_engine(
     settings.db_url,
-    echo=settings.DEBUG,
+    echo=settings.DATABASE_ECHO,
     pool_pre_ping=True,
     pool_recycle=1800,
 )

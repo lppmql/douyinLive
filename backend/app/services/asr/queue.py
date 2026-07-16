@@ -12,6 +12,25 @@ from app.models.stream_sources import StreamSource
 from app.services.tasks.runtime import ensure_task_identity
 
 
+def reset_failed_task_for_retry(task: AsrTask, failed_chunks: list[AsrAudioChunk], stream_id: int) -> None:
+    """手动重试失败任务，保留完成分片，只重置失败部分。"""
+    for chunk in failed_chunks:
+        chunk.status = "pending"
+        chunk.retry_count = 0
+        chunk.error_message = None
+        chunk.completed_at = None
+        chunk.worker_id = None
+    task.stream_id = stream_id
+    task.status = "queued"
+    task.retry_count = 0
+    task.error_message = None
+    task.started_at = None
+    task.completed_at = None
+    task.worker_id = None
+    task.heartbeat_at = None
+    ensure_task_identity(task, "asr", f"asr:session:{task.session_id}")
+
+
 def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrTask, bool]:
     """幂等创建单场转写任务，并优先复用最近的有效流源。"""
     stream = (
@@ -40,21 +59,12 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
         .first()
     )
     if existing:
-        if existing.status == "failed" and (existing.retry_count or 0) < (existing.max_retries or 3):
+        if existing.status == "failed":
             failed_chunks = db.query(AsrAudioChunk).filter(
                 AsrAudioChunk.task_id == existing.id,
                 AsrAudioChunk.status == "failed",
             ).all()
-            for chunk in failed_chunks:
-                chunk.status = "pending"
-                chunk.retry_count = 0
-                chunk.error_message = None
-                chunk.completed_at = None
-            existing.stream_id = stream.id
-            existing.status = "queued"
-            existing.error_message = None
-            existing.completed_at = None
-            ensure_task_identity(existing, "asr", f"asr:session:{session.id}")
+            reset_failed_task_for_retry(existing, failed_chunks, stream.id)
             db.flush()
             return existing, True
         return existing, False

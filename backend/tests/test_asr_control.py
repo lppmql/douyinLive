@@ -2,7 +2,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from app.api.v1.ws import get_full_text, serialize_transcription_task
+from app.api.v1.ws import build_full_transcript_text, get_full_text, serialize_transcription_task
 from app.services.asr.control import _worker_pids
 
 
@@ -65,8 +65,28 @@ def test_missing_full_transcript_is_a_normal_empty_state():
         def first(self):
             return None
 
+        def order_by(self, *_args):
+            return self
+
+        def limit(self, _limit):
+            return self
+
+        def all(self):
+            return []
+
     db = SimpleNamespace(query=lambda _model: EmptyQuery())
 
     result = get_full_text(13246, db=db)
 
     assert result == {"id": None, "full_text": "", "available": False}
+
+
+def test_full_transcript_falls_back_to_real_segments():
+    segments = [
+        SimpleNamespace(segment_start=12.3, text_content="开零食店先核算预算"),
+        SimpleNamespace(segment_start=18.8, text_content="资料可以通过站内私信领取"),
+    ]
+
+    text = build_full_transcript_text(segments)
+
+    assert text == "[12.3s] 开零食店先核算预算\n[18.8s] 资料可以通过站内私信领取"

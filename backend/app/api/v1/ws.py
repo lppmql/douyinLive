@@ -16,6 +16,15 @@ from app.services.asr.websocket_manager import ws_manager
 rest_router = APIRouter(prefix="/transcripts", tags=["话术转写"])
 
 
+def build_full_transcript_text(segments: list[TranscriptSegment]) -> str:
+    """从真实分段动态拼接全文，作为全文缓存尚未生成时的可靠兜底。"""
+    return "\n".join(
+        f"[{float(segment.segment_start or 0):.1f}s] {segment.text_content}"
+        for segment in segments
+        if segment.text_content
+    )
+
+
 def serialize_transcription_task(task: AsrTask, session: LiveSession, segment_count: int) -> dict:
     """统一任务明细结构，页面只展示数据库中的真实任务与场次信息。"""
     return {
@@ -195,8 +204,16 @@ def get_full_text(session_id: int, db: Session = Depends(get_db)):
         .first()
     )
     if not record:
-        # 未开始、失败或仍在分片转写的场次没有全文是正常状态，不应让前端误报 404。
-        return {"id": None, "full_text": "", "available": False}
+        segments = (
+            db.query(TranscriptSegment)
+            .filter(TranscriptSegment.session_id == session_id)
+            .order_by(TranscriptSegment.segment_start.asc(), TranscriptSegment.id.asc())
+            .limit(5000)
+            .all()
+        )
+        full_text = build_full_transcript_text(segments)
+        # 未开始或失败场次没有缓存全文是正常状态；已有分段时仍返回完整可读内容。
+        return {"id": None, "full_text": full_text, "available": bool(full_text)}
     return {"id": record.id, "full_text": record.full_text or "", "available": bool(record.full_text)}
 
 

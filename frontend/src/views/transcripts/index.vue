@@ -401,7 +401,7 @@ onUnmounted(() => {
             复制全文
           </NButton>
           <NButton type="primary" secondary :disabled="!selectedSessionId" :loading="queueLoading" @click="startTranscription">
-            {{ selectedTask?.status === 'completed' ? '重新转写' : '开始转写' }}
+            {{ selectedTask ? '重新转写' : '开始转写' }}
           </NButton>
           <NButton type="primary" :disabled="!segments.length" :loading="aiLoading" @click="runAiPipeline">AI 分析并入库</NButton>
           <NDropdown

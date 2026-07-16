@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     DB_PASSWORD: str = "root123"
     DB_NAME: str = "douyin_live"
     DATABASE_URL: str = ""
+    DATABASE_ECHO: bool = False
     DATAEASE_READER_USER: str = "dataease_reader"
     DATAEASE_READER_PASSWORD: str = "dataease_reader_change_me"
 
