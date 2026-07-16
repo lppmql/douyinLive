@@ -32,7 +32,7 @@ from app.models.live_sessions import LiveSession
 from app.models.scraper_logs import ScraperLog
 from app.services.asr.m3u8_pipe import M3u8Pipe
 from app.services.asr.funasr_client import FunasrClient
-from app.services.asr.queue import queue_auto_transcriptions
+from app.services.asr.queue import list_queued_task_ids_latest_first, queue_auto_transcriptions
 from app.services.asr.websocket_manager import ws_manager
 from app.services.ai.post_collection import process_session_post_collection
 from app.services.tasks.runtime import (
@@ -155,15 +155,10 @@ class AsrWorker:
 
         db = SessionLocal()
         try:
-            queued_ids = [row[0] for row in (
-                db.query(AsrTask)
-                .join(LiveSession, LiveSession.id == AsrTask.session_id)
-                .filter(AsrTask.status == "queued")
-                .with_entities(AsrTask.id)
-                .order_by(AsrTask.priority.asc(), LiveSession.live_duration_seconds.asc(), AsrTask.created_at.asc())
-                .limit(min(settings.ASR_MAX_QUEUED, available_slots))
-                .all()
-            )]
+            queued_ids = list_queued_task_ids_latest_first(
+                db,
+                min(settings.ASR_MAX_QUEUED, available_slots),
+            )
 
             for task_id in queued_ids:
                 now = datetime.utcnow()

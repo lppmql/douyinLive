@@ -75,7 +75,7 @@ def queue_transcription_by_anchor(
     min_duration_seconds: int = Query(600, ge=60, le=7200),
     db: Session = Depends(get_db),
 ):
-    """每位主播增量选择较短的真实回放排队，默认每位一场。"""
+    """每位主播从最新真实回放开始增量排队，默认每位一场。"""
     anchors = [
         row[0]
         for row in db.query(LiveSession.anchor_name)
@@ -95,7 +95,7 @@ def queue_transcription_by_anchor(
                 LiveSession.live_duration_seconds >= min_duration_seconds,
                 StreamSource.status == "active",
             )
-            .order_by(LiveSession.live_duration_seconds.asc(), LiveSession.live_start_time.desc())
+            .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
             .all()
         )
         selected = 0
@@ -169,7 +169,15 @@ def list_transcription_tasks(
     )
     if status:
         query = query.filter(AsrTask.status == status)
-    rows = query.order_by(AsrTask.id.desc()).limit(limit).all()
+    rows = (
+        query.order_by(
+            LiveSession.live_start_time.desc(),
+            LiveSession.id.desc(),
+            AsrTask.id.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
     return [serialize_transcription_task(task, session, segment_count) for task, session, segment_count in rows]
 
 

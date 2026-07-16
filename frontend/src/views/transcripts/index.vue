@@ -416,7 +416,10 @@ onUnmounted(() => {
     <NCard :bordered="false" class="card-wrapper">
       <div class="flex flex-wrap items-start justify-between gap-14px">
         <div class="min-w-280px flex-1">
-          <div class="mb-7px text-12px font-600 text-gray-500">当前复盘场次</div>
+          <div class="mb-7px flex items-center gap-7px text-12px font-600 text-gray-500">
+            <span>当前复盘场次</span>
+            <NTag size="tiny" type="info" :bordered="false" round>默认最新</NTag>
+          </div>
           <NSelect
             v-model:value="selectedSessionId"
             size="large"

@@ -82,6 +82,27 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
     return task, True
 
 
+def list_queued_task_ids_latest_first(db: Session, limit: int) -> list[int]:
+    """保留显式优先级，同优先级默认从最新真实场次开始转写。"""
+    return [
+        row[0]
+        for row in (
+            db.query(AsrTask)
+            .join(LiveSession, LiveSession.id == AsrTask.session_id)
+            .filter(AsrTask.status == "queued")
+            .with_entities(AsrTask.id)
+            .order_by(
+                AsrTask.priority.asc(),
+                LiveSession.live_start_time.desc(),
+                LiveSession.id.desc(),
+                AsrTask.created_at.asc(),
+            )
+            .limit(limit)
+            .all()
+        )
+    ]
+
+
 def queue_auto_transcriptions(
     db: Session,
     limit: int | None = None,
@@ -114,7 +135,7 @@ def queue_auto_transcriptions(
         query = query.filter(LiveSession.id.in_(session_ids))
     sessions = (
         query
-        .order_by(LiveSession.live_duration_seconds.asc(), LiveSession.live_start_time.desc())
+        .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
         .limit(available)
         .all()
     )
