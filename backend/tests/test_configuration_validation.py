@@ -1,4 +1,9 @@
+from pathlib import Path
+
 from app.core.config import Settings
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_settings(**overrides) -> Settings:
@@ -53,3 +58,12 @@ def test_redis_url_is_redacted_for_logs():
 
     assert settings.redacted_redis_url == "redis://127.0.0.1:6379/2"
     assert "do-not-log" not in settings.redacted_redis_url
+
+
+def test_alembic_uses_runtime_database_configuration_without_stored_password():
+    env_source = (BACKEND_ROOT / "alembic" / "env.py").read_text(encoding="utf-8")
+    ini_source = (BACKEND_ROOT / "alembic.ini").read_text(encoding="utf-8")
+
+    assert 'config.set_main_option("sqlalchemy.url", settings.db_url.replace("%", "%%"))' in env_source
+    assert "root123" not in ini_source
+    assert "mysql+pymysql://localhost/douyin_live" in ini_source

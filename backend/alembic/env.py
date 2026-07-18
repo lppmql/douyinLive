@@ -8,10 +8,15 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
+from app.core.config import settings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
+
+# 迁移与应用共用同一套集中配置，避免 alembic.ini 保存环境密码或与运行环境不一致。
+# ConfigParser 会把百分号当作插值符号，因此写入前需要转义。
+config.set_main_option("sqlalchemy.url", settings.db_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
