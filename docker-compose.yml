@@ -9,9 +9,9 @@ services:
     container_name: douyin_live_mysql
     restart: unless-stopped
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
       MYSQL_DATABASE: douyin_live
       MYSQL_CHARACTER_SET_SERVER: utf8mb4
       MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
@@ -28,7 +28,7 @@ services:
     container_name: douyin_live_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - ./data/redis:/data
     command: redis-server --appendonly yes
@@ -37,12 +37,11 @@ services:
     image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.13
     container_name: douyin_live_funasr
     restart: unless-stopped
-    privileged: true
     # 8GB Mac 上限制识别容器资源，避免话术生成期间占满整机。
     cpus: 2.0
     mem_limit: 1800m
     ports:
-      - "10096:10095"
+      - "127.0.0.1:10096:10095"
     volumes:
       - ./data/funasr/models:/workspace/models
     working_dir: /workspace/FunASR/runtime
@@ -59,7 +58,7 @@ services:
     cpus: 1.0
     mem_limit: 1200m
     ports:
-      - "8100:8100"
+      - "127.0.0.1:8100:8100"
     volumes:
       - ./dataease/conf/application.yml:/opt/apps/config/application.yml
       - ./data/dataease/data:/opt/dataease2.0/data
@@ -77,7 +76,7 @@ services:
     cpus: 0.5
     mem_limit: 512m
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -93,10 +92,10 @@ services:
     cpus: 0.5
     mem_limit: 512m
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-this-before-enabling-observability}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana

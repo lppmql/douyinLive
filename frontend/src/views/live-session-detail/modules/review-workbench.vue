@@ -13,9 +13,9 @@ import {
 import MetricsChart from './metrics-chart.vue';
 import ReviewVideoPlayer from './review-video-player.vue';
 import ReviewTimeline from './review-timeline.vue';
-import ReviewFindings from './review-findings.vue';
 import SessionComparison from './session-comparison.vue';
 import ScriptAssetsPanel from './script-assets-panel.vue';
+import AiPanel from './ai-panel.vue';
 
 defineOptions({ name: 'LiveReviewWorkbench' });
 const props = defineProps<{ sessionId: number; detail: Api.Douyin.LiveSessionDetail }>();
@@ -214,43 +214,43 @@ onBeforeUnmount(() => {
         当前数据仍可回看，但不足以形成稳定AI结论。请优先补齐分钟指标、评论或ASR话术。
       </NAlert>
 
-      <NGrid :x-gap="16" :y-gap="16" cols="1 xl:5" responsive="screen">
-        <NGi span="1 xl:3">
-          <div class="space-y-14px">
-            <div class="grid grid-cols-1 items-start gap-14px md:grid-cols-[280px_minmax(0,1fr)]">
-              <ReviewVideoPlayer
-                :session-id="sessionId"
-                :stream-url="detail.stream_url"
-                :title="detail.session.session_title || '直播场次回放'"
+      <div class="grid grid-cols-1 items-start gap-16px md:grid-cols-[280px_minmax(0,1fr)]">
+        <ReviewVideoPlayer
+          :session-id="sessionId"
+          :stream-url="detail.stream_url"
+          :title="detail.session.session_title || '直播场次回放'"
+        />
+        <NCard title="统一复盘分析" :bordered="false" class="card-wrapper min-w-0">
+          <template #header-extra>
+            <NButton size="small" type="primary" :loading="generating" @click="generateReview">
+              重新生成 AI 复盘
+            </NButton>
+          </template>
+          <NTabs type="line" animated default-value="timeline">
+            <NTabPane name="timeline" tab="统一时间轴" display-directive="if">
+              <NAlert v-if="workbench.live_alerts.length" type="warning" :bordered="false" class="mb-12px">
+                当前有 {{ workbench.live_alerts.length }} 条实时告警，已按发生时间合并到时间轴中。
+              </NAlert>
+              <ReviewTimeline
+                :session-start="detail.session.live_start_time"
+                :metrics="detail.metrics"
+                :comments="detail.comments"
+                :segments="workbench.transcript_segments"
+                :findings="workbench.findings"
+                :alerts="workbench.live_alerts"
+                @create-asset="openAssetModal"
+                @update-finding="updateFinding"
               />
-              <NCard title="统一复盘时间轴" :bordered="false" class="card-wrapper min-w-0">
-                <ReviewTimeline
-                  :session-start="detail.session.live_start_time"
-                  :metrics="detail.metrics"
-                  :comments="detail.comments"
-                  :segments="workbench.transcript_segments"
-                  :findings="workbench.findings"
-                  @create-asset="openAssetModal"
-                />
-              </NCard>
-            </div>
-            <NCard title="分钟指标曲线" :bordered="false" class="card-wrapper">
+            </NTabPane>
+            <NTabPane name="metrics" :tab="`分钟曲线 (${detail.metrics.length})`" display-directive="if">
               <MetricsChart :metrics="detail.metrics" />
-            </NCard>
-          </div>
-        </NGi>
-        <NGi span="1 xl:2">
-          <NCard :bordered="false" class="card-wrapper h-full">
-            <ReviewFindings
-              :findings="workbench.findings"
-              :alerts="workbench.live_alerts"
-              :generating="generating"
-              @generate="generateReview"
-              @update-status="updateFinding"
-            />
-          </NCard>
-        </NGi>
-      </NGrid>
+            </NTabPane>
+            <NTabPane name="ai" tab="AI 分析" display-directive="if">
+              <AiPanel :session-id="sessionId" :detail="detail" />
+            </NTabPane>
+          </NTabs>
+        </NCard>
+      </div>
 
       <NCard :bordered="false" class="card-wrapper">
         <NTabs type="line" animated>

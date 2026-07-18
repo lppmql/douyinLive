@@ -33,7 +33,7 @@ def test_video_download_waits_until_live_has_ended():
     assert error.value.status_code == 409
 
 
-def test_browser_playback_transcodes_h265_with_low_resource_limits():
+def test_browser_playback_transcodes_h265_without_realtime_throttling():
     command = build_browser_playback_command(
         "https://example.test/replay.m3u8",
         {"Referer": "https://example.test", "Cookie": "secret"},
@@ -43,7 +43,9 @@ def test_browser_playback_transcodes_h265_with_low_resource_limits():
 
     assert command[command.index("-c:v") + 1] == "h264_videotoolbox"
     assert command[command.index("-ss") + 1] == "125.500"
-    assert "-re" in command
+    assert "-re" not in command
+    assert command[command.index("-maxrate") + 1] == "3500k"
+    assert command[command.index("-bufsize") + 1] == "5000k"
     assert "frag_keyframe+empty_moov+default_base_moof" in command
     assert any("Referer: https://example.test" in value for value in command)
     assert "secret" not in command

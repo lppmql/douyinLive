@@ -1,5 +1,5 @@
-import os
 from pathlib import Path
+from urllib.parse import urlparse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 项目根目录（config.py → app/core/ → backend/ → 项目根目录）
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # 应用
     APP_NAME: str = "零食店避坑直播运营复盘系统"
     APP_VERSION: str = "0.1.0"
-    DEBUG: bool = True
+    DEBUG: bool = False
     ALLOW_SYNTHETIC_DATA: bool = False
     LOG_FORMAT: str = "json"
     OBSERVABILITY_ENABLED: bool = True
@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     DB_HOST: str = "localhost"
     DB_PORT: int = 3306
     DB_USER: str = "root"
-    DB_PASSWORD: str = "root123"
+    DB_PASSWORD: str = ""
     DB_NAME: str = "douyin_live"
     DATABASE_URL: str = ""
     DATABASE_ECHO: bool = False
@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     PROFILE_COLLECT_INTERVAL: int = 120
 
     # Phase 8: JWT 认证
-    JWT_SECRET_KEY: str = "douyin-live-jwt-secret-change-in-prod"
+    JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 小时
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -100,5 +100,43 @@ class Settings(BaseSettings):
     @property
     def asr_mock_enabled(self) -> bool:
         return self.synthetic_data_enabled and self.ASR_ALLOW_MOCK
+
+    @property
+    def redacted_redis_url(self) -> str:
+        """日志只显示 Redis 地址，不暴露账号和密码。"""
+        parsed = urlparse(self.REDIS_URL)
+        host = parsed.hostname or "unknown"
+        port = f":{parsed.port}" if parsed.port else ""
+        database = parsed.path or ""
+        return f"{parsed.scheme or 'redis'}://{host}{port}{database}"
+
+    def runtime_configuration_issues(self) -> tuple[list[str], list[str]]:
+        """返回阻断启动的错误和不阻断本地开发的安全提醒。"""
+        errors: list[str] = []
+        warnings: list[str] = []
+        if not self.DB_PASSWORD:
+            errors.append("DATABASE_PASSWORD_MISSING")
+        elif not self.DEBUG and len(self.DB_PASSWORD) < 16:
+            errors.append("DATABASE_PASSWORD_INSECURE")
+        if self.ASR_CHUNK_SECONDS < 30:
+            errors.append("ASR_CHUNK_SECONDS_TOO_SMALL")
+        if self.ASR_MAX_QUEUED < 1:
+            errors.append("ASR_QUEUE_LIMIT_INVALID")
+        if self.MONITOR_CHECK_INTERVAL < 10:
+            errors.append("MONITOR_INTERVAL_TOO_SMALL")
+        if not self.DEBUG and (
+            len(self.JWT_SECRET_KEY) < 32
+            or self.JWT_SECRET_KEY in {"replace-with-a-long-random-secret", "douyin-live-jwt-secret-change-in-prod"}
+        ):
+            errors.append("JWT_SECRET_INSECURE")
+
+        if self.DB_USER.lower() == "root":
+            warnings.append("DATABASE_ROOT_USER")
+        parsed_redis = urlparse(self.REDIS_URL)
+        if not parsed_redis.password:
+            warnings.append("REDIS_AUTH_DISABLED")
+        if self.DATAEASE_READER_PASSWORD in {"", "dataease_reader_change_me", "请修改为仅供DataEase使用的强密码"}:
+            warnings.append("DATAEASE_READER_PASSWORD_INSECURE")
+        return errors, warnings
 
 settings = Settings()

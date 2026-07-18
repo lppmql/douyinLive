@@ -51,9 +51,15 @@ def recover_interrupted_collector_tasks() -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期"""
+    configuration_errors, configuration_warnings = settings.runtime_configuration_issues()
+    for warning in configuration_warnings:
+        logger.warning("配置安全提醒 code=%s，请运行 make doctor 查看处理建议", warning)
+    if configuration_errors:
+        raise RuntimeError(f"启动配置校验失败: {', '.join(configuration_errors)}")
+
     logger.info(f"🚀 {settings.APP_NAME} v{settings.APP_VERSION} 启动中...")
     logger.info(f"📦 数据库: {settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}")
-    logger.info(f"🔴 Redis: {settings.REDIS_URL}")
+    logger.info(f"🔴 Redis: {settings.redacted_redis_url}")
 
     try:
         with engine.connect() as conn:
@@ -144,6 +150,7 @@ def root():
 
 @app.get("/health")
 def health():
+    configuration_errors, configuration_warnings = settings.runtime_configuration_issues()
     database_ok = False
     redis_ok = False
     try:
@@ -170,6 +177,8 @@ def health():
         "database": "ok" if database_ok else "error",
         "redis": "ok" if redis_ok else "error",
         "monitor": "running" if scheduler_manager.running else "stopped",
+        "configuration": "error" if configuration_errors else "warning" if configuration_warnings else "ok",
+        "configuration_issues": configuration_errors + configuration_warnings,
     }
 
 

@@ -18,10 +18,11 @@
 - **低资源保护**：ASR 同时只转写 1 场，自动回收心跳超时任务并从已完成分片续跑；默认关闭逐条 SQL 回显和 WebSocket 音频帧日志，避免长场次日志占满磁盘；实时监控的浏览器页面任务同样串行，避免多主播同时采集时关闭共享上下文。
 - **无头浏览器稳定性**：Playwright Chromium 使用新版无头模式，关闭硬件 GPU 与 WebGL 但保留软件光栅器作为 macOS 渲染后备；登录上下文保留一个无网络空白页，避免零页面时浏览器退出，异常后仍会从保存的 Cookie、StorageState 和指纹自动恢复。
 - **视频下载**：场次详情显示 m3u8 地址，可选择本地位置并以原码流低开销封装为 MP4。
-- **兼容回放**：抖音回放为 H.265 时，场次详情使用靠左的小尺寸 9:16 竖屏播放器按需转换为浏览器兼容的 H.264；统一复盘时间轴在播放器右侧，分钟指标曲线保持在下方；macOS 优先使用硬件编码，单路限速运行且离开页面立即释放。
+- **兼容回放**：抖音回放为 H.265 时，场次详情使用靠左的小尺寸 9:16 竖屏播放器按需转换为浏览器兼容的 H.264；统一复盘分析在播放器右侧，时间轴、分钟曲线和 AI 分析在同一区域切换；macOS 优先使用硬件编码，单路限速运行且离开页面立即释放。
 - **AI 复盘工作台**：默认打开最新真实直播场次，场次选择器展示真实主播头像并支持搜索，统一展示数据可信度、五维话术评分、优势不足、证据发现、下一场动作和历史报告；完整复盘按证据提取、AI 评分、优化建议分阶段执行。
 - **证据化复盘工作台**：回放、分钟趋势、评论、话术和复盘发现使用同一条时间轴，点击证据可跳转到对应回放位置。
-- **场次详情精简**：详情页只保留一份分钟曲线，复盘发现直接维护确认状态；场次信息与回放下载合并展示，评论、画像和 AI 按需切换，跨场选择只读取最近 100 条轻量场次。
+- **场次详情精简**：视频回放和统一复盘分析前置；实时告警、复盘发现、评论、话术和指标按真实时间汇聚，分钟曲线与 AI 分析集成在同一工作区；场次信息与回放下载合并展示，跨场选择只读取最近 100 条轻量场次。
+- **可维护性自检**：GitHub Actions 持续验证后端迁移与测试、前端类型、ESLint、Oxlint 和构建；`make doctor` 检查依赖、容器、Playwright、健康接口、磁盘和弱配置。
 - **P1 复盘能力**：同主播跨场对比、实时异常提示、下一场验证、真实话术资产和版本化合规筛查。
 - **零食店领域分析**：识别城市选址、预算面积、租金转让费、品牌加盟、货源供应链、毛利损耗、证照和资料领取问题；禁止把业务误判为零食带货。
 - **知识库自由问答**：话术、评论和分钟指标按 5 分钟形成可追溯时间片；聊天主工作区支持连续追问、分类检索和真实来源展开，追问会继承上一轮引用场次，引用可直接穿透到原直播场次。
@@ -291,9 +292,20 @@ POST /api/v1/knowledge-base/time-slices/sync/{session_id}
 docker compose --profile observability up -d prometheus grafana
 ```
 
-资源限制为 Prometheus 0.5 核/512MB、Grafana 0.5 核/512MB。Grafana 默认地址为 <http://localhost:3000>，本地初始账号为 `admin / admin123`，首次使用后请立即修改密码。配置参考 [Prometheus Python Client 官方文档](https://prometheus.github.io/client_python/exporting/http/asgi/)、[Grafana Docker 官方文档](https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/) 和 [DataEase 数据源文档](https://dataease.io/docs/v2/user_manual/datasource_description/)。
+资源限制为 Prometheus 0.5 核/512MB、Grafana 0.5 核/512MB。Grafana 默认地址为 <http://localhost:3000>，账号为 `admin`，密码必须通过 `.env` 的 `GRAFANA_ADMIN_PASSWORD` 单独设置。配置参考 [Prometheus Python Client 官方文档](https://prometheus.github.io/client_python/exporting/http/asgi/)、[Grafana Docker 官方文档](https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/) 和 [DataEase 数据源文档](https://dataease.io/docs/v2/user_manual/datasource_description/)。
 
 ## 常用检查
+
+推荐先使用统一入口：
+
+```bash
+make doctor
+make test
+make lint
+make build
+```
+
+详细验收步骤见[核心链路验收](docs/acceptance/README.md)，本轮真实结果见[2026-07-18 项目自检报告](docs/acceptance/2026-07-18-self-check.md)，维护边界和后续改造顺序见[模块化维护路线](docs/architecture/maintenance-roadmap.md)。
 
 后端测试：
 
@@ -327,8 +339,11 @@ douyinLive/
 ├── backend/          FastAPI、采集、ASR、AI 与测试
 ├── frontend/         SoybeanAdmin 前端
 ├── data/             本地数据库、模型、日志（不提交 Git）
-├── docs/             开发记录
+├── docs/             架构、验收、教程与开发记录
+├── scripts/          环境诊断等统一维护脚本
+├── .github/          CI 与依赖更新配置
 ├── observability/    Prometheus 与 Grafana 配置
+├── Makefile          doctor、测试、检查和迁移统一入口
 ├── docker-compose.yml
 └── start.sh          本地一键启动脚本
 ```
@@ -341,6 +356,8 @@ douyinLive/
 - 删除采集账号会清除本地登录环境，需要重新扫码，请确认后操作。
 - 正式部署前必须替换 `JWT_SECRET_KEY` 和数据库默认密码。
 - 首次启动前请修改 `DATAEASE_READER_PASSWORD`，DataEase 数据源不要使用 root 账号。
+- MySQL、Redis、FunASR、DataEase、Prometheus 和 Grafana 端口默认只绑定 `127.0.0.1`；正式部署需要远程访问时应使用受控网络和反向代理，不要直接暴露数据库端口。
+- `DEBUG=false` 时，数据库密码缺失或 JWT 密钥不足 32 位会阻断启动；健康接口只返回问题代码，不返回任何密钥内容。
 
 ## 常见问题
 

@@ -5,7 +5,6 @@ import { useRouter } from 'vue-router';
 import { fetchLiveSessionData, getLiveSessionVideoDownloadUrl } from '@/service/api/douyin';
 import BusinessPageHeader from '@/components/business/page-header.vue';
 import CommentGroups from './modules/comment-groups.vue';
-import AiPanel from './modules/ai-panel.vue';
 import ReviewWorkbench from './modules/review-workbench.vue';
 
 defineOptions({ name: 'LiveSessionDetail' });
@@ -128,6 +127,8 @@ onMounted(load);
         </div>
       </BusinessPageHeader>
 
+      <ReviewWorkbench v-if="detail" :session-id="Number(id)" :detail="detail" @refresh-detail="load" />
+
       <NGrid :x-gap="16" :y-gap="16" cols="1 s:2 m:3 l:6" responsive="screen">
         <NGi v-for="item in kpis" :key="String(item[0])">
           <NCard :bordered="false" class="card-wrapper">
@@ -143,8 +144,6 @@ onMounted(load);
           </NCard>
         </NGi>
       </NGrid>
-
-      <ReviewWorkbench v-if="detail" :session-id="Number(id)" :detail="detail" @refresh-detail="load" />
 
       <NGrid :x-gap="16" :y-gap="16" cols="1 l:3" responsive="screen">
         <NGi span="1 l:2">
@@ -198,7 +197,7 @@ onMounted(load);
         </NGi>
       </NGrid>
 
-      <NCard :bordered="false" class="card-wrapper" title="评论、画像与 AI 分析">
+      <NCard :bordered="false" class="card-wrapper" title="评论与观众画像">
         <NTabs type="line" animated default-value="comments">
           <NTabPane name="comments" :tab="`直播评论 (${detail?.comments.length || 0})`" display-directive="if">
             <CommentGroups :comments="detail?.comments || []" />
@@ -210,9 +209,6 @@ onMounted(load);
               :pagination="{ pageSize: 20 }"
               size="small"
             />
-          </NTabPane>
-          <NTabPane name="ai" tab="AI 分析" display-directive="if">
-            <AiPanel :session-id="Number(id)" :detail="detail" />
           </NTabPane>
         </NTabs>
       </NCard>
