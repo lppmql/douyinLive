@@ -67,3 +67,15 @@ def test_alembic_uses_runtime_database_configuration_without_stored_password():
     assert 'config.set_main_option("sqlalchemy.url", settings.db_url.replace("%", "%%"))' in env_source
     assert "root123" not in ini_source
     assert "mysql+pymysql://localhost/douyin_live" in ini_source
+
+
+def test_one_click_start_waits_for_backend_and_dataease_health():
+    start_source = (BACKEND_ROOT.parent / "start.sh").read_text(encoding="utf-8")
+
+    assert "docker compose --profile dataease up -d mysql redis dataease" in start_source
+    assert "if ! wait_for_backend; then" in start_source
+    assert "if ! wait_for_dataease; then" in start_source
+    assert start_source.index("if ! wait_for_backend; then") < start_source.index('echo "  ✅ 后端: http://localhost:8000"')
+    assert start_source.index("if ! wait_for_dataease; then") < start_source.index(
+        'echo "  ✅ DataEase: http://localhost:8100"'
+    )

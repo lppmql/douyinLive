@@ -90,7 +90,7 @@ export function fetchCollectorAccounts() {
 }
 
 /** 获取采集日志 */
-export function fetchCollectorLogs(params?: { taskId?: number; level?: string; limit?: number }) {
+export function fetchCollectorLogs(params?: { task_id?: number; level?: string; limit?: number }) {
   return backendRequest<Api.Douyin.CollectorLog[]>({ url: `${API_PREFIX}/collector/logs`, params });
 }
 
@@ -103,7 +103,7 @@ export function clearCollectorLogs() {
 }
 
 /** 获取采集任务列表 */
-export function fetchCollectorTasks(params?: { status?: string; taskType?: string }) {
+export function fetchCollectorTasks(params?: { status?: string; task_type?: string }) {
   return backendRequest<Api.Douyin.CollectorTask[]>({ url: `${API_PREFIX}/collector/tasks`, params });
 }
 
@@ -236,16 +236,6 @@ export function fetchAnalysisReports(params?: { sessionId?: number; reportType?:
       limit: params?.limit || 200
     }
   });
-}
-
-/** 获取 AI 评分 */
-export function fetchAnalysisScore(sessionId: number) {
-  return backendRequest<Api.Douyin.AnalysisScore>({ url: `${API_PREFIX}/analysis/${sessionId}/score` });
-}
-
-/** 获取异常告警 */
-export function fetchAnalysisAlerts(sessionId: number) {
-  return backendRequest<Api.Douyin.AlertItem[]>({ url: `${API_PREFIX}/analysis/${sessionId}/alerts` });
 }
 
 export function runTranscriptAiPipeline(sessionId: number) {

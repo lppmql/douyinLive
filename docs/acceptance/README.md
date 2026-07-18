@@ -10,6 +10,7 @@
 - [知识库验收](knowledge-acceptance.md)
 - [主播排班验收](schedule-acceptance.md)
 - [可观测性验收](observability-acceptance.md)
+- [2026-07-18 前后端协调验收](2026-07-18-frontend-backend-coordination.md)
 
 ## 统一记录要求
 

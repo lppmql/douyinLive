@@ -8,6 +8,7 @@ WebSocket 连接管理器 + Redis Pub/Sub 桥接
 """
 import asyncio
 import json
+from contextlib import suppress
 from typing import Optional
 
 import redis.asyncio as aioredis
@@ -31,13 +32,13 @@ class WebSocketManager:
         self._connections: dict[int, set[WebSocket]] = {}
         self._redis: Optional[aioredis.Redis] = None
         self._pubsub_task: Optional[asyncio.Task] = None
+        self._listener_lock = asyncio.Lock()
 
     async def connect(self, session_id: int, ws: WebSocket):
         """注册前端 WebSocket 连接"""
         if session_id not in self._connections:
             self._connections[session_id] = set()
-            # 首次有连接时启动该 session 的 Redis 订阅
-            await self._start_listener(session_id)
+        await self._ensure_listener()
         self._connections[session_id].add(ws)
         logger.info(f"WebSocket 已连接: session={session_id} 当前连接数={len(self._connections[session_id])}")
 
@@ -77,8 +78,17 @@ class WebSocketManager:
         except Exception as e:
             logger.warning(f"Redis Pub 失败: {e}")
 
-    async def _start_listener(self, session_id: int):
-        """启动 Redis Pub/Sub 监听"""
+    async def _ensure_listener(self):
+        """确保进程内只有一个 Redis 订阅，避免多场连接导致重复广播。"""
+        if self._pubsub_task and not self._pubsub_task.done():
+            return
+        async with self._listener_lock:
+            if self._pubsub_task and not self._pubsub_task.done():
+                return
+            await self._start_listener()
+
+    async def _start_listener(self):
+        """启动全局 Redis Pub/Sub 监听。"""
         if not self._redis:
             try:
                 self._redis = aioredis.from_url(settings.REDIS_URL)
@@ -106,8 +116,7 @@ class WebSocketManager:
                 await pubsub.unsubscribe(REDIS_CHANNEL_ASR)
                 await pubsub.close()
 
-        # 每个 session 一个监听任务
-        asyncio.create_task(_listen())
+        self._pubsub_task = asyncio.create_task(_listen())
 
     async def close(self):
         """关闭所有连接"""
@@ -118,8 +127,14 @@ class WebSocketManager:
                 except Exception:
                     pass
         self._connections.clear()
+        if self._pubsub_task:
+            self._pubsub_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._pubsub_task
+            self._pubsub_task = None
         if self._redis:
             await self._redis.close()
+            self._redis = None
 
 
 # 全局单例

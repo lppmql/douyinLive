@@ -123,11 +123,11 @@ cd ..
 - 前端：<http://localhost:9527>
 - 后端健康检查：<http://localhost:8000/health>
 - API 文档：<http://localhost:8000/docs>
-- DataEase（可选）：<http://localhost:8100>
+- DataEase：<http://localhost:8100>
 - Prometheus（可选）：<http://localhost:9090>
 - Grafana（可选）：<http://localhost:3000>
 
-`start.sh` 启动 MySQL、Redis、执行 Alembic 数据库迁移、配置 DataEase 只读账号、启动后端和前端，后端会自动启动 FunASR。后端默认使用稳定单进程模式，避免开发热更新遗留孤儿进程和重复数据库连接；需要修改后端代码并自动重载时可使用 `BACKEND_RELOAD=true ./start.sh`。采集调度器由后端统一管理，不再额外启动第二个采集 Worker；FunASR 限制 2 核、1.8GB 内存，ffmpeg 单线程，ASR Worker 单任务并发且最多排队 5 场。
+`start.sh` 启动 MySQL、Redis、DataEase，执行 Alembic 数据库迁移、配置 DataEase 只读账号并启动后端和前端，后端会自动启动 FunASR。脚本会等待 FastAPI 与 DataEase 通过健康检查后再提示启动完成；DataEase 首次初始化约需 3 分钟。后端默认使用稳定单进程模式，避免开发热更新遗留孤儿进程和重复数据库连接；需要修改后端代码并自动重载时可使用 `BACKEND_RELOAD=true ./start.sh`。采集调度器由后端统一管理，不再额外启动第二个采集 Worker；FunASR 限制 2 核、1.8GB 内存，DataEase 限制 1 核、1.2GB 内存，ffmpeg 单线程，ASR Worker 单任务并发且最多排队 5 场。
 
 DataEase 应使用 `.env` 中的 `DATAEASE_READER_USER` 和 `DATAEASE_READER_PASSWORD` 连接业务 MySQL。该账号只有 `SELECT`、`SHOW VIEW` 权限，不能修改业务数据。现有大屏继续使用 `de_*` 宽表，新数据集优先使用 `de_v_*` 语义视图；统一指标接口为 `GET /api/v1/dataease/semantic-layer`，同步状态接口为 `GET /api/v1/dataease/status`。
 
@@ -308,7 +308,7 @@ make lint
 make build
 ```
 
-详细验收步骤见[核心链路验收](docs/acceptance/README.md)，本轮真实结果见[2026-07-18 项目自检报告](docs/acceptance/2026-07-18-self-check.md)，维护边界和后续改造顺序见[模块化维护路线](docs/architecture/maintenance-roadmap.md)，新调研的采用与暂缓决策见[深度调研落地评估](docs/architecture/deep-research-assessment-2026-07-18.md)。
+详细验收步骤见[核心链路验收](docs/acceptance/README.md)，本轮真实结果见[2026-07-18 项目自检报告](docs/acceptance/2026-07-18-self-check.md)和[前后端协调验收](docs/acceptance/2026-07-18-frontend-backend-coordination.md)，维护边界和后续改造顺序见[模块化维护路线](docs/architecture/maintenance-roadmap.md)，新调研的采用与暂缓决策见[深度调研落地评估](docs/architecture/deep-research-assessment-2026-07-18.md)。
 
 后端测试：
 
@@ -332,6 +332,7 @@ pnpm build
 ```bash
 curl http://localhost:8000/health
 curl http://localhost:8000/metrics
+curl -I http://localhost:8100/
 docker compose ps
 ```
 

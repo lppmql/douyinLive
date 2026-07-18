@@ -61,6 +61,15 @@ export function getServiceBaseURL(env: Env.ImportMeta, isProxy: boolean) {
   };
 }
 
+/** Convert an HTTP service base URL to an absolute WebSocket base URL. */
+export function getWebSocketBaseURL(baseURL: string, origin = window.location.origin) {
+  const absoluteBaseURL = /^https?:\/\//.test(baseURL)
+    ? baseURL
+    : `${origin}${baseURL.startsWith('/') ? '' : '/'}${baseURL}`;
+
+  return absoluteBaseURL.replace(/^http/, 'ws').replace(/\/$/, '');
+}
+
 /**
  * Get proxy pattern of backend service base url
  *

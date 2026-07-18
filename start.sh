@@ -28,13 +28,57 @@ clean_port() {
   fi
 }
 
-# 1. 启动基础 Docker 服务（ASR 由后端按安全资源限制自动启动）
+wait_for_backend() {
+  local ATTEMPTS=60
+  local HEALTH_RESPONSE
+  for ((i = 1; i <= ATTEMPTS; i++)); do
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+      echo "  ❌ 后端进程已退出，请根据上方 FastAPI 错误修正配置后重试"
+      wait "$BACKEND_PID" 2>/dev/null || true
+      return 1
+    fi
+    HEALTH_RESPONSE=$(curl -fsS --max-time 2 http://127.0.0.1:8000/health 2>/dev/null || true)
+    if [ -n "$HEALTH_RESPONSE" ] && python -c 'import json, sys; sys.exit(json.load(sys.stdin).get("status") != "ok")' <<< "$HEALTH_RESPONSE"; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "  ❌ 后端 60 秒内未通过健康检查，请检查 MySQL、Redis 和后端日志"
+  kill "$BACKEND_PID" 2>/dev/null || true
+  wait "$BACKEND_PID" 2>/dev/null || true
+  return 1
+}
+
+wait_for_dataease() {
+  local ATTEMPTS=240
+  local RUNNING
+  local HEALTH
+  for ((i = 1; i <= ATTEMPTS; i++)); do
+    RUNNING=$(docker inspect -f '{{.State.Running}}' douyin_live_dataease 2>/dev/null || true)
+    HEALTH=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' douyin_live_dataease 2>/dev/null || true)
+    if [ "$HEALTH" = "healthy" ]; then
+      return 0
+    fi
+    if [ "$RUNNING" != "true" ]; then
+      echo "  ❌ DataEase 容器已退出，最近日志如下："
+      docker logs --tail 30 douyin_live_dataease 2>&1 || true
+      return 1
+    fi
+    sleep 1
+  done
+  echo "  ❌ DataEase 240 秒内未通过健康检查，最近日志如下："
+  docker logs --tail 30 douyin_live_dataease 2>&1 || true
+  return 1
+}
+
+# 1. 启动基础 Docker 服务与 DataEase（ASR 由后端按安全资源限制自动启动）
 echo ""
-echo "[1/5] 启动数据库 MySQL + Redis..."
+echo "[1/5] 启动 MySQL、Redis 与 DataEase..."
 cd "$ROOT_DIR"
-docker compose up -d
+docker compose --profile dataease up -d mysql redis dataease
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
+echo "  ⏳ DataEase 正在启动，首次初始化可能需要约 3 分钟"
 echo "  ℹ️  FunASR 将由后端自动启动：单任务并发、队列上限 5"
 
 # 2. 启动后端（先清理 8000 端口）
@@ -55,8 +99,16 @@ else
   echo "  ℹ️  后端使用稳定单进程模式；开发时可设置 BACKEND_RELOAD=true"
 fi
 BACKEND_PID=$!
+if ! wait_for_backend; then
+  exit 1
+fi
 echo "  ✅ 后端: http://localhost:8000"
 echo "  ✅ Swagger: http://localhost:8000/docs"
+if ! wait_for_dataease; then
+  kill "$BACKEND_PID" 2>/dev/null || true
+  exit 1
+fi
+echo "  ✅ DataEase: http://localhost:8100"
 
 # 3. 启动采集 Worker（后台采集调度，仅在 MONITOR_ENABLED=true 时有效）
 echo ""
@@ -87,6 +139,7 @@ echo "========================================"
 echo "  启动完成！"
 echo "  前端: http://localhost:9527"
 echo "  后端: http://localhost:8000"
+echo "  DataEase: http://localhost:8100"
 echo "  Swagger: http://localhost:8000/docs"
 echo "========================================"
 echo ""
@@ -98,11 +151,11 @@ cleanup() {
     echo "正在停止服务..."
     cd "$BACKEND_DIR"
     .venv/bin/python -c "from app.services.asr.control import stop_asr_runtime; stop_asr_runtime()" 2>/dev/null || true
-    kill $BACKEND_PID 2>/dev/null
-    [ -z "$WORKER_PID" ] || kill $WORKER_PID 2>/dev/null
-    kill $ASR_PID 2>/dev/null
-    kill $FRONTEND_PID 2>/dev/null
-    wait
+    [ -z "$BACKEND_PID" ] || kill "$BACKEND_PID" 2>/dev/null || true
+    [ -z "$WORKER_PID" ] || kill "$WORKER_PID" 2>/dev/null || true
+    [ -z "$ASR_PID" ] || kill "$ASR_PID" 2>/dev/null || true
+    [ -z "$FRONTEND_PID" ] || kill "$FRONTEND_PID" 2>/dev/null || true
+    wait 2>/dev/null || true
     echo "已停止"
     exit 0
 }

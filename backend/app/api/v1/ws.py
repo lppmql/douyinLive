@@ -198,6 +198,7 @@ def list_transcript_segments(
     return [
         {
             "id": s.id,
+            "session_id": s.session_id,
             "segment_start": float(s.segment_start) if s.segment_start else 0,
             "segment_end": float(s.segment_end) if s.segment_end else 0,
             "text_content": s.text_content or "",

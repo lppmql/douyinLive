@@ -302,6 +302,7 @@ declare namespace Api {
       last_login_at: string | null;
       expires_at: string | null;
       created_at: string;
+      updated_at: string;
     }
 
     interface CollectorLog {
@@ -317,7 +318,7 @@ declare namespace Api {
       id: number;
       account_id: number | null;
       session_id: number | null;
-      task_type: 'login' | 'collect_all' | 'metrics' | 'comments' | 'leads' | 'profile';
+      task_type: 'login' | 'collect_all' | 'live_detail' | 'metrics' | 'comments' | 'leads' | 'profile';
       status: 'pending' | 'running' | 'completed' | 'failed';
       started_at: string | null;
       completed_at: string | null;
@@ -465,21 +466,6 @@ declare namespace Api {
       completed_at: string | null;
       created_at: string;
       updated_at: string;
-    }
-
-    /* ---------- AI 分析 ---------- */
-    interface AnalysisScore {
-      completeness: number;
-      interactivity: number;
-      leadGuidance: number;
-      overall: number;
-    }
-
-    interface AlertItem {
-      key: string;
-      title: string;
-      desc: string;
-      type: 'warning' | 'error' | 'info';
     }
 
     interface AnalysisReport {

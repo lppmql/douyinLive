@@ -17,6 +17,7 @@ import {
   queueTranscriptsByAnchor,
   runTranscriptAiPipeline
 } from '@/service/api/douyin';
+import { getServiceBaseURL, getWebSocketBaseURL } from '@/utils/service';
 
 defineOptions({ name: 'Transcripts' });
 
@@ -51,9 +52,11 @@ const visibleSegmentLimit = ref(80);
 const selectedSession = computed(() => sessions.value.find(item => item.id === selectedSessionId.value) || null);
 const selectedTask = computed(() => tasks.value.find(item => item.session_id === selectedSessionId.value) || null);
 const activeTaskCount = computed(() => taskSummary.value.queued + taskSummary.value.processing);
+const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
+const { otherBaseURL } = getServiceBaseURL(import.meta.env, isHttpProxy);
+const transcriptWsBaseURL = getWebSocketBaseURL(otherBaseURL.backend || window.location.origin);
 const wsUrl = computed(() => {
-  const base = import.meta.env.VITE_SERVICE_BASE_URL || 'http://localhost:8000';
-  return selectedSessionId.value ? `${base.replace(/^http/, 'ws')}/ws/transcript/${selectedSessionId.value}` : '';
+  return selectedSessionId.value ? `${transcriptWsBaseURL}/ws/transcript/${selectedSessionId.value}` : '';
 });
 const { status: wsStatus, data: wsData, open, close } = useWebSocket(wsUrl, {
   autoReconnect: { retries: 5, delay: 3000 },

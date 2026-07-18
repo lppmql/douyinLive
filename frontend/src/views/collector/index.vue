@@ -192,7 +192,7 @@ async function loadData(silent = false) {
       fetchCollectorLogs({
         limit: 100,
         level: logLevel.value === 'all' ? undefined : logLevel.value,
-        taskId: logTaskId.value || undefined
+        task_id: logTaskId.value || undefined
       }),
       fetchCollectorTasks(),
       fetchMonitorStatus(),
@@ -748,7 +748,8 @@ const taskColumns = [
         metrics: '指标采集',
         comments: '评论采集',
         leads: '留资采集',
-        profile: '画像采集'
+        profile: '画像采集',
+        live_detail: '实时场次采集'
       };
       return labels[row.task_type] || row.task_type;
     }
