@@ -45,6 +45,21 @@ DATAEASE_SYNC_TOTAL = Counter(
     "DataEase session sync results",
     ("result",),
 )
+AI_CALLS_TOTAL = Counter(
+    "douyin_ai_calls_total",
+    "AI calls by operation, model and result",
+    ("operation", "model", "status"),
+)
+AI_CALL_DURATION = Histogram(
+    "douyin_ai_call_duration_seconds",
+    "AI call duration in seconds",
+    ("operation", "model"),
+)
+AI_TOKENS_TOTAL = Counter(
+    "douyin_ai_tokens_total",
+    "AI tokens by operation, model and direction",
+    ("operation", "model", "direction"),
+)
 ASR_QUEUE_SIZE = Gauge("douyin_asr_queue_size", "Queued ASR tasks")
 ASR_PROCESSING_COUNT = Gauge("douyin_asr_processing_count", "Processing ASR tasks")
 ASR_CHUNK_STATUS = Gauge("douyin_asr_chunk_count", "ASR chunks by status", ("status",))
@@ -53,6 +68,7 @@ KNOWLEDGE_SESSION_COUNT = Gauge("douyin_knowledge_session_count", "Sessions cove
 DATAEASE_SYNC_PENDING = Gauge("douyin_dataease_sync_pending", "Complete sessions pending DataEase sync")
 COLLECTOR_LAST_SUCCESS = Gauge("douyin_collector_last_success_timestamp", "Last successful collector task unix timestamp")
 MONITOR_RUNNING = Gauge("douyin_monitor_running", "Whether realtime monitor is running")
+AI_LAST_SUCCESS = Gauge("douyin_ai_last_success_timestamp", "Last successful AI call unix timestamp")
 
 
 class JsonFormatter(logging.Formatter):

@@ -68,9 +68,18 @@ def test_semantic_layer_has_unique_metrics_and_readonly_views():
 
     assert len(metric_keys) == len(set(metric_keys))
     assert all(item["time_semantics"] for item in METRIC_DEFINITIONS)
-    assert len(dataset_views) == 10
+    assert len(dataset_views) == 11
     assert all(view.startswith("de_v_") for view in dataset_views)
-    assert {"private_message_rate", "review_action_completion_rate", "approved_script_asset_count"}.issubset(metric_keys)
+    assert {
+        "private_message_rate",
+        "review_action_completion_rate",
+        "approved_script_asset_count",
+        "ai_call_success_rate",
+        "ai_total_tokens",
+    }.issubset(metric_keys)
+    ai_metrics = [item for item in METRIC_DEFINITIONS if item["dataset"] == "de_v_fact_ai_call_trace"]
+    assert ai_metrics
+    assert all(item["time_semantics"] == "使用模型调用发生时的系统观测时间" for item in ai_metrics)
 
 
 def test_trace_id_reuses_valid_header_and_rejects_unsafe_value():

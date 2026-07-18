@@ -287,6 +287,8 @@ POST /api/v1/knowledge-base/time-slices/sync/{session_id}
 
 后端按照 Prometheus Python Client 规范提供 `GET /metrics`，每个 HTTP 响应返回 `X-Trace-ID`，也可通过请求头传入合法 `X-Trace-ID` 串联外部调用。JSON 日志包含时间、级别、模块、函数、行号和 Trace ID。
 
+AI 调用采用轻量 Langfuse 风格追踪：`ai_call_traces` 记录业务类型、关联场次、模型、Prompt 类型与版本、Token、耗时和脱敏错误；不重复保存真实评论、完整话术、知识库正文、Prompt 原文或模型输出。DataEase 可通过 `de_v_fact_ai_call_trace` 只读视图分析成功率和成本，Prometheus/Grafana 展示 AI 成功率、P95 延迟和 Token 速率，并内置 API 不可用、ASR 积压、AI 高失败率和任务集中失败 4 条规则。
+
 默认一键启动不会启动 Prometheus 和 Grafana。需要查看监控大盘时执行：
 
 ```bash
@@ -306,7 +308,7 @@ make lint
 make build
 ```
 
-详细验收步骤见[核心链路验收](docs/acceptance/README.md)，本轮真实结果见[2026-07-18 项目自检报告](docs/acceptance/2026-07-18-self-check.md)，维护边界和后续改造顺序见[模块化维护路线](docs/architecture/maintenance-roadmap.md)。
+详细验收步骤见[核心链路验收](docs/acceptance/README.md)，本轮真实结果见[2026-07-18 项目自检报告](docs/acceptance/2026-07-18-self-check.md)，维护边界和后续改造顺序见[模块化维护路线](docs/architecture/maintenance-roadmap.md)，新调研的采用与暂缓决策见[深度调研落地评估](docs/architecture/deep-research-assessment-2026-07-18.md)。
 
 后端测试：
 

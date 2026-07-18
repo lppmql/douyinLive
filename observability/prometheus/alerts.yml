@@ -1,0 +1,37 @@
+groups:
+  - name: douyin-live-runtime
+    rules:
+      - alert: DouyinLiveApiDown
+        expr: up{job="douyin-live-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 抖音直播复盘后端无法访问
+          description: Prometheus 连续 2 分钟无法抓取后端指标，请检查后端进程和 8000 端口。
+
+      - alert: DouyinAsrQueueBacklog
+        expr: douyin_asr_queue_size > 5
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: ASR 排队持续积压
+          description: ASR 等待任务连续 15 分钟超过 5 个，请检查 FunASR 状态，避免直接提高并发拖垮本机。
+
+      - alert: DouyinAiHighFailureRate
+        expr: (sum(rate(douyin_ai_calls_total{status="failed"}[10m])) / clamp_min(sum(rate(douyin_ai_calls_total[10m])), 0.001)) > 0.25 and sum(rate(douyin_ai_calls_total[10m])) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: AI 调用失败率偏高
+          description: AI 调用失败率连续 10 分钟超过 25%，请按 operation、model 和 Trace ID 排查。
+
+      - alert: DouyinTaskFailuresBurst
+        expr: sum(increase(douyin_task_events_total{status="failed"}[15m])) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: 后台任务集中失败
+          description: 最近 15 分钟失败任务超过 3 个，请查看采集、ASR 和后处理任务日志。

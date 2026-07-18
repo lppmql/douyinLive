@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.services.ai.deepseek_client import chat
-from app.services.ai.prompt_service import get_prompt
+from app.services.ai.prompt_service import get_prompt_template
 from app.services.ai.scoring import score_session_transcript, batch_score_recent
 from app.services.ai.analysis import analyze_trend, detect_anomalies
 from app.services.ai.high_intent_service import identify_high_intent, list_high_intent_users
@@ -41,13 +41,18 @@ class ChatResponse(BaseModel):
 def ai_chat(req: ChatRequest, db: Session = Depends(get_db)):
     """AI 对话（可选使用提示词模板）"""
     system_prompt = ""
+    prompt_template = None
     if req.prompt_type:
-        system_prompt = get_prompt(db, req.prompt_type) or ""
+        prompt_template = get_prompt_template(db, req.prompt_type)
+        system_prompt = prompt_template.content if prompt_template else ""
     reply = chat(
         system_prompt=system_prompt,
         user_message=req.message,
         temperature=req.temperature,
         max_tokens=req.max_tokens,
+        operation="general_chat",
+        prompt_name=prompt_template.type if prompt_template else None,
+        prompt_version=prompt_template.version if prompt_template else None,
     )
     return ChatResponse(reply=reply)
 
@@ -60,6 +65,7 @@ def test_connection():
             system_prompt="你是一个AI助手。只回复'连接成功'这四个字即可。",
             user_message="请回复连接成功",
             max_tokens=20,
+            operation="connection_test",
         )
         return {"status": "ok", "reply": reply}
     except Exception as e:
@@ -140,8 +146,8 @@ def optimize_session(session_id: int, db: Session = Depends(get_db)):
         AnalysisReport.report_type == "speech_score",
     ).order_by(AnalysisReport.created_at.desc()).first()
 
-    prompt = get_prompt(db, "optimization")
-    if not prompt:
+    prompt_template = get_prompt_template(db, "optimization")
+    if not prompt_template:
         raise HTTPException(500, "未找到 optimization 提示词模板")
 
     comments = db.query(Comment).filter(Comment.session_id == session_id).order_by(
@@ -181,7 +187,7 @@ def optimize_session(session_id: int, db: Session = Depends(get_db)):
         "comments": real_comments,
         "transcript_segments": real_transcript,
     }
-    user_message = prompt.replace(
+    user_message = prompt_template.content.replace(
         "{session_data}",
         json.dumps(evidence_payload, ensure_ascii=False),
     )
@@ -200,6 +206,10 @@ def optimize_session(session_id: int, db: Session = Depends(get_db)):
         ),
         user_message=user_message,
         temperature=0.3,
+        operation="session_optimization",
+        session_id=session_id,
+        prompt_name=prompt_template.type,
+        prompt_version=prompt_template.version,
     )
 
     report = AnalysisReport(

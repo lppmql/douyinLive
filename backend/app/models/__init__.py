@@ -20,6 +20,7 @@ from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.knowledge_time_slices import KnowledgeTimeSlice
 from app.models.user import User
 from app.models.review import ReviewFinding, ReviewActionItem, ScriptAsset, ComplianceRule
+from app.models.ai_call_traces import AiCallTrace
 
 __all__ = [
     "Base",
@@ -47,4 +48,5 @@ __all__ = [
     "ReviewActionItem",
     "ScriptAsset",
     "ComplianceRule",
+    "AiCallTrace",
 ]

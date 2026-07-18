@@ -11,7 +11,7 @@ from app.models.transcript_segments import TranscriptSegment
 from app.models.analysis_reports import AnalysisReport
 from app.models.de_tables import DeAnchorTranscriptSummary
 from app.services.ai.deepseek_client import chat_json
-from app.services.ai.prompt_service import get_prompt
+from app.services.ai.prompt_service import get_prompt_template
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +52,13 @@ def score_session_transcript(session_id: int, db: Session | None = None) -> dict
             return None
 
         # 获取提示词模板
-        prompt = get_prompt(db, "speech_score")
-        if not prompt:
+        prompt_template = get_prompt_template(db, "speech_score")
+        if not prompt_template:
             logger.error("未找到 speech_score 提示词模板")
             return None
 
         # 调用 DeepSeek
-        user_message = prompt.replace("{transcript}", full_text[:8000])  # 限制长度
+        user_message = prompt_template.content.replace("{transcript}", full_text[:8000])  # 限制长度
         try:
             result = chat_json(
                 system_prompt=(
@@ -67,6 +67,10 @@ def score_session_transcript(session_id: int, db: Session | None = None) -> dict
                 ),
                 user_message=user_message,
                 temperature=0.3,
+                operation="speech_score",
+                session_id=session_id,
+                prompt_name=prompt_template.type,
+                prompt_version=prompt_template.version,
             )
         except Exception as e:
             logger.error("DeepSeek 话术评分失败: %s", e)

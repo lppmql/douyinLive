@@ -15,7 +15,7 @@ from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.review import ReviewFinding
 from app.services.ai.deepseek_client import chat
-from app.services.ai.prompt_service import get_prompt
+from app.services.ai.prompt_service import get_prompt_template
 from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices
 
 logger = logging.getLogger(__name__)
@@ -161,14 +161,14 @@ def qa_search(
     knowledge_context = "\n\n---\n\n".join(context_parts)
 
     # 3. 用 QA 提示词调用 DeepSeek
-    prompt = get_prompt(db, "qa")
-    if not prompt:
+    prompt_template = get_prompt_template(db, "qa")
+    if not prompt_template:
         logger.error("未找到 qa 提示词模板")
         return {"answer": "系统配置错误", "sources": sources, "has_result": False}
 
     conversation = _format_conversation(history)
     contextual_prompt = f"{conversation}\n\n当前问题：{question}" if conversation else question
-    user_message = prompt.replace("{knowledge_context}", knowledge_context).replace(
+    user_message = prompt_template.content.replace("{knowledge_context}", knowledge_context).replace(
         "{question}", contextual_prompt
     )
 
@@ -181,6 +181,9 @@ def qa_search(
             user_message=user_message,
             temperature=0.5,
             max_tokens=2048,
+            operation="knowledge_qa",
+            prompt_name=prompt_template.type,
+            prompt_version=prompt_template.version,
         )
     except Exception as e:
         logger.error("DeepSeek QA 回答失败: %s", e)

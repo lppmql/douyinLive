@@ -10,7 +10,7 @@ from app.models.live_sessions import LiveSession
 from app.models.analysis_reports import AnalysisReport
 from app.models.de_tables import DeAnchorConversionFunnel
 from app.services.ai.deepseek_client import chat_json
-from app.services.ai.prompt_service import get_prompt
+from app.services.ai.prompt_service import get_prompt_template
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +57,18 @@ def analyze_trend(session_ids: list[int], db: Session | None = None) -> dict[str
             ensure_ascii=False, indent=2,
         )
 
-        prompt = get_prompt(db, "trend_analysis")
-        if not prompt:
+        prompt_template = get_prompt_template(db, "trend_analysis")
+        if not prompt_template:
             return None
 
         result = chat_json(
             system_prompt="你是一个直播数据分析师。请按要求输出 JSON。",
-            user_message=prompt.replace("{sessions_data}", sessions_data),
+            user_message=prompt_template.content.replace("{sessions_data}", sessions_data),
             temperature=0.3,
+            operation="trend_analysis",
+            session_id=sessions[-1].id,
+            prompt_name=prompt_template.type,
+            prompt_version=prompt_template.version,
         )
 
         # 保存报告
@@ -107,11 +111,11 @@ def detect_anomalies(session_id: int, db: Session | None = None) -> dict[str, An
             LiveSession.live_status == "ended",
         ).order_by(LiveSession.live_start_time.desc()).limit(10).all()
 
-        prompt = get_prompt(db, "anomaly_detection")
-        if not prompt:
+        prompt_template = get_prompt_template(db, "anomaly_detection")
+        if not prompt_template:
             return None
 
-        user_message = prompt.replace(
+        user_message = prompt_template.content.replace(
             "{session_data}", json.dumps(_format_session_for_ai(session), ensure_ascii=False)
         ).replace(
             "{history_data}", json.dumps(
@@ -123,6 +127,10 @@ def detect_anomalies(session_id: int, db: Session | None = None) -> dict[str, An
             system_prompt="你是一个异常检测分析师。请按要求输出 JSON。",
             user_message=user_message,
             temperature=0.3,
+            operation="anomaly_detection",
+            session_id=session_id,
+            prompt_name=prompt_template.type,
+            prompt_version=prompt_template.version,
         )
 
         report = AnalysisReport(

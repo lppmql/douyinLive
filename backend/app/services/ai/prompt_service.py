@@ -9,6 +9,19 @@ from app.models.prompt_templates import PromptTemplate
 logger = logging.getLogger(__name__)
 
 
+def get_prompt_template(db: Session, type: str, version: int | None = None) -> PromptTemplate | None:
+    """获取指定类型和版本的完整模板，供调用链记录版本。"""
+    q = db.query(PromptTemplate).filter(PromptTemplate.type == type)
+    if version:
+        q = q.filter(PromptTemplate.version == version)
+    else:
+        q = q.order_by(PromptTemplate.version.desc())
+    template = q.first()
+    if not template:
+        logger.warning("未找到提示词模板: type=%s, version=%s", type, version)
+    return template
+
+
 def get_prompt(db: Session, type: str, version: int | None = None) -> str | None:
     """获取指定类型和版本的提示词内容
 
@@ -20,16 +33,8 @@ def get_prompt(db: Session, type: str, version: int | None = None) -> str | None
     Returns:
         提示词内容，找不到返回 None
     """
-    q = db.query(PromptTemplate).filter(PromptTemplate.type == type)
-    if version:
-        q = q.filter(PromptTemplate.version == version)
-    else:
-        q = q.order_by(PromptTemplate.version.desc())
-    template = q.first()
-    if template:
-        return template.content
-    logger.warning("未找到提示词模板: type=%s, version=%s", type, version)
-    return None
+    template = get_prompt_template(db, type, version)
+    return template.content if template else None
 
 
 def create_prompt(db: Session, type: str, content: str,

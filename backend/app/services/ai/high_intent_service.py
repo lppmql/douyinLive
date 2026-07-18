@@ -9,7 +9,7 @@ from app.core.database import SessionLocal
 from app.models.comments import Comment
 from app.models.high_intent_users import HighIntentUser
 from app.services.ai.deepseek_client import chat_json
-from app.services.ai.prompt_service import get_prompt
+from app.services.ai.prompt_service import get_prompt_template
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,8 @@ def identify_high_intent(session_id: int, db: Session | None = None) -> list[dic
             for i, c in enumerate(comments)
         ])
 
-        prompt = get_prompt(db, "high_intent")
-        if not prompt:
+        prompt_template = get_prompt_template(db, "high_intent")
+        if not prompt_template:
             logger.error("未找到 high_intent 提示词模板")
             return []
 
@@ -64,8 +64,12 @@ def identify_high_intent(session_id: int, db: Session | None = None) -> list[dic
                     "只根据真实评论识别选址、预算、品牌、供应链、毛利损耗、证照或资料领取意向，"
                     "不得猜测联系方式，请按JSON格式输出。"
                 ),
-                user_message=prompt.replace("{comments}", comments_text),
+                user_message=prompt_template.content.replace("{comments}", comments_text),
                 temperature=0.3,
+                operation="high_intent_detection",
+                session_id=session_id,
+                prompt_name=prompt_template.type,
+                prompt_version=prompt_template.version,
             )
         except Exception as e:
             logger.error("DeepSeek 高意向用户识别失败: %s", e)

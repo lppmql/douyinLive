@@ -10,6 +10,7 @@ def _metric(
     expression: str,
     value_format: str = "integer",
     time_field: str = "platform_start_time",
+    time_semantics: str = "优先使用抖音平台事件时间，不使用数据库创建时间作为业务统计时间",
 ) -> dict[str, Any]:
     return {
         "key": key,
@@ -19,7 +20,7 @@ def _metric(
         "expression": expression,
         "format": value_format,
         "time_field": time_field,
-        "time_semantics": "优先使用抖音平台事件时间，不使用数据库创建时间作为业务统计时间",
+        "time_semantics": time_semantics,
     }
 
 
@@ -40,6 +41,9 @@ METRIC_DEFINITIONS = (
     _metric("review_action_completion_rate", "整改完成率", "已完成或已验证整改任务占全部整改任务的比例", "de_v_fact_review_action", "SUM(CASE WHEN status IN ('completed', 'verified') THEN 1 ELSE 0 END) / NULLIF(COUNT(action_id), 0)", "percent", "platform_start_time"),
     _metric("approved_script_asset_count", "已确认话术资产数", "从真实直播话术中人工确认可复用的片段数量", "de_v_fact_script_asset", "SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END)", "integer", "platform_start_time"),
     _metric("transcript_coverage_seconds", "话术覆盖时长", "完成转写片段的去重前累计秒数", "de_v_fact_transcript_segment", "SUM(GREATEST(segment_end - segment_start, 0))", "duration", "platform_start_time"),
+    _metric("ai_call_success_rate", "AI调用成功率", "成功AI调用占全部AI调用的比例", "de_v_fact_ai_call_trace", "SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) / NULLIF(COUNT(ai_call_id), 0)", "percent", "observed_at", "使用模型调用发生时的系统观测时间"),
+    _metric("ai_call_avg_latency_ms", "AI平均耗时", "AI调用平均耗时毫秒数", "de_v_fact_ai_call_trace", "AVG(latency_ms)", "integer", "observed_at", "使用模型调用发生时的系统观测时间"),
+    _metric("ai_total_tokens", "AI Token用量", "成功或失败调用返回的总Token数", "de_v_fact_ai_call_trace", "SUM(total_tokens)", "integer", "observed_at", "使用模型调用发生时的系统观测时间"),
 )
 
 
@@ -54,4 +58,5 @@ SEMANTIC_DATASETS = (
     {"name": "复盘发现事实", "view": "de_v_fact_review_finding", "grain": "每条可追溯复盘发现一行", "time_field": "platform_start_time"},
     {"name": "整改任务事实", "view": "de_v_fact_review_action", "grain": "每个复盘整改任务一行", "time_field": "platform_start_time"},
     {"name": "话术资产事实", "view": "de_v_fact_script_asset", "grain": "每个真实直播话术资产一行", "time_field": "platform_start_time"},
+    {"name": "AI 调用事实", "view": "de_v_fact_ai_call_trace", "grain": "每次AI模型调用一行，仅含脱敏元数据", "time_field": "observed_at"},
 )

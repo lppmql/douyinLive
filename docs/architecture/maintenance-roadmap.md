@@ -21,6 +21,8 @@
 - `Makefile` 与 `scripts/doctor.sh` 提供统一的本地检查入口。
 - 启动前校验关键配置，日志中的 Redis 地址自动脱敏。
 - 核心链路新增可重复验收文档。
+- AI 调用统一记录业务类型、真实场次、模型、Prompt 版本、Token、耗时与脱敏错误，不复制真实业务正文。
+- Prometheus/Grafana 增加 AI 成功率、延迟、Token 面板及 4 条运行告警；DataEase 增加 AI 调用只读事实视图。
 
 ## 暂不一次性实施
 
@@ -36,9 +38,14 @@
 
 重叠切片会改变分片索引、时间覆盖和全文去重规则，需要先准备真实脱敏边界样本与去重测试，不能直接修改生产积压任务。
 
+### Taskiq、向量库与重型平台
+
+现有任务已经具备 MySQL 状态、幂等键、心跳、重试和 Redis Streams 生命周期事件。没有独立压测和迁移收益数据前，不再叠加 Taskiq；Chroma/pgvector 先以真实问答召回基线做 POC；RAGFlow、Milvus、Temporal、完整 Langfuse、Dify 和 FastGPT 不进入 8GB 本机默认栈。
+
 ## 下一阶段进入条件
 
 1. CI 连续通过。
 2. 六类核心验收至少各完成一次真实数据记录。
 3. Outbox 与 ASR 边界样本测试先于数据库和队列迁移。
 4. 任何目录迁移都保持 API 响应兼容，并提供回滚提交。
+5. AI Prompt 调整必须能按 Prompt 版本对比成功率、耗时、Token 和人工确认结果。
