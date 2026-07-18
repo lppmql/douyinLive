@@ -36,6 +36,7 @@ export default defineConfig(configEnv => {
       port: 9527,
       strictPort: true,
       open: true,
+      allowedHosts: ['.ngrok-free.app'],
       proxy: createViteProxy(viteEnv, enableProxy)
     },
     preview: {
