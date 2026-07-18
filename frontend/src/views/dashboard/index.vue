@@ -1,197 +1,37 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import { useMessage } from 'naive-ui';
-import CountTo from '@/components/custom/count-to.vue';
-import BusinessPageHeader from '@/components/business/page-header.vue';
-import { $t } from '@/locales';
-import { fetchDashboardSummary } from '@/service/api/douyin';
-
 defineOptions({
   name: 'Dashboard'
 });
 
-interface KpiItem {
-  key: string;
-  title: string;
-  endValue: number;
-  decimals?: number;
-  suffix: string;
-  icon: string;
-  iconClass: string;
-  description: string;
-}
-
-const message = useMessage();
-const loading = ref(false);
-const summary = ref<Api.Douyin.DashboardSummary | null>(null);
-
-async function loadSummary() {
-  loading.value = true;
-  try {
-    const response = await fetchDashboardSummary();
-    if (response.data) summary.value = response.data;
-  } catch {
-    message.error('经营数据加载失败');
-  } finally {
-    loading.value = false;
-  }
-}
-
-onMounted(loadSummary);
-
-const kpiData = computed<KpiItem[]>(() => [
-  {
-    key: 'anchors',
-    title: '已采集主播',
-    endValue: summary.value?.anchor_count || 0,
-    suffix: ' 位',
-    icon: 'mdi:account-multiple-check-outline',
-    iconClass: 'bg-primary-100 text-primary dark:bg-primary-900/30',
-    description: `直播中 ${summary.value?.live_session_count || 0} 场`
-  },
-  {
-    key: 'sessions',
-    title: '直播场次',
-    endValue: summary.value?.session_count || 0,
-    suffix: ' 场',
-    icon: 'mdi:video-check-outline',
-    iconClass: 'bg-success-100 text-success dark:bg-success-900/30',
-    description: `累计观看 ${(summary.value?.total_viewers || 0).toLocaleString()} 人`
-  },
-  {
-    key: 'completeness',
-    title: '场次详情完整率',
-    endValue: summary.value?.detail_completion_rate || 0,
-    decimals: 1,
-    suffix: '%',
-    icon: 'mdi:database-check-outline',
-    iconClass: 'bg-warning-100 text-warning dark:bg-warning-900/30',
-    description: `完整 ${summary.value?.detail_complete_count || 0} 场`
-  },
-  {
-    key: 'private-messages',
-    title: '站内私信人数',
-    endValue: summary.value?.total_private_messages || 0,
-    suffix: ' 人',
-    icon: 'mdi:message-badge-outline',
-    iconClass: 'bg-error-100 text-error dark:bg-error-900/30',
-    description: `高意向评论 ${summary.value?.high_intent_comment_count || 0} 条`
-  }
-]);
-
-const dataeaseUrl = ref(import.meta.env.VITE_DATAEASE_URL || '');
+const dataeaseShareUrl = import.meta.env.VITE_DATAEASE_URL || 'http://localhost:8100/#/de-link/ioyH1hYC';
 </script>
 
 <template>
-  <NSpace vertical :size="16">
-    <BusinessPageHeader
-      title="零食店避坑直播数据大屏"
-      description="汇总真实主播、科普场次、筹备问题、站内私信和数据完整率；先看完整率，再判断资料钩子是否有效。"
-      icon="mdi:monitor-dashboard"
-      :status="summary ? `已汇总 ${summary.session_count} 场` : '正在读取数据'"
-      :status-type="summary ? 'success' : 'info'"
-    >
-      <template #actions>
-        <NButton type="primary" :loading="loading" @click="loadSummary">
-          <template #icon><SvgIcon icon="mdi:refresh" /></template>
-          刷新数据
-        </NButton>
-      </template>
-      <NAlert v-if="summary && summary.detail_completion_rate < 80" type="warning" :bordered="false" show-icon>
-        当前场次详情完整率为 {{ summary.detail_completion_rate.toFixed(1) }}%，指标为 0
-        可能表示尚未补齐数据。请先到“数据采集”执行刷新采集。
-      </NAlert>
-    </BusinessPageHeader>
-
-    <NSpin :show="loading">
-      <NGrid :x-gap="16" :y-gap="16" cols="1 s:2 m:4" responsive="screen">
-        <NGi v-for="item in kpiData" :key="item.key">
-          <NCard :bordered="false" class="card-wrapper h-full" size="small">
-            <div class="flex items-start justify-between gap-12px">
-              <div class="min-w-0">
-                <div class="text-13px text-gray-500">{{ item.title }}</div>
-                <div class="mt-8px flex items-baseline gap-4px">
-                  <span class="text-28px font-700">
-                    <CountTo :end-value="item.endValue" :decimals="item.decimals ?? 0" :duration="1200" />
-                  </span>
-                  <span class="text-13px text-gray-500">{{ item.suffix }}</span>
-                </div>
-                <div class="mt-8px text-12px text-gray-400">{{ item.description }}</div>
-              </div>
-              <div class="size-44px flex-center shrink-0 rounded-12px" :class="item.iconClass">
-                <SvgIcon :icon="item.icon" class="text-24px" />
-              </div>
-            </div>
-          </NCard>
-        </NGi>
-      </NGrid>
-    </NSpin>
-
-    <NCard :bordered="false" class="card-wrapper">
-      <template #header>
-        <div class="flex flex-wrap items-center justify-between gap-12px">
-          <NSpace align="center">
-            <SvgIcon icon="mdi:chart-donut" class="text-22px text-primary" />
-            <span class="text-16px font-bold">经营数据概览</span>
-          </NSpace>
-          <NButton size="small" :loading="loading" @click="loadSummary">
-            <template #icon><SvgIcon icon="mdi:refresh" /></template>
-            刷新
-          </NButton>
-        </div>
-      </template>
-      <NDescriptions label-placement="top" :column="4" bordered size="small" responsive="screen">
-        <NDescriptionsItem label="累计评论">{{ (summary?.total_comments || 0).toLocaleString() }}</NDescriptionsItem>
-        <NDescriptionsItem label="累计线索">{{ (summary?.total_leads || 0).toLocaleString() }}</NDescriptionsItem>
-        <NDescriptionsItem label="平均线索成本">¥{{ (summary?.average_lead_cost || 0).toFixed(2) }}</NDescriptionsItem>
-        <NDescriptionsItem label="待处理整改">{{ summary?.open_review_action_count || 0 }} 项</NDescriptionsItem>
-      </NDescriptions>
-    </NCard>
-
-    <!-- DataEase 大屏嵌入区域 -->
-    <NCard :bordered="false" class="card-wrapper">
-      <template #header>
-        <NSpace>
-          <SvgIcon icon="mdi:monitor-dashboard" class="text-22px" />
-          <span class="text-16px font-bold">{{ $t('route.dashboard') }}</span>
-        </NSpace>
-      </template>
-
-      <div v-if="dataeaseUrl" class="dataease-iframe-wrapper">
-        <iframe :src="dataeaseUrl" width="100%" height="800" frameborder="0" allowfullscreen class="rounded-8px" />
-      </div>
-
-      <NResult
-        v-else
-        status="info"
-        :title="$t('page.dashboard.placeholder')"
-        description="DataEase 地址尚未配置。经营汇总数据不受影响；完成 DataEase 配置后，这里会嵌入实时图表。"
-      >
-        <template #icon>
-          <SvgIcon icon="mdi:chart-box-outline" class="text-64px text-primary" />
-        </template>
-        <template #footer>
-          <NButton
-            tag="a"
-            href="http://localhost:8100"
-            target="_blank"
-            rel="noopener noreferrer"
-            type="primary"
-            secondary
-          >
-            <template #icon><SvgIcon icon="mdi:open-in-new" /></template>
-            打开 DataEase
-          </NButton>
-        </template>
-      </NResult>
-    </NCard>
-  </NSpace>
+  <iframe
+    class="dataease-screen"
+    :src="dataeaseShareUrl"
+    title="DataEase 数据大屏"
+    allow="fullscreen; clipboard-read; clipboard-write"
+    allowfullscreen
+  />
 </template>
 
 <style scoped>
-.dataease-iframe-wrapper {
+.dataease-screen {
+  display: block;
   width: 100%;
-  overflow: hidden;
+  height: calc(100vh - 112px);
+  min-height: 640px;
+  border: 0;
   border-radius: 8px;
+  background: #0b1220;
+}
+
+@media (max-width: 768px) {
+  .dataease-screen {
+    height: calc(100vh - 96px);
+    min-height: 560px;
+    border-radius: 0;
+  }
 }
 </style>

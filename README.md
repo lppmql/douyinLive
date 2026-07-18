@@ -131,6 +131,18 @@ cd ..
 
 DataEase 应使用 `.env` 中的 `DATAEASE_READER_USER` 和 `DATAEASE_READER_PASSWORD` 连接业务 MySQL。该账号只有 `SELECT`、`SHOW VIEW` 权限，不能修改业务数据。现有大屏继续使用 `de_*` 宽表，新数据集优先使用 `de_v_*` 语义视图；统一指标接口为 `GET /api/v1/dataease/semantic-layer`，同步状态接口为 `GET /api/v1/dataease/status`。
 
+### DataEase 数据大屏（2026-07-18）
+
+项目“数据大屏”一级页面不再重复绘制指标卡，按照 DataEase 官方公共链接嵌入方式，通过 `iframe` 直接承载已发布大屏：
+
+- 数据源：`抖音直播运营数据`，使用只读账号连接 `douyin_live_mysql:3306/douyin_live`。
+- 原生数据集：`直播场次总览`，来源为 `de_live_session_anchor_summary`，可继续在 DataEase 中维护图表。
+- DataEase 分享地址：`http://localhost:8100/#/de-link/ioyH1hYC`。
+- 前端配置：默认使用上述地址，也可通过 `VITE_DATAEASE_URL="http://localhost:8100/#/de-link/ioyH1hYC"` 覆盖；包含 `#` 的 URL 必须加引号，iframe 明确设置宽度、高度和无边框。
+- 跨域配置：`dataease.origin-list` 仅允许 `http://localhost:9527` 和 `http://127.0.0.1:9527`，修改后需重启 DataEase。
+
+本机同时启动前端和 DataEase 后，访问 <http://localhost:9527/dashboard> 即可在项目内查看。部署到其他电脑或域名时，必须同步修改 `VITE_DATAEASE_URL` 与 `dataease.origin-list`，两处都要使用用户浏览器能访问的真实地址。DataEase 的画布、数据源和数据集元数据保存在 MySQL 的 `dataease` 库，恢复数据库时应与业务库一并备份；不要把只读账号密码写入 README 或提交到 Git。
+
 复盘新增只读事实视图：
 
 | 视图 | 粒度 | 用途 |
