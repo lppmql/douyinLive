@@ -124,10 +124,10 @@ cd ..
 - 后端健康检查：<http://localhost:8000/health>
 - API 文档：<http://localhost:8000/docs>
 - DataEase：<http://localhost:8100>
-- Prometheus（可选）：<http://localhost:9090>
-- Grafana（可选）：<http://localhost:3000>
+- Prometheus：<http://localhost:9090>
+- Grafana：<http://localhost:3000>
 
-`start.sh` 启动 MySQL、Redis、DataEase，执行 Alembic 数据库迁移、配置 DataEase 只读账号并启动后端和前端，后端会自动启动 FunASR。脚本会等待 FastAPI 与 DataEase 通过健康检查后再提示启动完成；DataEase 首次初始化约需 3 分钟。后端默认使用稳定单进程模式，避免开发热更新遗留孤儿进程和重复数据库连接；需要修改后端代码并自动重载时可使用 `BACKEND_RELOAD=true ./start.sh`。采集调度器由后端统一管理，不再额外启动第二个采集 Worker；FunASR 限制 2 核、1.8GB 内存，DataEase 限制 1 核、1.2GB 内存，ffmpeg 单线程，ASR Worker 单任务并发且最多排队 5 场。
+`start.sh` 按“基础组件与 DataEase → Prometheus/Grafana → 后端 → ASR → 前端”顺序启动全栈，避免首次拉取监控镜像时与 FunASR 模型争抢内存。脚本会检查 FastAPI、DataEase RSA 公钥、Prometheus 和 Grafana，全部通过后才提示启动完成；DataEase 首次初始化约需 3 分钟。后端默认使用稳定单进程模式，避免开发热更新遗留孤儿进程和重复数据库连接；需要修改后端代码并自动重载时可使用 `BACKEND_RELOAD=true ./start.sh`。采集调度器由后端统一管理，不再额外启动第二个采集 Worker；FunASR 限制 2 核、1.8GB 内存，DataEase 限制 1 核、1.2GB 内存，ffmpeg 单线程，ASR Worker 单任务并发且最多排队 5 场。
 
 DataEase 应使用 `.env` 中的 `DATAEASE_READER_USER` 和 `DATAEASE_READER_PASSWORD` 连接业务 MySQL。该账号只有 `SELECT`、`SHOW VIEW` 权限，不能修改业务数据。现有大屏继续使用 `de_*` 宽表，新数据集优先使用 `de_v_*` 语义视图；统一指标接口为 `GET /api/v1/dataease/semantic-layer`，同步状态接口为 `GET /api/v1/dataease/status`。
 
@@ -145,6 +145,7 @@ DataEase 应使用 `.env` 中的 `DATAEASE_READER_USER` 和 `DATAEASE_READER_PAS
 
 1. 打开“数据采集”页面，扫码登录采集账号。
 2. 确认账号状态为“已登录”，并使用“检查存活”验证 Cookie。
+   实时监控开启时无需停止监控，存活检查会进入同一浏览器串行队列；刷新采集或扫码登录进行中时仍会阻止检查。
 3. 可直接执行“刷新数据采集”；刷新期间实时监控会保持开启但暂缓浏览器任务，刷新完成后自动恢复。
 4. 等待采集进度完成，查看已同步主播数、场次数、详情数和失败原因；采集日志在固定区域内滚动，“查看”操作始终固定在右侧。清空日志必须二次确认，并且不会删除任务和业务数据。
 5. 在“直播场次”进入详情，先确认复盘数据可信度，再联动查看回放、分钟趋势、按用户归组的评论和话术证据。
@@ -289,7 +290,7 @@ POST /api/v1/knowledge-base/time-slices/sync/{session_id}
 
 AI 调用采用轻量 Langfuse 风格追踪：`ai_call_traces` 记录业务类型、关联场次、模型、Prompt 类型与版本、Token、耗时和脱敏错误；不重复保存真实评论、完整话术、知识库正文、Prompt 原文或模型输出。DataEase 可通过 `de_v_fact_ai_call_trace` 只读视图分析成功率和成本，Prometheus/Grafana 展示 AI 成功率、P95 延迟和 Token 速率，并内置 API 不可用、ASR 积压、AI 高失败率和任务集中失败 4 条规则。
 
-默认一键启动不会启动 Prometheus 和 Grafana。需要查看监控大盘时执行：
+一键启动会默认启动 Prometheus 和 Grafana。只需要单独恢复监控组件时执行：
 
 ```bash
 docker compose --profile observability up -d prometheus grafana
@@ -368,6 +369,14 @@ douyinLive/
 ### 页面显示 500
 
 先打开 <http://localhost:8000/health>。如果不是 `status: ok`，检查 Docker Desktop、MySQL 和后端终端日志。
+
+### DataEase 登录出现 `InvocationTargetException`
+
+如果日志底层同时出现 `BadPaddingException`，通常是 DataEase 数据库恢复或重建后，浏览器仍使用旧的 `DataEaseKey` 公钥缓存。先运行 `make doctor`；若“DataEase 登录 RSA 公钥链路正常”，说明服务端密钥有效，不要删除数据库。请在浏览器中清除 `localhost:8100` 的站点数据，或只删除本地存储中的 `DataEaseKey`，然后重新打开登录页。项目自检不会打印公钥、私钥、密码或登录令牌。
+
+### Prometheus 或 Grafana 未启动
+
+`./start.sh` 现在默认启动并等待两个组件。单独恢复时执行 `docker compose --profile observability up -d prometheus grafana`，再用 `curl http://localhost:9090/-/ready` 和 `curl http://localhost:3000/api/health` 检查；`make doctor` 会同时检查容器和接口。
 
 ### 浏览器被关闭或 `Target page ... has been closed`
 

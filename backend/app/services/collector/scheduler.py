@@ -152,6 +152,15 @@ class SchedulerManager:
         """全量刷新接管浏览器期间，监控服务保持开启但不重复采集。"""
         return self._paused_for_collection
 
+    async def run_serialized_browser_operation(self, operation):
+        """让账号检查等临时操作与实时采集共用同一浏览器队列。"""
+        async with self._browser_job_lock:
+            self._active_browser_jobs += 1
+            try:
+                return await operation()
+            finally:
+                self._active_browser_jobs = max(0, self._active_browser_jobs - 1)
+
     def resume_after_collection(self) -> None:
         """全量刷新结束后立即唤醒监控，不等待下一个轮询周期。"""
         self._paused_for_collection = False

@@ -11,6 +11,7 @@
 - [主播排班验收](schedule-acceptance.md)
 - [可观测性验收](observability-acceptance.md)
 - [2026-07-18 前后端协调验收](2026-07-18-frontend-backend-coordination.md)
+- [2026-07-18 DataEase 与监控恢复验收](2026-07-18-dataease-observability-recovery.md)
 
 ## 统一记录要求
 

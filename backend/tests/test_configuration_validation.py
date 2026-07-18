@@ -69,12 +69,19 @@ def test_alembic_uses_runtime_database_configuration_without_stored_password():
     assert "mysql+pymysql://localhost/douyin_live" in ini_source
 
 
-def test_one_click_start_waits_for_backend_and_dataease_health():
+def test_one_click_start_waits_for_all_runtime_health_checks():
     start_source = (BACKEND_ROOT.parent / "start.sh").read_text(encoding="utf-8")
 
     assert "docker compose --profile dataease up -d mysql redis dataease" in start_source
+    assert "docker compose --profile observability up -d prometheus grafana" in start_source
     assert "if ! wait_for_backend; then" in start_source
     assert "if ! wait_for_dataease; then" in start_source
+    assert "scripts/check_dataease_crypto.py" in start_source
+    assert 'wait_for_http "Prometheus"' in start_source
+    assert 'wait_for_http "Grafana"' in start_source
+    assert start_source.index('echo "[2/6] 启动 Prometheus 与 Grafana..."') < start_source.index(
+        'echo "[3/6] 启动后端 FastAPI..."'
+    )
     assert start_source.index("if ! wait_for_backend; then") < start_source.index('echo "  ✅ 后端: http://localhost:8000"')
     assert start_source.index("if ! wait_for_dataease; then") < start_source.index(
         'echo "  ✅ DataEase: http://localhost:8100"'

@@ -71,19 +71,64 @@ wait_for_dataease() {
   return 1
 }
 
+wait_for_http() {
+  local NAME=$1
+  local URL=$2
+  local CONTAINER=$3
+  local ATTEMPTS=${4:-60}
+  local RUNNING
+  for ((i = 1; i <= ATTEMPTS; i++)); do
+    if curl -fsS --max-time 2 "$URL" >/dev/null 2>&1; then
+      return 0
+    fi
+    RUNNING=$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null || true)
+    if [ "$RUNNING" != "true" ]; then
+      echo "  ❌ $NAME 容器已退出，最近日志如下："
+      docker logs --tail 30 "$CONTAINER" 2>&1 || true
+      return 1
+    fi
+    sleep 1
+  done
+  echo "  ❌ $NAME 未在 ${ATTEMPTS} 秒内通过健康检查，最近日志如下："
+  docker logs --tail 30 "$CONTAINER" 2>&1 || true
+  return 1
+}
+
 # 1. 启动基础 Docker 服务与 DataEase（ASR 由后端按安全资源限制自动启动）
 echo ""
-echo "[1/5] 启动 MySQL、Redis 与 DataEase..."
+echo "[1/6] 启动 MySQL、Redis 与 DataEase..."
 cd "$ROOT_DIR"
 docker compose --profile dataease up -d mysql redis dataease
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
 echo "  ⏳ DataEase 正在启动，首次初始化可能需要约 3 分钟"
 echo "  ℹ️  FunASR 将由后端自动启动：单任务并发、队列上限 5"
+if ! wait_for_dataease; then
+  exit 1
+fi
+if ! "$BACKEND_DIR/.venv/bin/python" "$BACKEND_DIR/scripts/check_dataease_crypto.py"; then
+  echo "  ❌ DataEase 公钥链路异常，请先检查 core_rsa 数据和 DataEase 日志"
+  exit 1
+fi
+echo "  ✅ DataEase: http://localhost:8100"
 
-# 2. 启动后端（先清理 8000 端口）
+# 2. ASR 尚未启动时先准备监控组件，避免首次拉镜像与模型争抢内存。
 echo ""
-echo "[2/5] 启动后端 FastAPI..."
+echo "[2/6] 启动 Prometheus 与 Grafana..."
+cd "$ROOT_DIR"
+docker compose --profile observability up -d prometheus grafana
+if ! wait_for_http "Prometheus" "http://127.0.0.1:9090/-/ready" "douyin_live_prometheus" 90; then
+  exit 1
+fi
+if ! wait_for_http "Grafana" "http://127.0.0.1:3000/api/health" "douyin_live_grafana" 90; then
+  exit 1
+fi
+echo "  ✅ Prometheus: http://localhost:9090"
+echo "  ✅ Grafana: http://localhost:3000"
+
+# 3. 启动后端（先清理 8000 端口）
+echo ""
+echo "[3/6] 启动后端 FastAPI..."
 clean_port 8000
 cd "$BACKEND_DIR"
 source .venv/bin/activate
@@ -104,30 +149,25 @@ if ! wait_for_backend; then
 fi
 echo "  ✅ 后端: http://localhost:8000"
 echo "  ✅ Swagger: http://localhost:8000/docs"
-if ! wait_for_dataease; then
-  kill "$BACKEND_PID" 2>/dev/null || true
-  exit 1
-fi
-echo "  ✅ DataEase: http://localhost:8100"
 
-# 3. 启动采集 Worker（后台采集调度，仅在 MONITOR_ENABLED=true 时有效）
+# 4. 启动采集 Worker（后台采集调度，仅在 MONITOR_ENABLED=true 时有效）
 echo ""
-echo "[3/5] 采集调度器由后端统一管理..."
+echo "[4/6] 采集调度器由后端统一管理..."
 # 兼容旧版本启动脚本留下的独立 Worker，防止两个调度器重复创建浏览器。
 pkill -f "python -m workers.scraper_worker" 2>/dev/null || true
 WORKER_PID=""
 echo "  ✅ 避免重复启动独立 Worker 和重复创建浏览器"
 echo "     设置 MONITOR_ENABLED=true 启用自动采集"
 
-# 4. ASR 由后端统一启动，避免重复 Worker
+# 5. ASR 由后端统一启动，避免重复 Worker
 echo ""
-echo "[4/5] ASR 话术服务由后端统一管理..."
+echo "[5/6] ASR 话术服务由后端统一管理..."
 ASR_PID=""
 echo "  ✅ 默认开启，限制 2 核 / 1.8GB / 单任务并发，可在采集页面关闭"
 
-# 5. 启动前端（先清理 9527 端口）
+# 6. 启动前端（先清理 9527 端口）
 echo ""
-echo "[5/5] 启动前端..."
+echo "[6/6] 启动前端..."
 clean_port 9527
 cd "$FRONTEND_DIR"
 pnpm dev &
@@ -140,6 +180,8 @@ echo "  启动完成！"
 echo "  前端: http://localhost:9527"
 echo "  后端: http://localhost:8000"
 echo "  DataEase: http://localhost:8100"
+echo "  Prometheus: http://localhost:9090"
+echo "  Grafana: http://localhost:3000"
 echo "  Swagger: http://localhost:8000/docs"
 echo "========================================"
 echo ""

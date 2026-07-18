@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.api.v1.monitor import start_monitor
-from app.api.v1.collector import _collection_succeeded
+from app.api.v1.collector import _collection_succeeded, check_account_health
 from app.services.collector.scheduler import scheduler_manager
 
 
@@ -133,3 +133,47 @@ def test_realtime_browser_jobs_are_serialized():
     asyncio.run(scenario())
 
     assert max_active_count == 1
+
+
+def test_account_health_check_queues_behind_monitor_instead_of_requiring_stop():
+    account = SimpleNamespace(id=6, login_status="logged_in")
+
+    class FakeQuery:
+        def get(self, _account_id):
+            return account
+
+        def filter(self, *_args):
+            return self
+
+        def count(self):
+            return 0
+
+    class FakeDb:
+        def query(self, *_args):
+            return FakeQuery()
+
+        def commit(self):
+            return None
+
+    async def run_operation(operation):
+        return await operation()
+
+    original_running = scheduler_manager._running
+    scheduler_manager._running = True
+    try:
+        with (
+            patch.object(scheduler_manager, "run_serialized_browser_operation", side_effect=run_operation) as queued,
+            patch(
+                "app.api.v1.collector.browser_manager.check_account_health",
+                new_callable=AsyncMock,
+                return_value=(True, "账号登录状态有效"),
+            ) as browser_check,
+        ):
+            response = asyncio.run(check_account_health(6, FakeDb()))
+    finally:
+        scheduler_manager._running = original_running
+
+    assert response.valid is True
+    assert response.login_status == "logged_in"
+    queued.assert_awaited_once()
+    browser_check.assert_awaited_once_with(account)

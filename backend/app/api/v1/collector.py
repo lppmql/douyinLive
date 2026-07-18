@@ -169,12 +169,15 @@ async def check_account_health(account_id: int, db: Session = Depends(get_db)):
     account = db.query(ScraperAccount).get(account_id)
     if not account:
         raise HTTPException(404, "账号不存在")
-    if scheduler_manager.running:
-        raise HTTPException(409, "直播监控运行中，请先停止监控再检查账号")
-    if db.query(ScraperTask).filter(ScraperTask.status == "running").count():
-        raise HTTPException(409, "当前有采集任务运行，请等待任务结束后再检查账号")
+    if db.query(ScraperTask).filter(
+        ScraperTask.status == "running",
+        ScraperTask.task_type.in_(("collect_all", "login")),
+    ).count():
+        raise HTTPException(409, "当前有刷新采集或扫码登录任务运行，请等待任务结束后再检查账号")
 
-    valid, message = await browser_manager.check_account_health(account)
+    valid, message = await scheduler_manager.run_serialized_browser_operation(
+        lambda: browser_manager.check_account_health(account)
+    )
     account.login_status = "logged_in" if valid else "expired"
     db.commit()
     return AccountHealthResponse(
