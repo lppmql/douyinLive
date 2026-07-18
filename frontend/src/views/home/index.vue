@@ -11,9 +11,20 @@ const loading = ref(false);
 const collectorStatus = ref<Api.Douyin.CollectorStatus | null>(null);
 const monitorStatus = ref<Api.Douyin.MonitorStatus | null>(null);
 const tasks = ref<Api.Douyin.CollectorTask[]>([]);
+const loadError = ref('');
+const lastUpdatedAt = ref<number | null>(null);
 
 const runningTaskCount = computed(() => tasks.value.filter(task => task.status === 'running').length);
 const failedTaskCount = computed(() => tasks.value.filter(task => task.status === 'failed').length);
+const lastUpdatedLabel = computed(() => {
+  if (!lastUpdatedAt.value) return '尚未完成状态刷新';
+  return `最后更新 ${new Date(lastUpdatedAt.value).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })}`;
+});
 
 const quickActions = [
   {
@@ -34,11 +45,17 @@ const quickActions = [
     icon: 'mdi:text-box-outline',
     route: 'transcripts'
   },
-  { title: 'AI 复盘', description: '诊断知识价值、资料钩子和站内私信承接', icon: 'mdi:chart-box-outline', route: 'analysis' }
+  {
+    title: 'AI 复盘',
+    description: '诊断知识价值、资料钩子和站内私信承接',
+    icon: 'mdi:chart-box-outline',
+    route: 'analysis'
+  }
 ] as const;
 
 async function loadWorkspace() {
   loading.value = true;
+  loadError.value = '';
   const [collector, monitor, taskList] = await Promise.allSettled([
     fetchCollectorStatus(),
     fetchMonitorStatus(),
@@ -47,21 +64,32 @@ async function loadWorkspace() {
   if (collector.status === 'fulfilled' && collector.value.data) collectorStatus.value = collector.value.data;
   if (monitor.status === 'fulfilled' && monitor.value.data) monitorStatus.value = monitor.value.data;
   if (taskList.status === 'fulfilled' && taskList.value.data) tasks.value = taskList.value.data;
+  const failedCount = [collector, monitor, taskList].filter(
+    result => result.status === 'rejected' || Boolean(result.value.error)
+  ).length;
+  if (failedCount) loadError.value = `${failedCount} 项运行状态暂时未更新，已保留其余真实数据。`;
+  lastUpdatedAt.value = Date.now();
   loading.value = false;
+}
+
+function openRoute(name: 'collector' | 'live-sessions' | 'transcripts' | 'analysis') {
+  void router.push({ name });
 }
 
 onMounted(loadWorkspace);
 </script>
 
 <template>
-  <NSpace vertical :size="16">
+  <NSpace vertical :size="16" class="business-page">
     <BusinessPageHeader
       title="零食店避坑直播复盘工作台"
       description="围绕选址、预算、品牌、供应链、毛利损耗和证照科普，复盘资料钩子是否带来真实站内私信。"
       icon="mdi:view-dashboard-outline"
       eyebrow="知识科普与私信留资"
-      :status="failedTaskCount ? `${failedTaskCount} 个历史失败任务` : '系统状态已汇总'"
-      :status-type="failedTaskCount ? 'error' : 'success'"
+      :status="
+        loadError ? '部分状态更新失败' : failedTaskCount ? `${failedTaskCount} 个历史失败任务` : '系统状态已汇总'
+      "
+      :status-type="loadError || failedTaskCount ? 'error' : 'success'"
     >
       <template #actions>
         <NButton type="primary" :loading="loading" @click="loadWorkspace">
@@ -86,16 +114,29 @@ onMounted(loadWorkspace);
           <SvgIcon icon="mdi:numeric-4-circle-outline" />
           转写与 AI 分析
         </span>
+        <span class="ml-auto text-gray-400 lt-sm:ml-0">{{ lastUpdatedLabel }}</span>
       </div>
     </BusinessPageHeader>
+
+    <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
+      {{ loadError }}
+      <template #action>
+        <NButton size="small" secondary :loading="loading" @click="loadWorkspace">重新刷新</NButton>
+      </template>
+    </NAlert>
 
     <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">
       <NGi>
         <NCard
           :bordered="false"
-          class="card-wrapper h-full cursor-pointer"
+          class="business-clickable-card card-wrapper h-full"
           size="small"
-          @click="router.push({ name: 'collector' })"
+          role="button"
+          tabindex="0"
+          aria-label="查看采集服务状态"
+          @click="openRoute('collector')"
+          @keydown.enter="openRoute('collector')"
+          @keydown.space.prevent="openRoute('collector')"
         >
           <NStatistic label="采集服务" :value="collectorStatus?.connected ? '正常' : '异常'" />
           <NTag class="mt-12px" :type="collectorStatus?.connected ? 'success' : 'error'" round size="small">
@@ -106,9 +147,14 @@ onMounted(loadWorkspace);
       <NGi>
         <NCard
           :bordered="false"
-          class="card-wrapper h-full cursor-pointer"
+          class="business-clickable-card card-wrapper h-full"
           size="small"
-          @click="router.push({ name: 'collector' })"
+          role="button"
+          tabindex="0"
+          aria-label="管理采集账号"
+          @click="openRoute('collector')"
+          @keydown.enter="openRoute('collector')"
+          @keydown.space.prevent="openRoute('collector')"
         >
           <NStatistic
             label="可用采集账号"
@@ -122,9 +168,14 @@ onMounted(loadWorkspace);
       <NGi>
         <NCard
           :bordered="false"
-          class="card-wrapper h-full cursor-pointer"
+          class="business-clickable-card card-wrapper h-full"
           size="small"
-          @click="router.push({ name: 'collector' })"
+          role="button"
+          tabindex="0"
+          aria-label="查看实时监控"
+          @click="openRoute('collector')"
+          @keydown.enter="openRoute('collector')"
+          @keydown.space.prevent="openRoute('collector')"
         >
           <NStatistic label="实时监控" :value="monitorStatus?.active_session_count || 0">
             <template #suffix>场</template>
@@ -137,9 +188,14 @@ onMounted(loadWorkspace);
       <NGi>
         <NCard
           :bordered="false"
-          class="card-wrapper h-full cursor-pointer"
+          class="business-clickable-card card-wrapper h-full"
           size="small"
-          @click="router.push({ name: 'collector' })"
+          role="button"
+          tabindex="0"
+          aria-label="查看采集任务"
+          @click="openRoute('collector')"
+          @keydown.enter="openRoute('collector')"
+          @keydown.space.prevent="openRoute('collector')"
         >
           <NStatistic label="运行任务" :value="runningTaskCount">
             <template #suffix>个</template>
@@ -157,7 +213,7 @@ onMounted(loadWorkspace);
           <button
             type="button"
             class="h-full w-full flex items-start gap-12px rounded-10px border border-gray-200 bg-transparent p-14px text-left transition hover:border-primary hover:bg-primary-50 dark:border-white/10 dark:hover:bg-primary-900/15"
-            @click="router.push({ name: item.route })"
+            @click="openRoute(item.route)"
           >
             <div class="size-40px flex-center shrink-0 rounded-10px bg-primary-100 text-primary dark:bg-primary-900/30">
               <SvgIcon :icon="item.icon" class="text-21px" />

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, h, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useIntervalFn, useWebSocket } from '@vueuse/core';
 import type { SelectOption } from 'naive-ui';
@@ -17,7 +17,7 @@ import {
   queueTranscriptsByAnchor,
   runTranscriptAiPipeline
 } from '@/service/api/douyin';
-import { getServiceBaseURL, getWebSocketBaseURL } from '@/utils/service';
+import { getServiceBaseURL, getWebSocketBaseURL, unwrapServiceData } from '@/utils/service';
 
 defineOptions({ name: 'Transcripts' });
 
@@ -48,6 +48,8 @@ const categoryFilter = ref<string | null>(null);
 const viewMode = ref<'segments' | 'full'>('segments');
 const livePreview = ref('');
 const visibleSegmentLimit = ref(80);
+const loadError = ref('');
+const pageActive = ref(true);
 
 const selectedSession = computed(() => sessions.value.find(item => item.id === selectedSessionId.value) || null);
 const selectedTask = computed(() => tasks.value.find(item => item.session_id === selectedSessionId.value) || null);
@@ -58,17 +60,46 @@ const transcriptWsBaseURL = getWebSocketBaseURL(otherBaseURL.backend || window.l
 const wsUrl = computed(() => {
   return selectedSessionId.value ? `${transcriptWsBaseURL}/ws/transcript/${selectedSessionId.value}` : '';
 });
-const { status: wsStatus, data: wsData, open, close } = useWebSocket(wsUrl, {
+const {
+  status: wsStatus,
+  data: wsData,
+  open,
+  close
+} = useWebSocket(wsUrl, {
   autoReconnect: { retries: 5, delay: 3000 },
   heartbeat: { message: 'ping', interval: 30000 }
 });
 const wsConnected = computed(() => wsStatus.value === 'OPEN');
 
 const taskStatusCards = computed(() => [
-  { status: 'queued' as const, label: '等待转写', value: taskSummary.value.queued, icon: 'mdi:clock-outline', tone: 'info' },
-  { status: 'processing' as const, label: '正在转写', value: taskSummary.value.processing, icon: 'mdi:waveform', tone: 'warning' },
-  { status: 'completed' as const, label: '转写完成', value: taskSummary.value.completed, icon: 'mdi:check-circle-outline', tone: 'success' },
-  { status: 'failed' as const, label: '需要处理', value: taskSummary.value.failed, icon: 'mdi:alert-circle-outline', tone: 'error' }
+  {
+    status: 'queued' as const,
+    label: '等待转写',
+    value: taskSummary.value.queued,
+    icon: 'mdi:clock-outline',
+    tone: 'info'
+  },
+  {
+    status: 'processing' as const,
+    label: '正在转写',
+    value: taskSummary.value.processing,
+    icon: 'mdi:waveform',
+    tone: 'warning'
+  },
+  {
+    status: 'completed' as const,
+    label: '转写完成',
+    value: taskSummary.value.completed,
+    icon: 'mdi:check-circle-outline',
+    tone: 'success'
+  },
+  {
+    status: 'failed' as const,
+    label: '需要处理',
+    value: taskSummary.value.failed,
+    icon: 'mdi:alert-circle-outline',
+    tone: 'error'
+  }
 ]);
 const taskBySession = computed(() => new Map(tasks.value.map(item => [item.session_id, item])));
 const sessionOptions = computed(() =>
@@ -90,7 +121,11 @@ const categoryStats = computed(() => {
     counts.set(category, (counts.get(category) || 0) + 1);
   });
   return Array.from(counts.entries())
-    .map(([name, count]) => ({ name, count, percent: segments.value.length ? (count / segments.value.length) * 100 : 0 }))
+    .map(([name, count]) => ({
+      name,
+      count,
+      percent: segments.value.length ? (count / segments.value.length) * 100 : 0
+    }))
     .sort((a, b) => b.count - a.count);
 });
 const categoryOptions = computed(() => [
@@ -136,7 +171,12 @@ function formatDuration(seconds: number) {
 
 function formatDate(value: string | null) {
   if (!value) return '-';
-  return new Date(value).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return new Date(value).toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
 }
 
 function getStatusLabel(status?: DisplayStatus) {
@@ -191,13 +231,13 @@ function getSessionAvatarUrl(session: Api.Douyin.LiveSession) {
 
 async function loadSessions() {
   const response = await fetchLiveSessions();
-  sessions.value = sortSessionsByLatest(response.data || []);
+  sessions.value = sortSessionsByLatest(unwrapServiceData(response, '直播场次读取失败'));
 }
 
 async function loadTaskData() {
   const [summaryResponse, taskResponse] = await Promise.all([fetchTranscriptTaskStatus(), fetchTranscriptTasks()]);
-  if (summaryResponse.data) taskSummary.value = summaryResponse.data;
-  tasks.value = taskResponse.data || [];
+  taskSummary.value = unwrapServiceData(summaryResponse, '话术任务汇总读取失败');
+  tasks.value = unwrapServiceData(taskResponse, '话术任务读取失败');
 }
 
 async function loadTranscript(sessionId: number, silent = false) {
@@ -209,12 +249,12 @@ async function loadTranscript(sessionId: number, silent = false) {
       fetchTranscriptSegments(sessionId),
       fetchTranscriptFullText(sessionId).catch(() => ({ data: null }))
     ]);
-    segments.value = segmentResponse.data || [];
+    segments.value = unwrapServiceData(segmentResponse, '话术分段读取失败');
     fullText.value = textResponse.data?.full_text || '';
-  } catch {
+  } catch (error) {
     segments.value = [];
     fullText.value = '';
-    if (!silent) message.error('话术数据加载失败，请稍后重试');
+    if (!silent) message.error(error instanceof Error ? error.message : '话术数据加载失败，请稍后重试');
   } finally {
     loading.value = false;
   }
@@ -222,12 +262,14 @@ async function loadTranscript(sessionId: number, silent = false) {
 
 async function initializePage() {
   loading.value = true;
+  loadError.value = '';
   try {
     await Promise.all([loadSessions(), loadTaskData()]);
     const latestSession = sessions.value[0];
     if (latestSession) await loadTranscript(latestSession.id);
-  } catch {
-    message.error('主播话术页面加载失败');
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : '主播话术页面加载失败';
+    message.error(loadError.value);
   } finally {
     loading.value = false;
   }
@@ -238,9 +280,11 @@ async function refreshPage() {
   try {
     await Promise.all([loadSessions(), loadTaskData()]);
     if (selectedSessionId.value) await loadTranscript(selectedSessionId.value, true);
+    loadError.value = '';
     message.success('话术任务与内容已刷新');
-  } catch {
-    message.error('刷新失败，请检查后端服务');
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : '刷新失败，请检查后端服务';
+    message.error(loadError.value);
   } finally {
     refreshing.value = false;
   }
@@ -251,11 +295,11 @@ async function startTranscription() {
   queueLoading.value = true;
   try {
     const response = await queueTranscript(selectedSessionId.value);
-    if (!response.data) throw new Error('转写任务响应为空');
-    message.success(`任务已${response.data.created ? '创建' : '在队列中'}，编号 ${response.data.task_id}`);
+    const data = unwrapServiceData(response, '转写任务响应为空');
+    message.success(`任务已${data.created ? '创建' : '在队列中'}，编号 ${data.task_id}`);
     await loadTaskData();
-  } catch {
-    message.error('该场次暂无可用回放，请先刷新采集或检查 m3u8');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '该场次暂无可用回放，请先刷新采集或检查 m3u8');
   } finally {
     queueLoading.value = false;
   }
@@ -265,11 +309,11 @@ async function queueAnchorBatch() {
   batchLoading.value = true;
   try {
     const response = await queueTranscriptsByAnchor(1);
-    if (!response.data) throw new Error('批量任务响应为空');
-    message.success(`检查 ${response.data.anchor_count} 位主播，新建 ${response.data.created_count} 个任务`);
+    const data = unwrapServiceData(response, '批量任务响应为空');
+    message.success(`检查 ${data.anchor_count} 位主播，新建 ${data.created_count} 个任务`);
     await loadTaskData();
-  } catch {
-    message.error('增量转写失败，请确认已采集真实回放');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '增量转写失败，请确认已采集真实回放');
   } finally {
     batchLoading.value = false;
   }
@@ -280,13 +324,12 @@ async function runAiPipeline() {
   aiLoading.value = true;
   try {
     const response = await runTranscriptAiPipeline(selectedSessionId.value);
-    const data = response.data;
-    const saved = data
-      ? data.live_data_saved + data.comments_saved + data.transcript_saved + data.analysis_saved + data.review_saved
-      : 0;
+    const data = unwrapServiceData(response, 'AI 分析没有返回处理结果');
+    const saved =
+      data.live_data_saved + data.comments_saved + data.transcript_saved + data.analysis_saved + data.review_saved;
     message.success(`AI 复盘完成，知识库新增或更新 ${saved} 条真实数据`);
-  } catch {
-    message.error('AI 分析失败，请确认本场已有完整话术');
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : 'AI 分析失败，请确认本场已有完整话术');
   } finally {
     aiLoading.value = false;
   }
@@ -308,7 +351,8 @@ async function copyText(text: string, successMessage: string) {
 }
 
 function copyFullText() {
-  const text = fullText.value || segments.value.map(item => `[${formatTime(item.segment_start)}] ${item.text_content}`).join('\n');
+  const text =
+    fullText.value || segments.value.map(item => `[${formatTime(item.segment_start)}] ${item.text_content}`).join('\n');
   return copyText(text, '完整话术已复制');
 }
 
@@ -339,6 +383,7 @@ function openSessionDetail(sessionId: number) {
 
 const { pause: pausePolling, resume: resumePolling } = useIntervalFn(
   async () => {
+    if (!pageActive.value || document.visibilityState !== 'visible') return;
     await loadTaskData();
     if (selectedSessionId.value) await loadTranscript(selectedSessionId.value, true);
   },
@@ -346,7 +391,7 @@ const { pause: pausePolling, resume: resumePolling } = useIntervalFn(
   { immediate: false }
 );
 
-watch(activeTaskCount, count => (count ? resumePolling() : pausePolling()), { immediate: true });
+watch(activeTaskCount, count => (count && pageActive.value ? resumePolling() : pausePolling()), { immediate: true });
 watch([selectedSessionId, searchKeyword, categoryFilter], () => {
   visibleSegmentLimit.value = 80;
 });
@@ -367,14 +412,25 @@ watch(wsData, value => {
 });
 
 onMounted(initializePage);
+onActivated(() => {
+  pageActive.value = true;
+  if (activeTaskCount.value) resumePolling();
+  if (selectedSessionId.value) setTimeout(() => open(), 100);
+});
+onDeactivated(() => {
+  pageActive.value = false;
+  pausePolling();
+  close();
+});
 onUnmounted(() => {
+  pageActive.value = false;
   pausePolling();
   close();
 });
 </script>
 
 <template>
-  <NSpace vertical :size="16">
+  <NSpace vertical :size="16" class="business-page">
     <BusinessPageHeader
       title="主播话术"
       description="查看真实直播 ASR 话术、转写覆盖和内容结构，快速定位开店避坑知识、资料钩子与私信承接证据。"
@@ -382,21 +438,33 @@ onUnmounted(() => {
       :status="activeTaskCount ? `${activeTaskCount} 个任务运行中` : 'ASR 队列空闲'"
       :status-type="taskSummary.failed ? 'warning' : activeTaskCount ? 'info' : 'success'"
     >
-      <div class="flex flex-wrap items-center gap-x-16px gap-y-6px text-12px text-gray-500">
-        <span>选择真实场次</span><span>查看分段与覆盖</span><span>定位高价值话术</span><span>分析并同步知识库</span>
-        <NButton size="tiny" secondary :loading="refreshing" @click="refreshPage">
+      <template #actions>
+        <NButton secondary :loading="refreshing" @click="refreshPage">
           <template #icon><SvgIcon icon="mdi:refresh" /></template>
           刷新数据
         </NButton>
+      </template>
+      <div class="flex flex-wrap items-center gap-x-16px gap-y-6px text-12px text-gray-500">
+        <span>选择真实场次</span>
+        <span>查看分段与覆盖</span>
+        <span>定位高价值话术</span>
+        <span>分析并同步知识库</span>
       </div>
     </BusinessPageHeader>
+
+    <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
+      主播话术数据未能完整更新：{{ loadError }}
+      <template #action>
+        <NButton size="small" secondary :loading="loading || refreshing" @click="initializePage">重新加载</NButton>
+      </template>
+    </NAlert>
 
     <div class="grid grid-cols-2 gap-12px lg:grid-cols-4">
       <button
         v-for="card in taskStatusCards"
         :key="card.status"
         type="button"
-        class="status-card rounded-12px bg-white p-14px text-left dark:bg-dark sm:p-16px"
+        class="business-clickable-card status-card rounded-12px bg-white p-14px text-left dark:bg-dark sm:p-16px"
         :class="`status-card--${card.tone}`"
         @click="openTaskDrawer(card.status)"
       >
@@ -417,8 +485,8 @@ onUnmounted(() => {
     </NAlert>
 
     <NCard :bordered="false" class="card-wrapper">
-      <div class="flex flex-wrap items-start justify-between gap-14px">
-        <div class="min-w-280px flex-1">
+      <div class="business-toolbar">
+        <div class="min-w-0 flex-1">
           <div class="mb-7px flex items-center gap-7px text-12px font-600 text-gray-500">
             <span>当前复盘场次</span>
             <NTag size="tiny" type="info" :bordered="false" round>默认最新</NTag>
@@ -454,15 +522,23 @@ onUnmounted(() => {
             </NTooltip>
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-8px">
+        <div class="business-toolbar__actions">
           <NButton secondary :disabled="!selectedSessionId || (!segments.length && !fullText)" @click="copyFullText">
             <template #icon><SvgIcon icon="mdi:content-copy" /></template>
             复制全文
           </NButton>
-          <NButton type="primary" secondary :disabled="!selectedSessionId" :loading="queueLoading" @click="startTranscription">
+          <NButton
+            type="primary"
+            secondary
+            :disabled="!selectedSessionId"
+            :loading="queueLoading"
+            @click="startTranscription"
+          >
             {{ selectedTask ? '重新转写' : '开始转写' }}
           </NButton>
-          <NButton type="primary" :disabled="!segments.length" :loading="aiLoading" @click="runAiPipeline">AI 分析并入库</NButton>
+          <NButton type="primary" :disabled="!segments.length" :loading="aiLoading" @click="runAiPipeline">
+            AI 分析并入库
+          </NButton>
           <NDropdown
             trigger="click"
             :options="[
@@ -470,7 +546,14 @@ onUnmounted(() => {
               { label: '查看全部任务', key: 'tasks' },
               { label: '打开场次详情', key: 'detail', disabled: !selectedSessionId }
             ]"
-            @select="key => key === 'batch' ? queueAnchorBatch() : key === 'tasks' ? openTaskDrawer() : selectedSessionId && openSessionDetail(selectedSessionId)"
+            @select="
+              key =>
+                key === 'batch'
+                  ? queueAnchorBatch()
+                  : key === 'tasks'
+                    ? openTaskDrawer()
+                    : selectedSessionId && openSessionDetail(selectedSessionId)
+            "
           >
             <NButton quaternary :loading="batchLoading"><SvgIcon icon="mdi:dots-horizontal" /></NButton>
           </NDropdown>
@@ -480,7 +563,9 @@ onUnmounted(() => {
 
     <NAlert v-if="selectedTask?.status === 'failed'" type="error" :bordered="false" show-icon>
       本场最近一次转写失败：{{ selectedTask.error_message || '后台未记录具体错误' }}
-      <NButton text type="error" class="ml-8px" @click="openSessionDetail(selectedTask.session_id)">检查场次回放</NButton>
+      <NButton text type="error" class="ml-8px" @click="openSessionDetail(selectedTask.session_id)">
+        检查场次回放
+      </NButton>
     </NAlert>
     <NAlert v-if="livePreview" type="info" :bordered="false" show-icon>
       <template #header>正在接收实时话术</template>
@@ -488,10 +573,18 @@ onUnmounted(() => {
     </NAlert>
 
     <div v-if="selectedSessionId" class="grid grid-cols-2 gap-12px lg:grid-cols-4">
-      <NCard size="small" :bordered="false" class="card-wrapper"><NStatistic label="真实话术片段" :value="segments.length" suffix="段" /></NCard>
-      <NCard size="small" :bordered="false" class="card-wrapper"><NStatistic label="有效话术字数" :value="totalCharacters" suffix="字" /></NCard>
-      <NCard size="small" :bordered="false" class="card-wrapper"><NStatistic label="时间覆盖率" :value="coveragePercent" :precision="1" suffix="%" /></NCard>
-      <NCard size="small" :bordered="false" class="card-wrapper"><NStatistic label="平均 AI 评分" :value="averageAiScore ?? 0" :precision="1" suffix="分" /></NCard>
+      <NCard size="small" :bordered="false" class="card-wrapper">
+        <NStatistic label="真实话术片段" :value="segments.length" suffix="段" />
+      </NCard>
+      <NCard size="small" :bordered="false" class="card-wrapper">
+        <NStatistic label="有效话术字数" :value="totalCharacters" suffix="字" />
+      </NCard>
+      <NCard size="small" :bordered="false" class="card-wrapper">
+        <NStatistic label="时间覆盖率" :value="coveragePercent" :precision="1" suffix="%" />
+      </NCard>
+      <NCard size="small" :bordered="false" class="card-wrapper">
+        <NStatistic label="平均 AI 评分" :value="averageAiScore ?? 0" :precision="1" suffix="分" />
+      </NCard>
     </div>
 
     <NGrid :x-gap="16" :y-gap="16" cols="1 xl:3" responsive="screen">
@@ -513,7 +606,7 @@ onUnmounted(() => {
                 <NSelect
                   :value="categoryFilter || ''"
                   :options="categoryOptions"
-                  @update:value="value => categoryFilter = value || null"
+                  @update:value="value => (categoryFilter = value || null)"
                 />
               </div>
               <div class="mb-10px flex items-center justify-between text-12px text-gray-500">
@@ -529,16 +622,28 @@ onUnmounted(() => {
                   class="segment-card rounded-10px p-13px"
                 >
                   <div class="flex items-start gap-12px">
-                    <button type="button" class="time-button shrink-0 rounded-7px px-8px py-5px font-mono text-12px font-700" @click="jumpToSegment(item)">
+                    <button
+                      type="button"
+                      class="time-button shrink-0 rounded-7px px-8px py-5px font-mono text-12px font-700"
+                      @click="jumpToSegment(item)"
+                    >
                       {{ formatTime(item.segment_start) }}
                     </button>
                     <div class="min-w-0 flex-1">
-                      <p class="whitespace-pre-wrap text-14px leading-23px">{{ item.text_content || '该片段没有识别出有效文字' }}</p>
+                      <p class="whitespace-pre-wrap text-14px leading-23px">
+                        {{ item.text_content || '该片段没有识别出有效文字' }}
+                      </p>
                       <div class="mt-9px flex flex-wrap items-center gap-7px">
                         <NTag size="tiny" :bordered="false">{{ item.segment_type || '未分类' }}</NTag>
-                        <NTag size="tiny" :type="getStatusType(item.asr_status)" :bordered="false">{{ getStatusLabel(item.asr_status) }}</NTag>
-                        <span class="text-11px text-gray-400">{{ Math.max(0, item.segment_end - item.segment_start).toFixed(1) }} 秒</span>
-                        <span v-if="item.ai_score !== null" class="text-11px text-gray-400">AI {{ item.ai_score.toFixed(1) }} 分</span>
+                        <NTag size="tiny" :type="getStatusType(item.asr_status)" :bordered="false">
+                          {{ getStatusLabel(item.asr_status) }}
+                        </NTag>
+                        <span class="text-11px text-gray-400">
+                          {{ Math.max(0, item.segment_end - item.segment_start).toFixed(1) }} 秒
+                        </span>
+                        <span v-if="item.ai_score !== null" class="text-11px text-gray-400">
+                          AI {{ item.ai_score.toFixed(1) }} 分
+                        </span>
                       </div>
                     </div>
                     <NButton text class="shrink-0" @click="copyText(item.text_content, '该段话术已复制')">
@@ -557,7 +662,10 @@ onUnmounted(() => {
               <NEmpty v-if="!fullText && !segments.length" description="本场尚未生成完整话术" class="py-70px" />
               <NScrollbar v-else class="h-680px lt-sm:h-500px">
                 <div class="full-text whitespace-pre-wrap rounded-10px p-18px text-14px leading-26px">
-                  {{ fullText || segments.map(item => `[${formatTime(item.segment_start)}] ${item.text_content}`).join('\n\n') }}
+                  {{
+                    fullText ||
+                      segments.map(item => `[${formatTime(item.segment_start)}] ${item.text_content}`).join('\n\n')
+                  }}
                 </div>
               </NScrollbar>
             </template>
@@ -575,7 +683,10 @@ onUnmounted(() => {
                 :key="item.name"
                 type="button"
                 class="w-full text-left"
-                @click="categoryFilter = item.name; viewMode = 'segments'"
+                @click="
+                  categoryFilter = item.name;
+                  viewMode = 'segments';
+                "
               >
                 <div class="mb-5px flex items-center justify-between gap-10px text-12px">
                   <span class="truncate font-600">{{ item.name }}</span>
@@ -587,7 +698,9 @@ onUnmounted(() => {
           </NCard>
 
           <NCard title="时间导航" :bordered="false" class="card-wrapper">
-            <template #header-extra><NTag size="small" :bordered="false">{{ segments.length }} 个节点</NTag></template>
+            <template #header-extra>
+              <NTag size="small" :bordered="false">{{ segments.length }} 个节点</NTag>
+            </template>
             <NEmpty v-if="!segments.length" description="暂无时间节点" class="py-36px" />
             <NVirtualList v-else :items="segments" :item-size="64" item-resizable class="h-370px pr-5px">
               <template #default="{ item }">
@@ -596,8 +709,12 @@ onUnmounted(() => {
                   class="timeline-link mb-7px w-full flex items-start gap-9px rounded-8px p-9px text-left"
                   @click="jumpToSegment(item)"
                 >
-                  <span class="shrink-0 font-mono text-11px font-700 text-primary">{{ formatTime(item.segment_start) }}</span>
-                  <span class="line-clamp-2 text-12px leading-18px text-gray-500">{{ item.text_content || '无有效文字' }}</span>
+                  <span class="shrink-0 font-mono text-11px font-700 text-primary">
+                    {{ formatTime(item.segment_start) }}
+                  </span>
+                  <span class="line-clamp-2 text-12px leading-18px text-gray-500">
+                    {{ item.text_content || '无有效文字' }}
+                  </span>
                 </button>
               </template>
             </NVirtualList>
@@ -625,7 +742,9 @@ onUnmounted(() => {
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-7px">
                   <strong class="text-14px">{{ task.anchor_name }}</strong>
-                  <NTag size="tiny" :type="getStatusType(task.status)" :bordered="false">{{ getStatusLabel(task.status) }}</NTag>
+                  <NTag size="tiny" :type="getStatusType(task.status)" :bordered="false">
+                    {{ getStatusLabel(task.status) }}
+                  </NTag>
                   <NTag
                     v-if="task.status === 'completed'"
                     size="tiny"
@@ -664,7 +783,10 @@ onUnmounted(() => {
 .status-card {
   border: 1px solid rgba(128, 128, 128, 0.14);
   box-shadow: 0 8px 24px rgba(20, 35, 50, 0.05);
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 .status-card:hover,
 .status-card:focus-visible {
@@ -697,7 +819,9 @@ onUnmounted(() => {
 }
 .segment-card {
   scroll-margin-top: 24px;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
 }
 .segment-card:hover {
   border-color: rgba(32, 128, 240, 0.38);

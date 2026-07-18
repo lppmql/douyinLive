@@ -51,9 +51,9 @@ const bgColor = computed(() => {
 </script>
 
 <template>
-  <div class="relative size-full flex-center overflow-hidden" :style="{ backgroundColor: bgColor }">
+  <div class="relative size-full flex-center overflow-hidden p-16px lt-sm:p-12px" :style="{ backgroundColor: bgColor }">
     <WaveBg :theme-color="bgThemeColor" />
-    <div class="relative z-4 grid items-stretch gap-18px lg:grid-cols-[360px_440px]">
+    <div class="relative z-4 grid w-full max-w-820px items-stretch gap-18px lg:grid-cols-[360px_440px]">
       <section
         class="login-intro hidden overflow-hidden rounded-14px p-32px text-white lg:flex lg:flex-col lg:justify-between"
       >
@@ -80,8 +80,8 @@ const bgColor = computed(() => {
         </div>
       </section>
 
-      <NCard :bordered="false" class="w-auto rd-14px shadow-xl">
-        <div class="w-400px lt-sm:w-300px">
+      <NCard :bordered="false" class="min-w-0 w-full rd-14px shadow-xl">
+        <div class="w-full max-w-400px">
           <header class="flex-y-center justify-between">
             <SystemLogo class="size-64px lt-sm:size-48px" />
             <h3 class="text-28px text-primary font-500 lt-sm:text-22px">{{ $t('system.title') }}</h3>

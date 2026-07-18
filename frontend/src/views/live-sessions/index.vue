@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { h, reactive } from 'vue';
+import { h, reactive, ref } from 'vue';
 import { NTag, NButton, NAvatar } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { $t } from '@/locales';
@@ -7,6 +7,7 @@ import { fetchLiveSessionPage } from '@/service/api/douyin';
 import { defaultTransform, useNaivePaginatedTable } from '@/hooks/common/table';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
 import BusinessPageHeader from '@/components/business/page-header.vue';
+import { getServiceErrorMessage } from '@/utils/service';
 
 defineOptions({
   name: 'LiveSessions'
@@ -26,6 +27,7 @@ const searchParams = reactive({
   live_status: undefined as string | undefined,
   detail_status: undefined as string | undefined
 });
+const tableError = ref('');
 
 /* ---------- 状态标签映射 ---------- */
 const statusMap: Record<string, { type: 'success' | 'warning' | 'info' | 'default'; labelKey: string }> = {
@@ -91,16 +93,13 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSessionListItem>[] 
       fixed: 'left',
       render(row: Api.Douyin.LiveSessionListItem) {
         return h('div', { class: 'flex items-center gap-8px min-w-0' }, [
-          h(
-            NAvatar,
-            {
-              round: true,
-              size: 34,
-              src: row.anchor_avatar_url || undefined,
-              objectFit: 'cover',
-              renderFallback: () => row.anchor_name?.slice(0, 1) || '主'
-            }
-          ),
+          h(NAvatar, {
+            round: true,
+            size: 34,
+            src: row.anchor_avatar_url || undefined,
+            objectFit: 'cover',
+            renderFallback: () => row.anchor_name?.slice(0, 1) || '主'
+          }),
           h('div', { class: 'min-w-0' }, [
             h('div', { class: 'truncate font-600' }, row.anchor_name || '-'),
             h('div', { class: 'truncate text-12px text-gray-400' }, row.douyin_id || row.anchor_nickname || '-')
@@ -220,7 +219,10 @@ const {
   getDataByPage
 } = useNaivePaginatedTable({
   api: () => fetchLiveSessionPage(searchParams),
-  transform: response => defaultTransform(response),
+  transform: response => {
+    tableError.value = response.error ? getServiceErrorMessage(response.error, '直播场次列表读取失败') : '';
+    return defaultTransform(response);
+  },
   onPaginationParamsChange: ({ page, pageSize }) => {
     searchParams.current = page || 1;
     searchParams.size = pageSize || 10;
@@ -249,13 +251,19 @@ async function handleReset() {
 </script>
 
 <template>
-  <NSpace vertical :size="16">
+  <NSpace vertical :size="16" class="business-page">
     <BusinessPageHeader
       title="直播场次"
       description="查询全部真实直播记录，优先处理“待采集/待重试”的场次；表格中的短横线表示尚未采到，0 表示平台返回的真实零值。"
       icon="mdi:video-vintage"
-      :status="`数据库共 ${mobilePagination.itemCount || 0} 场`"
-      status-type="info"
+      :status="
+        tableError
+          ? '场次列表加载失败'
+          : loading && !mobilePagination.itemCount
+            ? '正在读取场次'
+            : `数据库共 ${mobilePagination.itemCount || 0} 场`
+      "
+      :status-type="tableError ? 'error' : 'info'"
     >
       <template #actions>
         <NButton type="primary" @click="router.push({ name: 'collector' })">
@@ -284,21 +292,25 @@ async function handleReset() {
       <NAlert class="mb-14px" type="info" :bordered="false" show-icon>
         建议先筛选“详情待采集”或“待重试”。详情完整后，评论、分钟趋势和 AI 分析才具备可靠的数据基础。
       </NAlert>
+      <NAlert v-if="tableError" class="mb-14px" type="error" :bordered="false" show-icon>
+        {{ tableError }}
+        <template #action><NButton size="small" secondary @click="getData">重新加载</NButton></template>
+      </NAlert>
 
-      <div class="mb-16px flex flex-wrap items-center justify-between gap-12px">
-        <NSpace wrap>
+      <div class="business-toolbar mb-16px">
+        <div class="business-toolbar__filters">
           <NInput
             v-model:value="searchForm.anchorName"
             clearable
             placeholder="搜索主播昵称"
-            class="w-200px lt-sm:w-full"
+            class="w-200px"
             @keyup.enter="handleSearch"
           />
           <NSelect
             v-model:value="searchForm.liveStatus"
             clearable
             placeholder="直播状态"
-            class="w-140px"
+            class="w-140px lt-sm:w-full"
             :options="[
               { label: '直播中', value: 'live' },
               { label: '已结束', value: 'finished' },
@@ -309,7 +321,7 @@ async function handleReset() {
             v-model:value="searchForm.detailStatus"
             clearable
             placeholder="详情状态"
-            class="w-140px"
+            class="w-140px lt-sm:w-full"
             :options="[
               { label: '详情完整', value: 'complete' },
               { label: '待采集', value: 'pending' },
@@ -319,30 +331,34 @@ async function handleReset() {
           />
           <NButton type="primary" @click="handleSearch">查询</NButton>
           <NButton @click="handleReset">重置</NButton>
-        </NSpace>
-        <TableHeaderOperation
-          v-model:columns="columnChecks"
-          :loading="loading"
-          :show-crud-actions="false"
-          @refresh="getData"
-        />
+        </div>
+        <div class="business-toolbar__actions">
+          <TableHeaderOperation
+            v-model:columns="columnChecks"
+            :loading="loading"
+            :show-crud-actions="false"
+            @refresh="getData"
+          />
+        </div>
       </div>
 
-      <NDataTable
-        :loading="loading"
-        :columns="columns"
-        :data="sessions"
-        :pagination="mobilePagination"
-        :scroll-x="scrollX"
-        :max-height="460"
-        :row-key="row => row.id"
-        :bordered="false"
-        :single-line="false"
-        :empty-text="$t('page.live-sessions.noData')"
-        remote
-        size="small"
-        striped
-      />
+      <div class="business-table-shell">
+        <NDataTable
+          :loading="loading"
+          :columns="columns"
+          :data="sessions"
+          :pagination="mobilePagination"
+          :scroll-x="scrollX"
+          :max-height="460"
+          :row-key="row => row.id"
+          :bordered="false"
+          :single-line="false"
+          :empty-text="$t('page.live-sessions.noData')"
+          remote
+          size="small"
+          striped
+        />
+      </div>
     </NCard>
   </NSpace>
 </template>

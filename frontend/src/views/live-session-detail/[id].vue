@@ -4,6 +4,7 @@ import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { fetchLiveSessionData, getLiveSessionVideoDownloadUrl } from '@/service/api/douyin';
 import BusinessPageHeader from '@/components/business/page-header.vue';
+import { unwrapServiceData } from '@/utils/service';
 import CommentGroups from './modules/comment-groups.vue';
 import ReviewWorkbench from './modules/review-workbench.vue';
 
@@ -14,7 +15,18 @@ const message = useMessage();
 const loading = ref(false);
 const videoDownloading = ref(false);
 const detail = ref<Api.Douyin.LiveSessionDetail | null>(null);
+const loadError = ref('');
 const session = computed(() => detail.value?.session);
+const headerStatus = computed(() => {
+  if (loading.value && !session.value) return '读取中';
+  if (loadError.value) return '加载失败';
+  return session.value?.live_status === 'live' ? '直播中' : '已结束';
+});
+const headerStatusType = computed(() => {
+  if (loadError.value) return 'error';
+  if (loading.value && !session.value) return 'info';
+  return session.value?.live_status === 'live' ? 'success' : 'default';
+});
 
 const profilesColumns: NaiveUI.TableColumn<Api.Douyin.LiveAudienceProfile>[] = [
   { title: '画像维度', key: 'dimension_type', width: 140 },
@@ -94,10 +106,12 @@ async function downloadVideo() {
 }
 async function load() {
   loading.value = true;
+  loadError.value = '';
   try {
-    detail.value = (await fetchLiveSessionData(Number(props.id))).data || null;
-  } catch {
-    message.error('直播场次详情加载失败');
+    detail.value = unwrapServiceData(await fetchLiveSessionData(Number(props.id)), '后台没有返回该场次的详情数据。');
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : '直播场次详情加载失败';
+    message.error(loadError.value);
   } finally {
     loading.value = false;
   }
@@ -106,27 +120,51 @@ onMounted(load);
 </script>
 
 <template>
-  <NSpin :show="loading">
-    <NSpace vertical :size="16">
-      <BusinessPageHeader
-        :title="session?.anchor_name || '直播场次详情'"
-        :description="session?.session_title || '正在读取场次信息'"
-        icon="mdi:video-vintage"
-        eyebrow="场次详情与 AI 分析"
-        :status="session?.live_status === 'live' ? '直播中' : '已结束'"
-        :status-type="session?.live_status === 'live' ? 'success' : 'default'"
-      >
-        <template #actions>
-          <NButton @click="router.push({ name: 'live-sessions' })">返回列表</NButton>
-        </template>
-        <div class="flex flex-wrap items-center gap-12px text-12px text-gray-500">
-          <NAvatar round :size="28" :src="session?.anchor_avatar_url || undefined" />
-          <span>抖音号 {{ session?.douyin_id || '未获取' }}</span>
-          <span>场次 #{{ id }}</span>
-          <span>详情状态：{{ session?.detail_collection_status || '读取中' }}</span>
-        </div>
-      </BusinessPageHeader>
+  <NSpace vertical :size="16" class="business-page" :aria-busy="loading">
+    <BusinessPageHeader
+      :title="session?.anchor_name || '直播场次详情'"
+      :description="session?.session_title || loadError || '正在读取真实场次信息，请稍候'"
+      icon="mdi:video-vintage"
+      eyebrow="场次详情与 AI 分析"
+      :status="headerStatus"
+      :status-type="headerStatusType"
+    >
+      <template #actions>
+        <NButton @click="router.push({ name: 'live-sessions' })">返回列表</NButton>
+      </template>
+      <div class="flex flex-wrap items-center gap-12px text-12px text-gray-500">
+        <NAvatar v-if="session" round :size="28" :src="session.anchor_avatar_url || undefined" />
+        <span v-if="session">抖音号 {{ session.douyin_id || '未获取' }}</span>
+        <span>场次 #{{ id }}</span>
+        <span>详情状态：{{ session?.detail_collection_status || (loading ? '读取中' : '-') }}</span>
+      </div>
+    </BusinessPageHeader>
 
+    <NCard v-if="loading && !detail" :bordered="false" class="business-loading-panel card-wrapper">
+      <NSkeleton text :repeat="2" />
+      <NSkeleton class="mt-20px" height="240px" :sharp="false" />
+      <div class="mt-16px grid grid-cols-2 gap-12px lt-sm:grid-cols-1">
+        <NSkeleton height="96px" :sharp="false" />
+        <NSkeleton height="96px" :sharp="false" />
+      </div>
+    </NCard>
+
+    <NResult
+      v-else-if="loadError"
+      status="error"
+      title="场次详情暂时无法读取"
+      :description="loadError"
+      class="card-wrapper bg-white py-36px dark:bg-dark"
+    >
+      <template #footer>
+        <NSpace justify="center">
+          <NButton @click="router.push({ name: 'live-sessions' })">返回场次列表</NButton>
+          <NButton type="primary" :loading="loading" @click="load">重新加载</NButton>
+        </NSpace>
+      </template>
+    </NResult>
+
+    <template v-else-if="detail">
       <ReviewWorkbench v-if="detail" :session-id="Number(id)" :detail="detail" @refresh-detail="load" />
 
       <NGrid :x-gap="16" :y-gap="16" cols="1 s:2 m:3 l:6" responsive="screen">
@@ -212,8 +250,8 @@ onMounted(load);
           </NTabPane>
         </NTabs>
       </NCard>
-    </NSpace>
-  </NSpin>
+    </template>
+  </NSpace>
 </template>
 
 <style scoped></style>

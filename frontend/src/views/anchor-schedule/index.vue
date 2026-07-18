@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, h, onActivated, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, h, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
 import { NAvatar, NButton, NTag, useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import BusinessPageHeader from '@/components/business/page-header.vue';
 import { fetchAnchorScheduleDashboard, getLiveSessionAvatarUrl } from '@/service/api/douyin';
+import { unwrapServiceData } from '@/utils/service';
 
 defineOptions({ name: 'AnchorSchedule' });
 
@@ -16,6 +17,7 @@ const todayTimestamp = dayjs().startOf('day').valueOf();
 const selectedRange = ref<[number, number]>([todayTimestamp, todayTimestamp]);
 const selectedAnchor = ref<string | null>(null);
 const reminderDrawerVisible = ref(false);
+const loadError = ref('');
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 const selectedStartDate = computed(() => dayjs(selectedRange.value[0]).format('YYYY-MM-DD'));
@@ -120,7 +122,12 @@ function setDateOffset(offset: number) {
 
 function setRecentDays(dayCount: number) {
   const endTimestamp = dayjs().startOf('day').valueOf();
-  selectedRange.value = [dayjs(endTimestamp).subtract(dayCount - 1, 'day').valueOf(), endTimestamp];
+  selectedRange.value = [
+    dayjs(endTimestamp)
+      .subtract(dayCount - 1, 'day')
+      .valueOf(),
+    endTimestamp
+  ];
   selectedAnchor.value = null;
   void loadSchedule();
 }
@@ -149,9 +156,13 @@ async function loadSchedule(silent = false) {
   if (!silent) loading.value = true;
   try {
     const response = await fetchAnchorScheduleDashboard(selectedStartDate.value, selectedEndDate.value);
-    if (response.data) dashboard.value = response.data;
-  } catch {
-    if (!silent) message.error('排班数据加载失败，请检查后端服务和数据库迁移');
+    dashboard.value = unwrapServiceData(response, '排班数据加载失败，请检查后端服务和数据库迁移');
+    loadError.value = '';
+  } catch (error) {
+    if (!silent) {
+      loadError.value = error instanceof Error ? error.message : '排班数据加载失败，请检查后端服务和数据库迁移';
+      message.error(loadError.value);
+    }
   } finally {
     if (!silent) loading.value = false;
   }
@@ -175,7 +186,11 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
         const anchor = dashboard.value?.anchors.find(item => item.source_anchor_name === row.source_anchor_name);
         const avatarUrl = getAnchorAvatarUrl(anchor);
         return h('div', { class: 'flex items-center gap-10px' }, [
-          h(NAvatar, { round: true, size: 36, src: avatarUrl }, avatarUrl ? undefined : () => row.source_anchor_name[0]),
+          h(
+            NAvatar,
+            { round: true, size: 36, src: avatarUrl },
+            avatarUrl ? undefined : () => row.source_anchor_name[0]
+          ),
           h('div', { class: 'min-w-0' }, [
             h('div', { class: 'truncate font-600' }, row.display_name),
             h('div', { class: 'truncate text-12px text-gray-400' }, anchor?.actual_anchor_name || '等待匹配真实账号')
@@ -211,9 +226,7 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.AnchorScheduleRow>[] {
       key: 'planned_start_time',
       width: 135,
       render: row =>
-        row.is_extra
-          ? '计划外加场'
-          : `${formatClock(row.planned_start_time)} - ${formatClock(row.planned_end_time)}`
+        row.is_extra ? '计划外加场' : `${formatClock(row.planned_start_time)} - ${formatClock(row.planned_end_time)}`
     },
     {
       title: '标准时长',
@@ -288,14 +301,23 @@ onMounted(() => {
   void loadSchedule();
   startAutoRefresh();
 });
-onActivated(() => void loadSchedule(true));
+onActivated(() => {
+  if (!refreshTimer) {
+    void loadSchedule(true);
+    startAutoRefresh();
+  }
+});
+onDeactivated(() => {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = null;
+});
 onBeforeUnmount(() => {
   if (refreshTimer) clearInterval(refreshTimer);
 });
 </script>
 
 <template>
-  <NSpace vertical :size="16">
+  <NSpace vertical :size="16" class="business-page">
     <BusinessPageHeader
       title="主播排班"
       description="依据真实排班表核对每天的开播场次、有效时长和开播整点；提醒只使用已采集直播场次，不会用模拟数据补齐。"
@@ -308,9 +330,11 @@ onBeforeUnmount(() => {
       :status-type="dashboard ? 'success' : 'info'"
     >
       <template #actions>
-        <NButton secondary @click="setDateOffset(-1)">昨天</NButton>
-        <NButton secondary @click="setDateOffset(0)">今天</NButton>
-        <NButton secondary @click="setRecentDays(7)">近 7 天</NButton>
+        <NButtonGroup>
+          <NButton secondary @click="setDateOffset(-1)">昨天</NButton>
+          <NButton secondary @click="setDateOffset(0)">今天</NButton>
+          <NButton secondary @click="setRecentDays(7)">近 7 天</NButton>
+        </NButtonGroup>
         <NDatePicker
           :value="selectedRange"
           type="daterange"
@@ -336,6 +360,13 @@ onBeforeUnmount(() => {
       </div>
     </BusinessPageHeader>
 
+    <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
+      排班核对数据未能更新：{{ loadError }}
+      <template #action>
+        <NButton size="small" secondary :loading="loading" @click="loadSchedule()">重新加载</NButton>
+      </template>
+    </NAlert>
+
     <NAlert
       v-if="dashboard?.summary.reminder_count"
       :type="dashboard.summary.invalid_count ? 'error' : 'warning'"
@@ -346,7 +377,8 @@ onBeforeUnmount(() => {
     >
       {{ selectedDateLabel }} 共有 {{ dashboard.summary.reminder_count }} 条排班提醒：缺少
       {{ dashboard.summary.missing_count }} 场、无效 {{ dashboard.summary.invalid_count }} 场、时长不足
-      {{ dashboard.summary.duration_short_count }} 场、跨整点开播 {{ dashboard.summary.cross_hour_count }} 场。点击查看明细。
+      {{ dashboard.summary.duration_short_count }} 场、跨整点开播
+      {{ dashboard.summary.cross_hour_count }} 场。点击查看明细。
     </NAlert>
     <NAlert v-else-if="dashboard" type="success" :bordered="false" show-icon>
       当前已到期班次没有发现异常；未来班次不会提前提示缺场。
@@ -381,9 +413,14 @@ onBeforeUnmount(() => {
         <NGi>
           <NCard
             :bordered="false"
-            class="schedule-kpi schedule-kpi-alert cursor-pointer"
+            class="business-clickable-card schedule-kpi schedule-kpi-alert"
             size="small"
+            role="button"
+            tabindex="0"
+            aria-label="查看排班提醒明细"
             @click="reminderDrawerVisible = true"
+            @keydown.enter="reminderDrawerVisible = true"
+            @keydown.space.prevent="reminderDrawerVisible = true"
           >
             <div class="text-13px text-gray-500">待处理提醒</div>
             <div class="mt-8px text-30px font-700 text-warning">{{ dashboard?.summary.reminder_count || 0 }}</div>
@@ -400,12 +437,13 @@ onBeforeUnmount(() => {
           <div class="mt-3px text-12px font-normal text-gray-400">点击主播卡片可筛选下方班次</div>
         </div>
       </template>
-      <NGrid :x-gap="12" :y-gap="12" cols="1 s:2 m:5" responsive="screen">
+      <NGrid :x-gap="12" :y-gap="12" cols="1 s:2 l:3 xxl:5" responsive="screen">
         <NGi v-for="anchor in dashboard?.anchors || []" :key="anchor.source_anchor_name">
           <button
             type="button"
             class="anchor-card"
             :class="{ 'anchor-card-active': selectedAnchor === anchor.source_anchor_name }"
+            :aria-pressed="selectedAnchor === anchor.source_anchor_name"
             @click="toggleAnchor(anchor.source_anchor_name)"
           >
             <div class="flex items-center gap-10px">
@@ -415,13 +453,15 @@ onBeforeUnmount(() => {
               </NAvatar>
               <div class="min-w-0 text-left">
                 <div class="truncate text-14px font-700">{{ anchor.display_name }}</div>
-                <div class="mt-2px truncate text-11px text-gray-400">{{ anchor.room_name }} · {{ anchor.network_name }}</div>
+                <div class="mt-2px truncate text-11px text-gray-400">
+                  {{ anchor.room_name }} · {{ anchor.network_name }}
+                </div>
               </div>
             </div>
             <div class="mt-13px flex items-end justify-between">
               <div>
                 <span class="text-24px font-700">{{ anchor.matched_count }}</span>
-                <span class="text-12px text-gray-400"> / {{ anchor.expected_count }} 场</span>
+                <span class="text-12px text-gray-400">/ {{ anchor.expected_count }} 场</span>
               </div>
               <NTag v-if="anchor.warning_count" type="warning" size="small" round :bordered="false">
                 {{ anchor.warning_count }} 条提醒
@@ -494,19 +534,21 @@ onBeforeUnmount(() => {
           {{ includesToday ? '范围包含今天，每 60 秒静默刷新' : '历史范围按需刷新' }}
         </span>
       </template>
-      <NDataTable
-        :columns="columns"
-        :data="visibleRows"
-        :loading="loading"
-        :row-key="row => `${row.schedule_date}-${row.id}`"
-        :scroll-x="1560"
-        :max-height="560"
-        size="small"
-        striped
-      />
+      <div class="business-table-shell">
+        <NDataTable
+          :columns="columns"
+          :data="visibleRows"
+          :loading="loading"
+          :row-key="row => `${row.schedule_date}-${row.id}`"
+          :scroll-x="1560"
+          :max-height="560"
+          size="small"
+          striped
+        />
+      </div>
     </NCard>
 
-    <NDrawer v-model:show="reminderDrawerVisible" :width="460" placement="right">
+    <NDrawer v-model:show="reminderDrawerVisible" width="min(460px, 94vw)" placement="right">
       <NDrawerContent title="排班提醒" closable>
         <NEmpty v-if="!dashboard?.reminders.length" description="当前没有已到期异常" />
         <NList v-else hoverable clickable>
@@ -532,7 +574,8 @@ onBeforeUnmount(() => {
               </div>
             </template>
             <div class="font-600">
-              {{ item.anchor_name }} · {{ item.is_extra ? `加场 ${item.session_index}` : `第 ${item.session_index} 场` }}
+              {{ item.anchor_name }} ·
+              {{ item.is_extra ? `加场 ${item.session_index}` : `第 ${item.session_index} 场` }}
             </div>
             <div class="mt-4px text-13px text-gray-500">{{ item.message }}</div>
             <div class="mt-5px text-11px text-gray-400">

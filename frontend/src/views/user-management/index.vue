@@ -17,6 +17,7 @@ import { fetchUserList, fetchCreateUser, fetchUpdateUser, fetchDeleteUser, type 
 import { defaultTransform, useNaivePaginatedTable } from '@/hooks/common/table';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
 import BusinessPageHeader from '@/components/business/page-header.vue';
+import { getServiceErrorMessage } from '@/utils/service';
 
 defineOptions({ name: 'UserManagement' });
 
@@ -26,6 +27,7 @@ const dialog = useDialog();
 /* ---------- 搜索 ---------- */
 const searchUsername = ref('');
 const searchParams = reactive({ current: 1, size: 20, username: undefined as string | undefined });
+const tableError = ref('');
 
 /* ---------- 表格列 ---------- */
 function renderRoles(roles: string[]) {
@@ -54,8 +56,8 @@ function fmtDateTime(val: string | null): string {
 
 function createColumns(): NaiveUI.TableColumn<UserRecord>[] {
   return [
-    { title: 'ID', key: 'id', width: 60 },
-    { title: '用户名', key: 'username', width: 100 },
+    { title: 'ID', key: 'id', width: 60, fixed: 'left' },
+    { title: '用户名', key: 'username', width: 120, fixed: 'left' },
     {
       title: '昵称',
       key: 'nickname',
@@ -109,6 +111,7 @@ function createColumns(): NaiveUI.TableColumn<UserRecord>[] {
       title: '操作',
       key: 'actions',
       width: 140,
+      fixed: 'right',
       render(row: UserRecord) {
         return h(
           NSpace,
@@ -150,7 +153,10 @@ const {
   getDataByPage
 } = useNaivePaginatedTable({
   api: () => fetchUserList(searchParams),
-  transform: response => defaultTransform(response),
+  transform: response => {
+    tableError.value = response.error ? getServiceErrorMessage(response.error, '用户列表读取失败') : '';
+    return defaultTransform(response);
+  },
   onPaginationParamsChange: ({ page, pageSize }) => {
     searchParams.current = page || 1;
     searchParams.size = pageSize || 20;
@@ -223,6 +229,7 @@ function openEdit(row: UserRecord) {
 }
 
 async function handleSave() {
+  formData.username = formData.username.trim();
   if (!formData.username) {
     message.error('请输入用户名');
     return;
@@ -240,6 +247,8 @@ async function handleSave() {
         message.success('更新成功');
         modalShow.value = false;
         getData();
+      } else {
+        message.error(getServiceErrorMessage(error, '更新用户失败'));
       }
     } else {
       const { error } = await fetchCreateUser(formData);
@@ -247,6 +256,8 @@ async function handleSave() {
         message.success('创建成功');
         modalShow.value = false;
         getData();
+      } else {
+        message.error(getServiceErrorMessage(error, '创建用户失败'));
       }
     }
   } catch {
@@ -260,14 +271,17 @@ function handleDelete(row: UserRecord) {
   dialog.warning({
     title: '确认删除',
     content: `确定要删除用户 "${row.username}" 吗？`,
-    positiveText: '确定',
+    positiveText: '确认删除',
     negativeText: '取消',
+    positiveButtonProps: { type: 'error' },
     onPositiveClick: async () => {
       try {
         const { error } = await fetchDeleteUser(row.id);
         if (!error) {
           message.success('删除成功');
           getData();
+        } else {
+          message.error(getServiceErrorMessage(error, '删除失败'));
         }
       } catch {
         message.error('删除失败');
@@ -278,13 +292,19 @@ function handleDelete(row: UserRecord) {
 </script>
 
 <template>
-  <NSpace vertical :size="16">
+  <NSpace vertical :size="16" class="business-page">
     <BusinessPageHeader
       title="系统用户管理"
       description="维护中台登录账号、角色和启停状态。管理员账号受保护；不确定是否仍需使用时，建议先停用而不是删除。"
       icon="mdi:account-group-outline"
-      :status="`共 ${users.length} 个当前页用户`"
-      status-type="info"
+      :status="
+        tableError
+          ? '用户列表加载失败'
+          : loading && !mobilePagination.itemCount
+            ? '正在读取用户'
+            : `共 ${mobilePagination.itemCount || 0} 个用户`
+      "
+      :status-type="tableError ? 'error' : 'info'"
     >
       <template #actions>
         <NButton type="primary" @click="openCreate">
@@ -295,38 +315,47 @@ function handleDelete(row: UserRecord) {
     </BusinessPageHeader>
 
     <NCard :bordered="false" class="card-wrapper h-full" title="用户列表">
-      <div class="mb-16px flex flex-wrap items-center justify-between gap-12px">
-        <NSpace align="center" wrap>
+      <NAlert v-if="tableError" class="mb-16px" type="error" :bordered="false" show-icon>
+        {{ tableError }}
+        <template #action><NButton size="small" secondary @click="getData">重新加载</NButton></template>
+      </NAlert>
+      <div class="business-toolbar mb-16px">
+        <div class="business-toolbar__filters">
           <NInput
             v-model:value="searchUsername"
             placeholder="搜索用户名"
             clearable
-            class="w-200px lt-sm:w-160px"
+            class="w-220px"
             @keyup.enter="handleSearch"
           />
           <NButton type="primary" @click="handleSearch">搜索</NButton>
           <NButton @click="handleResetSearch">重置</NButton>
-        </NSpace>
-        <TableHeaderOperation v-model:columns="columnChecks" :loading="loading" @refresh="getData">
-          <template #default>
-            <NTag type="info" round size="small">超级管理员不可删除</NTag>
-          </template>
-        </TableHeaderOperation>
+        </div>
+        <div class="business-toolbar__actions">
+          <TableHeaderOperation v-model:columns="columnChecks" :loading="loading" @refresh="getData">
+            <template #default>
+              <NTag type="info" round size="small">超级管理员不可删除</NTag>
+            </template>
+          </TableHeaderOperation>
+        </div>
       </div>
 
-      <NDataTable
-        :loading="loading"
-        :columns="columns"
-        :data="users"
-        :pagination="mobilePagination"
-        :row-key="(row: UserRecord) => row.id"
-        :scroll-x="scrollX"
-        remote
-        size="small"
-        striped
-        :bordered="false"
-        class="min-h-0"
-      />
+      <div class="business-table-shell">
+        <NDataTable
+          :loading="loading"
+          :columns="columns"
+          :data="users"
+          :pagination="mobilePagination"
+          :row-key="(row: UserRecord) => row.id"
+          :scroll-x="Math.max(scrollX, 1080)"
+          :max-height="520"
+          remote
+          size="small"
+          striped
+          :bordered="false"
+          class="min-h-0"
+        />
+      </div>
 
       <!-- 新增/编辑对话框 -->
       <NModal
@@ -336,7 +365,10 @@ function handleDelete(row: UserRecord) {
         preset="card"
         class="w-520px max-w-[calc(100vw-32px)]"
       >
-        <NForm label-placement="left" label-width="80px">
+        <NAlert class="mb-16px" type="info" :bordered="false">
+          普通用户用于日常查看；仅确有管理需要时授予超级管理员角色。
+        </NAlert>
+        <NForm label-placement="top">
           <NFormItem label="用户名" required>
             <NInput v-model:value="formData.username" placeholder="请输入用户名" />
           </NFormItem>

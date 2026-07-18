@@ -11,7 +11,9 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ updateAsset: [asset: Api.Douyin.ScriptAsset, status: Api.Douyin.ScriptAsset['status']] }>();
 const reviewStore = useReviewStore();
-const complianceFindings = computed(() => props.findings.filter(item => item.category === '合规' && item.status !== 'dismissed'));
+const complianceFindings = computed(() =>
+  props.findings.filter(item => item.category === '合规' && item.status !== 'dismissed')
+);
 </script>
 
 <template>
@@ -24,14 +26,23 @@ const complianceFindings = computed(() => props.findings.filter(item => item.cat
           <button
             type="button"
             class="w-full rounded-9px border p-10px text-left"
-            :class="item.covered ? 'border-success-200 bg-success-50 dark:bg-success-900/15' : 'border-gray-200 dark:border-gray-700'"
+            :class="
+              item.covered
+                ? 'border-success-200 bg-success-50 dark:bg-success-900/15'
+                : 'border-gray-200 dark:border-gray-700'
+            "
             @click="item.first_seconds !== null && reviewStore.seekTo(item.first_seconds)"
           >
             <div class="flex items-center gap-7px text-12px font-700">
-              <SvgIcon :icon="item.covered ? 'mdi:check-circle-outline' : 'mdi:circle-outline'" :class="item.covered ? 'text-success' : 'text-gray-400'" />
+              <SvgIcon
+                :icon="item.covered ? 'mdi:check-circle-outline' : 'mdi:circle-outline'"
+                :class="item.covered ? 'text-success' : 'text-gray-400'"
+              />
               {{ item.category }}
             </div>
-            <div class="mt-5px text-11px text-gray-400">{{ item.covered ? `${item.segment_count} 个片段` : '本场未识别' }}</div>
+            <div class="mt-5px text-11px text-gray-400">
+              {{ item.covered ? `${item.segment_count} 个片段` : '本场未识别' }}
+            </div>
           </button>
         </NGi>
       </NGrid>
@@ -61,7 +72,9 @@ const complianceFindings = computed(() => props.findings.filter(item => item.cat
             </template>
             <template #footer>
               <div class="mt-8px flex items-center justify-between gap-8px text-11px text-gray-400">
-                <button type="button" @click="reviewStore.seekTo(item.start_seconds || 0)">{{ item.category }} · 跳到原话</button>
+                <button type="button" @click="reviewStore.seekTo(item.start_seconds || 0)">
+                  {{ item.category }} · 跳到原话
+                </button>
                 <NButton
                   v-if="item.status === 'candidate'"
                   size="tiny"

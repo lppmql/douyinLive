@@ -120,7 +120,11 @@ onBeforeUnmount(() => {
         <div v-else>该场次尚未采集到可回放的 m3u8 地址。</div>
         <NButton v-if="streamUrl" class="mt-14px" type="primary" secondary @click="startPlayback">
           <template #icon><SvgIcon icon="mdi:play-circle-outline" /></template>
-          {{ playbackOffset ? `从 ${Math.floor(playbackOffset / 60)}:${String(Math.floor(playbackOffset % 60)).padStart(2, '0')} 播放` : '播放兼容回放' }}
+          {{
+            playbackOffset
+              ? `从 ${Math.floor(playbackOffset / 60)}:${String(Math.floor(playbackOffset % 60)).padStart(2, '0')} 播放`
+              : '播放兼容回放'
+          }}
         </NButton>
       </div>
       <div v-if="started && loading" class="pointer-events-none absolute flex flex-col items-center text-white">
@@ -136,7 +140,11 @@ onBeforeUnmount(() => {
       <span class="min-w-0 flex-1 truncate">{{ title }}</span>
       <div class="flex shrink-0 items-center gap-8px">
         <NTag size="small" type="success" :bordered="false">9:16 · H.264</NTag>
-        <span>联动位置 {{ Math.floor(reviewStore.currentSecond / 60) }}:{{ String(Math.floor(reviewStore.currentSecond % 60)).padStart(2, '0') }}</span>
+        <span>
+          联动位置 {{ Math.floor(reviewStore.currentSecond / 60) }}:{{
+            String(Math.floor(reviewStore.currentSecond % 60)).padStart(2, '0')
+          }}
+        </span>
       </div>
     </div>
   </div>

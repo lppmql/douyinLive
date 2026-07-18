@@ -4,6 +4,7 @@ import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import AnchorAvatar from '@/components/business/anchor-avatar.vue';
 import BusinessPageHeader from '@/components/business/page-header.vue';
+import { unwrapServiceData } from '@/utils/service';
 import {
   askKnowledge,
   fetchKnowledgeItemPage,
@@ -37,6 +38,7 @@ const refreshing = ref(false);
 const syncing = ref(false);
 const sliceLoading = ref(false);
 const itemLoading = ref(false);
+const loadError = ref('');
 
 const sliceFilters = reactive({
   keyword: '',
@@ -79,11 +81,18 @@ const suggestedQuestions = [
   '最近场次中用户最常问哪些开店预算问题？',
   '找出有明确地区和预算的高意向评论'
 ];
-const followUpQuestions = ['对应哪些主播和场次？', '给出评论或话术原文证据', '不同场次之间有什么差异？', '整理成下一场可执行动作'];
+const followUpQuestions = [
+  '对应哪些主播和场次？',
+  '给出评论或话术原文证据',
+  '不同场次之间有什么差异？',
+  '整理成下一场可执行动作'
+];
 
 const sessionById = computed(() => new Map(sessions.value.map(session => [session.id, session])));
 const anchorOptions = computed(() => {
-  const names = new Set(sessions.value.map(session => session.anchor_name).filter((name): name is string => Boolean(name)));
+  const names = new Set(
+    sessions.value.map(session => session.anchor_name).filter((name): name is string => Boolean(name))
+  );
   return Array.from(names)
     .sort((a, b) => a.localeCompare(b, 'zh-CN'))
     .map(name => ({ label: name, value: name }));
@@ -132,12 +141,9 @@ const summaryCards = computed(() => [
 ]);
 
 async function loadOverview() {
-  const [statusResponse, sessionResponse] = await Promise.all([
-    fetchKnowledgeTimeSliceStatus(),
-    fetchLiveSessions()
-  ]);
-  sliceStatus.value = statusResponse.data || null;
-  sessions.value = sessionResponse.data || [];
+  const [statusResponse, sessionResponse] = await Promise.all([fetchKnowledgeTimeSliceStatus(), fetchLiveSessions()]);
+  sliceStatus.value = unwrapServiceData(statusResponse, '知识库覆盖状态读取失败');
+  sessions.value = unwrapServiceData(sessionResponse, '直播场次读取失败');
 }
 
 async function loadTimeSlices() {
@@ -150,8 +156,9 @@ async function loadTimeSlices() {
       anchor_name: sliceFilters.anchorName || undefined,
       evidence_type: sliceFilters.evidenceType || undefined
     });
-    timeSlices.value = response.data?.records || [];
-    slicePagination.total = response.data?.total || 0;
+    const page = unwrapServiceData(response, '时间片证据读取失败');
+    timeSlices.value = page.records;
+    slicePagination.total = page.total;
   } finally {
     sliceLoading.value = false;
   }
@@ -167,8 +174,9 @@ async function loadKnowledgeItems() {
       category: itemFilters.category || undefined,
       source_type: itemFilters.sourceType || undefined
     });
-    items.value = response.data?.records || [];
-    itemPagination.total = response.data?.total || 0;
+    const page = unwrapServiceData(response, '整场知识读取失败');
+    items.value = page.records;
+    itemPagination.total = page.total;
   } finally {
     itemLoading.value = false;
   }
@@ -176,10 +184,12 @@ async function loadKnowledgeItems() {
 
 async function loadPage() {
   initialLoading.value = true;
+  loadError.value = '';
   try {
     await Promise.all([loadOverview(), loadTimeSlices(), loadKnowledgeItems()]);
-  } catch {
-    message.error('知识库加载失败，请检查后端服务');
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : '知识库加载失败，请检查后端服务';
+    message.error(loadError.value);
   } finally {
     initialLoading.value = false;
   }
@@ -189,9 +199,11 @@ async function refreshPage() {
   refreshing.value = true;
   try {
     await Promise.all([loadOverview(), loadTimeSlices(), loadKnowledgeItems()]);
+    loadError.value = '';
     message.success('知识证据与覆盖状态已刷新');
-  } catch {
-    message.error('知识库刷新失败');
+  } catch (error) {
+    loadError.value = error instanceof Error ? error.message : '知识库刷新失败';
+    message.error(loadError.value);
   } finally {
     refreshing.value = false;
   }
@@ -201,9 +213,9 @@ async function syncRecent() {
   syncing.value = true;
   try {
     const response = await syncRecentKnowledge(20);
-    const data = response.data;
+    const data = unwrapServiceData(response, '同步知识库失败');
     message.success(
-      `已同步 ${data?.session_count || 0} 场，新增 ${data?.time_slices_created || 0} 个时间片，更新 ${data?.time_slices_updated || 0} 个`
+      `已同步 ${data.session_count || 0} 场，新增 ${data.time_slices_created || 0} 个时间片，更新 ${data.time_slices_updated || 0} 个`
     );
     slicePagination.current = 1;
     itemPagination.current = 1;
@@ -376,17 +388,18 @@ async function sendQuestion(preset?: string) {
 
   try {
     const response = await askKnowledge(content, assistantCategory.value || undefined, history);
+    const answer = unwrapServiceData(response, '知识检索请求失败');
     messages.value.push({
       id: ++messageId,
       role: 'ai',
-      content: response.data?.answer || '当前真实知识库没有返回可用结论。',
-      sources: response.data?.sources || []
+      content: answer.answer || '当前真实知识库没有返回可用结论。',
+      sources: answer.sources || []
     });
-  } catch {
+  } catch (error) {
     messages.value.push({
       id: ++messageId,
       role: 'ai',
-      content: '知识检索请求失败，请确认 AI 服务状态后重试。',
+      content: error instanceof Error ? error.message : '知识检索请求失败，请确认 AI 服务状态后重试。',
       error: true
     });
   } finally {
@@ -410,7 +423,7 @@ onMounted(loadPage);
 </script>
 
 <template>
-  <div class="knowledge-page flex flex-col gap-16px">
+  <div class="knowledge-page business-page">
     <BusinessPageHeader
       class="order-1"
       title="直播经营知识库"
@@ -436,13 +449,23 @@ onMounted(loadPage);
       </div>
     </BusinessPageHeader>
 
+    <NAlert v-if="loadError" class="order-2" type="warning" :bordered="false" show-icon>
+      知识证据未能完整更新：{{ loadError }}
+      <template #action>
+        <NButton size="small" secondary :loading="initialLoading || refreshing" @click="loadPage">重新加载</NButton>
+      </template>
+    </NAlert>
+
     <div class="order-3 grid grid-cols-2 gap-12px xl:grid-cols-5">
       <button
         v-for="card in summaryCards"
         :key="card.key"
         type="button"
-        class="summary-card"
-        :class="[`summary-card--${card.tone}`, { 'summary-card--active': (sliceFilters.evidenceType || '') === card.key }]"
+        class="business-clickable-card summary-card"
+        :class="[
+          `summary-card--${card.tone}`,
+          { 'summary-card--active': (sliceFilters.evidenceType || '') === card.key }
+        ]"
         :aria-pressed="(sliceFilters.evidenceType || '') === card.key"
         @click="selectSummaryEvidence(card.key)"
       >
@@ -471,13 +494,19 @@ onMounted(loadPage);
         </template>
         <template #header-extra>
           <NTag round :bordered="false" type="info">
-            {{ activeTab === 'time-slices' ? `${formatNumber(slicePagination.total)} 个时间片` : `${formatNumber(itemPagination.total)} 条知识` }}
+            {{
+              activeTab === 'time-slices'
+                ? `${formatNumber(slicePagination.total)} 个时间片`
+                : `${formatNumber(itemPagination.total)} 条知识`
+            }}
           </NTag>
         </template>
 
         <NTabs v-model:value="activeTab" type="line" animated>
           <NTabPane name="time-slices" tab="时间片证据">
-            <div class="mb-14px grid grid-cols-[minmax(220px,1fr)_190px_170px_auto] gap-8px lt-lg:grid-cols-2 lt-sm:grid-cols-1">
+            <div
+              class="mb-14px grid grid-cols-[minmax(220px,1fr)_190px_170px_auto] gap-8px lt-lg:grid-cols-2 lt-sm:grid-cols-1"
+            >
               <NInput
                 v-model:value="sliceFilters.keyword"
                 clearable
@@ -506,11 +535,7 @@ onMounted(loadPage);
             </div>
 
             <NSpin :show="initialLoading || sliceLoading">
-              <NEmpty
-                v-if="!timeSlices.length && !sliceLoading"
-                class="py-56px"
-                description="没有符合条件的真实时间片"
-              >
+              <NEmpty v-if="!timeSlices.length && !sliceLoading" class="py-56px" description="没有符合条件的真实时间片">
                 <template #extra><NButton secondary @click="resetSliceFilters">清除筛选</NButton></template>
               </NEmpty>
               <div v-else class="flex flex-col gap-10px">
@@ -532,30 +557,50 @@ onMounted(loadPage);
                     <div class="flex flex-wrap items-center justify-end gap-6px">
                       <NTag v-if="slice.transcript_text" size="small" round :bordered="false" type="success">话术</NTag>
                       <NTag v-if="slice.comment_count" size="small" round :bordered="false" type="info">评论</NTag>
-                      <NTag v-if="slice.metric_point_count" size="small" round :bordered="false" type="warning">指标</NTag>
+                      <NTag v-if="slice.metric_point_count" size="small" round :bordered="false" type="warning">
+                        指标
+                      </NTag>
                       <NTag v-if="slice.high_intent_comment_count" size="small" round :bordered="false" type="error">
                         高意向 {{ slice.high_intent_comment_count }}
                       </NTag>
-                      <NTag size="small" round>{{ formatOffset(slice.slice_start_seconds) }} - {{ formatOffset(slice.slice_end_seconds) }}</NTag>
+                      <NTag size="small" round>
+                        {{ formatOffset(slice.slice_start_seconds) }} - {{ formatOffset(slice.slice_end_seconds) }}
+                      </NTag>
                     </div>
                   </div>
 
                   <div class="mt-10px grid grid-cols-4 gap-7px lt-sm:grid-cols-2">
-                    <div class="metric-chip"><span>评论</span><strong>{{ slice.comment_count }}</strong></div>
-                    <div class="metric-chip"><span>采样点</span><strong>{{ slice.metric_point_count }}</strong></div>
-                    <div class="metric-chip"><span>平均在线</span><strong>{{ Math.round(slice.avg_online_count) }}</strong></div>
-                    <div class="metric-chip"><span>峰值在线</span><strong>{{ slice.peak_online_count }}</strong></div>
+                    <div class="metric-chip">
+                      <span>评论</span>
+                      <strong>{{ slice.comment_count }}</strong>
+                    </div>
+                    <div class="metric-chip">
+                      <span>采样点</span>
+                      <strong>{{ slice.metric_point_count }}</strong>
+                    </div>
+                    <div class="metric-chip">
+                      <span>平均在线</span>
+                      <strong>{{ Math.round(slice.avg_online_count) }}</strong>
+                    </div>
+                    <div class="metric-chip">
+                      <span>峰值在线</span>
+                      <strong>{{ slice.peak_online_count }}</strong>
+                    </div>
                   </div>
 
                   <div v-if="slice.transcript_text" class="evidence-block mt-10px">
                     <div class="mb-4px flex items-center gap-5px text-11px font-700 text-green-600">
-                      <SvgIcon icon="mdi:waveform" />主播原话
+                      <SvgIcon icon="mdi:waveform" />
+                      主播原话
                     </div>
-                    <p class="line-clamp-3 m-0 whitespace-pre-wrap text-13px leading-21px">{{ slice.transcript_text }}</p>
+                    <p class="line-clamp-3 m-0 whitespace-pre-wrap text-13px leading-21px">
+                      {{ slice.transcript_text }}
+                    </p>
                   </div>
                   <div v-if="slice.comments_text" class="evidence-block mt-8px">
                     <div class="mb-4px flex items-center gap-5px text-11px font-700 text-blue-600">
-                      <SvgIcon icon="mdi:comment-text-outline" />用户评论
+                      <SvgIcon icon="mdi:comment-text-outline" />
+                      用户评论
                     </div>
                     <p class="line-clamp-2 m-0 whitespace-pre-wrap text-13px leading-21px">{{ slice.comments_text }}</p>
                   </div>
@@ -563,7 +608,9 @@ onMounted(loadPage);
                     本时间片只有分钟指标证据，没有可展示的话术或评论原文。
                   </div>
 
-                  <div class="mt-10px flex items-center justify-between gap-10px border-t border-gray-100 pt-9px dark:border-dark-100">
+                  <div
+                    class="mt-10px flex items-center justify-between gap-10px border-t border-gray-100 pt-9px dark:border-dark-100"
+                  >
                     <span class="text-11px text-gray-400">平台时间 {{ formatDateTime(slice.slice_start_time) }}</span>
                     <NButton text type="primary" size="small" @click="openSession(slice.session_id)">
                       查看原场次
@@ -574,7 +621,7 @@ onMounted(loadPage);
               </div>
             </NSpin>
 
-            <div v-if="slicePagination.total" class="mt-16px flex justify-end">
+            <div v-if="slicePagination.total" class="mt-16px flex justify-end overflow-x-auto pb-2px">
               <NPagination
                 :page="slicePagination.current"
                 :page-size="slicePagination.size"
@@ -589,7 +636,9 @@ onMounted(loadPage);
           </NTabPane>
 
           <NTabPane name="whole-session" tab="整场知识">
-            <div class="mb-14px grid grid-cols-[minmax(220px,1fr)_160px_160px_auto] gap-8px lt-lg:grid-cols-2 lt-sm:grid-cols-1">
+            <div
+              class="mb-14px grid grid-cols-[minmax(220px,1fr)_160px_160px_auto] gap-8px lt-lg:grid-cols-2 lt-sm:grid-cols-1"
+            >
               <NInput
                 v-model:value="itemFilters.keyword"
                 clearable
@@ -598,7 +647,12 @@ onMounted(loadPage);
               >
                 <template #prefix><SvgIcon icon="mdi:magnify" /></template>
               </NInput>
-              <NSelect v-model:value="itemFilters.category" clearable :options="categoryOptions" placeholder="全部分类" />
+              <NSelect
+                v-model:value="itemFilters.category"
+                clearable
+                :options="categoryOptions"
+                placeholder="全部分类"
+              />
               <NSelect
                 v-model:value="itemFilters.sourceType"
                 clearable
@@ -622,12 +676,22 @@ onMounted(loadPage);
                     </div>
                     <NTag size="small" round :bordered="false" type="info">{{ item.category || '未分类' }}</NTag>
                   </div>
-                  <p class="line-clamp-5 mb-0 mt-10px whitespace-pre-wrap text-13px leading-21px text-gray-600 dark:text-gray-300">
+                  <p
+                    class="line-clamp-5 mb-0 mt-10px whitespace-pre-wrap text-13px leading-21px text-gray-600 dark:text-gray-300"
+                  >
                     {{ item.content || '暂无真实内容' }}
                   </p>
-                  <div class="mt-10px flex items-center justify-between border-t border-gray-100 pt-9px dark:border-dark-100">
+                  <div
+                    class="mt-10px flex items-center justify-between border-t border-gray-100 pt-9px dark:border-dark-100"
+                  >
                     <span class="text-11px text-gray-400">{{ sourceTypeLabel(item.source_type) }}</span>
-                    <NButton v-if="item.session_id" text type="primary" size="small" @click="openSession(item.session_id)">
+                    <NButton
+                      v-if="item.session_id"
+                      text
+                      type="primary"
+                      size="small"
+                      @click="openSession(item.session_id)"
+                    >
                       查看场次
                     </NButton>
                   </div>
@@ -635,7 +699,7 @@ onMounted(loadPage);
               </div>
             </NSpin>
 
-            <div v-if="itemPagination.total" class="mt-16px flex justify-end">
+            <div v-if="itemPagination.total" class="mt-16px flex justify-end overflow-x-auto pb-2px">
               <NPagination
                 :page="itemPagination.current"
                 :page-size="itemPagination.size"
@@ -658,7 +722,9 @@ onMounted(loadPage);
               <SvgIcon icon="mdi:message-processing-outline" class="text-primary" />
               知识库自由问答
             </div>
-            <div class="mt-3px text-12px font-normal text-gray-500">连续追问真实话术、评论、指标与复盘结论，每条回答都能回到原场次核验</div>
+            <div class="mt-3px text-12px font-normal text-gray-500">
+              连续追问真实话术、评论、指标与复盘结论，每条回答都能回到原场次核验
+            </div>
           </div>
         </template>
         <template #header-extra>
@@ -672,7 +738,9 @@ onMounted(loadPage);
           <div class="assistant-context">
             <div class="flex items-center justify-between gap-8px">
               <span class="text-12px font-700">本次检索范围</span>
-              <NTag size="small" round :bordered="false" type="success">{{ sliceStatus?.session_count || 0 }} 场可追溯</NTag>
+              <NTag size="small" round :bordered="false" type="success">
+                {{ sliceStatus?.session_count || 0 }} 场可追溯
+              </NTag>
             </div>
             <NSelect
               v-model:value="assistantCategory"
@@ -759,12 +827,19 @@ onMounted(loadPage);
                             <div class="truncate text-12px font-700">{{ source.title || '未命名来源' }}</div>
                             <div class="mt-2px text-11px text-gray-400">
                               {{ source.anchor_name || sourceTypeLabel(source.source_type) }}
-                              <span v-if="sourceTimeLabel(source)"> · {{ sourceTimeLabel(source) }}</span>
+                              <span v-if="sourceTimeLabel(source)">· {{ sourceTimeLabel(source) }}</span>
                             </div>
                           </div>
-                          <SvgIcon v-if="source.session_id" icon="mdi:open-in-new" class="mt-1px shrink-0 text-primary" />
+                          <SvgIcon
+                            v-if="source.session_id"
+                            icon="mdi:open-in-new"
+                            class="mt-1px shrink-0 text-primary"
+                          />
                         </div>
-                        <div v-if="source.excerpt" class="line-clamp-2 mt-5px text-left text-11px leading-18px text-gray-500">
+                        <div
+                          v-if="source.excerpt"
+                          class="line-clamp-2 mt-5px text-left text-11px leading-18px text-gray-500"
+                        >
                           {{ source.excerpt }}
                         </div>
                       </button>
@@ -775,7 +850,8 @@ onMounted(loadPage);
 
               <div v-if="chatting" class="mb-12px flex justify-start">
                 <div class="chat-bubble chat-bubble--ai flex items-center gap-7px text-gray-500">
-                  <NSpin :size="14" />正在检索真实话术、评论和指标…
+                  <NSpin :size="14" />
+                  正在检索真实话术、评论和指标…
                 </div>
               </div>
               <div ref="chatEndRef" />
@@ -802,7 +878,12 @@ onMounted(loadPage);
             />
             <div class="mt-8px flex items-center justify-between gap-8px">
               <span class="text-11px text-gray-400">回答会附带场次与时间片来源</span>
-              <NButton type="primary" :loading="chatting" :disabled="!question.trim() || chatting" @click="sendQuestion()">
+              <NButton
+                type="primary"
+                :loading="chatting"
+                :disabled="!question.trim() || chatting"
+                @click="sendQuestion()"
+              >
                 <template #icon><SvgIcon icon="mdi:send" /></template>
                 发送
               </NButton>
@@ -823,7 +904,10 @@ onMounted(loadPage);
   padding: 15px;
   text-align: left;
   box-shadow: 0 5px 18px rgb(15 23 42 / 4%);
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
 }
 
 .summary-card:hover,
@@ -844,10 +928,18 @@ onMounted(loadPage);
   background: color-mix(in srgb, var(--summary-tone) 12%, transparent);
 }
 
-.summary-card--success { --summary-tone: #18a058; }
-.summary-card--info { --summary-tone: #2080f0; }
-.summary-card--warning { --summary-tone: #f0a020; }
-.summary-card--danger { --summary-tone: #d03050; }
+.summary-card--success {
+  --summary-tone: #18a058;
+}
+.summary-card--info {
+  --summary-tone: #2080f0;
+}
+.summary-card--warning {
+  --summary-tone: #f0a020;
+}
+.summary-card--danger {
+  --summary-tone: #d03050;
+}
 
 .assistant-card :deep(.n-card-content) {
   display: grid;
@@ -916,7 +1008,9 @@ onMounted(loadPage);
   border-radius: 12px;
   background: color-mix(in srgb, var(--card-color) 95%, rgb(var(--primary-color)) 5%);
   padding: 13px;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .evidence-item:hover,
@@ -969,7 +1063,9 @@ onMounted(loadPage);
   color: var(--text-color-2);
   font-size: 12px;
   line-height: 18px;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
 }
 
 .question-prompt:hover {
@@ -1008,7 +1104,9 @@ onMounted(loadPage);
   border-radius: 9px;
   background: var(--card-color);
   padding: 8px 9px;
-  transition: border-color 0.2s ease, background 0.2s ease;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
 }
 
 .source-card:not(:disabled):hover {
@@ -1067,6 +1165,18 @@ onMounted(loadPage);
 @media (max-width: 640px) {
   .summary-card {
     padding: 12px;
+  }
+
+  .assistant-main {
+    height: min(560px, calc(100vh - 150px));
+  }
+
+  .chat-scroll {
+    padding: 12px 8px 6px 12px;
+  }
+
+  .chat-composer {
+    padding: 10px 11px 12px;
   }
 }
 </style>

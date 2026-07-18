@@ -70,6 +70,29 @@ export function getWebSocketBaseURL(baseURL: string, origin = window.location.or
   return absoluteBaseURL.replace(/^http/, 'ws').replace(/\/$/, '');
 }
 
+/** Convert flat Axios errors into a message that can be shown in page-level feedback. */
+export function getServiceErrorMessage(error: unknown, fallback: string) {
+  if (!error || typeof error !== 'object') return fallback;
+
+  const responseData = (error as { response?: { data?: unknown } }).response?.data;
+  if (responseData && typeof responseData === 'object') {
+    const detail = (responseData as { detail?: unknown; message?: unknown }).detail;
+    const message = (responseData as { detail?: unknown; message?: unknown }).message;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' && message.trim() ? message : fallback;
+}
+
+/** Unwrap SoybeanAdmin's flat request result and keep page error handling consistent. */
+export function unwrapServiceData<T>(result: { data: T | null; error: unknown }, fallback: string): T {
+  if (result.error) throw new Error(getServiceErrorMessage(result.error, fallback));
+  if (result.data === null) throw new Error(fallback);
+  return result.data;
+}
+
 /**
  * Get proxy pattern of backend service base url
  *

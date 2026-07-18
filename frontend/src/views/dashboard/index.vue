@@ -11,6 +11,8 @@ const dataeaseShareUrl = import.meta.env.VITE_DATAEASE_URL || 'http://localhost:
     class="dataease-screen"
     :src="dataeaseShareUrl"
     title="DataEase 数据大屏"
+    loading="eager"
+    referrerpolicy="strict-origin-when-cross-origin"
     allow="fullscreen; clipboard-read; clipboard-write"
     allowfullscreen
   />

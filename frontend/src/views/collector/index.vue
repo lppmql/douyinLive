@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref } from 'vue';
+import { computed, h, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
 import { NButton, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
 import BusinessPageHeader from '@/components/business/page-header.vue';
+import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
 import {
   fetchCollectorStatus,
   fetchCollectorAccounts,
@@ -57,6 +58,8 @@ const asrStatus = ref<Api.Douyin.AsrControlStatus | null>(null);
 const asrControlLoading = ref(false);
 const dataEaseStatus = ref<Api.Douyin.DataEaseStatus | null>(null);
 const dataEaseSyncLoading = ref(false);
+const dataLoadFailedCount = ref(0);
+const lastDataUpdatedAt = ref<number | null>(null);
 
 const loggedInAccountCount = computed(() => accounts.value.filter(item => item.login_status === 'logged_in').length);
 const latestSuccessfulCollectTime = computed(() => {
@@ -110,14 +113,15 @@ const collectDisabledReason = computed(() => {
 
 async function loadMonitorStatus() {
   const res = await fetchMonitorStatus();
-  if (res.data) monitorStatus.value = res.data;
+  monitorStatus.value = unwrapServiceData(res, '实时监控状态读取失败');
 }
 
 async function handleStartMonitor() {
   monitorLoading.value = true;
   try {
     const res = await startMonitor();
-    if (res.data?.success) message.success(res.data.message);
+    const data = unwrapServiceData(res, '启动监控失败');
+    if (data.success) message.success(data.message);
     await loadMonitorStatus();
   } catch {
     message.error('启动监控失败');
@@ -130,7 +134,8 @@ async function handleStopMonitor() {
   monitorLoading.value = true;
   try {
     const res = await stopMonitor();
-    if (res.data?.success) message.success(res.data.message);
+    const data = unwrapServiceData(res, '停止监控失败');
+    if (data.success) message.success(data.message);
     await loadMonitorStatus();
   } catch {
     message.error('停止监控失败');
@@ -141,14 +146,16 @@ async function handleStopMonitor() {
 
 async function handleTriggerLive() {
   const res = await triggerMockLive();
-  if (res.data?.success) message.success(res.data.message);
-  else message.warning(res.data?.message || '模拟开播失败');
+  const data = unwrapServiceData(res, '模拟开播失败');
+  if (data.success) message.success(data.message);
+  else message.warning(data.message || '模拟开播失败');
   await loadMonitorStatus();
 }
 
 async function handleTriggerEnd() {
   const res = await triggerMockEnd();
-  if (res.data?.success) message.success(res.data.message);
+  const data = unwrapServiceData(res, '模拟下播失败');
+  if (data.success) message.success(data.message);
   await loadMonitorStatus();
 }
 
@@ -158,12 +165,13 @@ async function handleCollectAll() {
   collectAllResult.value = null;
   try {
     const res = await collectAllData();
-    collectAllResult.value = res.data;
-    if (res.data?.collected_rooms && res.data.collected_rooms > 0) {
-      message.success(`采集完成：${res.data.collected_rooms}/${res.data.total_rooms} 个房间`);
-      message.info(`全部场次检查完成，本次补齐 ${res.data.history_detail_synced_count || 0} 场详情`);
-    } else if (res.data?.message) {
-      message.warning(res.data.message);
+    const data = unwrapServiceData(res, '刷新数据采集失败');
+    collectAllResult.value = data;
+    if (data.collected_rooms > 0) {
+      message.success(`采集完成：${data.collected_rooms}/${data.total_rooms} 个房间`);
+      message.info(`全部场次检查完成，本次补齐 ${data.history_detail_synced_count || 0} 场详情`);
+    } else if (data.message) {
+      message.warning(data.message);
     }
   } catch {
     await loadData(true);
@@ -210,10 +218,13 @@ async function loadData(silent = false) {
     }
 
     const failedCount = [statusRes, accountsRes, logsRes, tasksRes, monitorRes, asrRes, dataEaseRes].filter(
-      result => result.status === 'rejected'
+      result => result.status === 'rejected' || Boolean(result.value.error)
     ).length;
+    dataLoadFailedCount.value = failedCount;
+    lastDataUpdatedAt.value = Date.now();
     if (failedCount && !silent) message.warning(`${failedCount} 项数据暂时加载失败，其他区域已正常更新`);
   } catch {
+    dataLoadFailedCount.value = 7;
     if (!silent) message.error('加载采集数据失败');
   } finally {
     if (silent) silentRefreshing.value = false;
@@ -225,12 +236,11 @@ async function handleDataEaseSync() {
   dataEaseSyncLoading.value = true;
   try {
     const res = await syncDataEase();
-    if (res.data) {
-      dataEaseStatus.value = res.data.dataease;
-      const text = `DataEase 同步完成：成功 ${res.data.synced_count} 场，失败 ${res.data.failed_count} 场，清理旧宽表 ${res.data.removed_stale_row_count} 行`;
-      if (res.data.failed_count) message.warning(text);
-      else message.success(text);
-    }
+    const data = unwrapServiceData(res, 'DataEase 同步失败');
+    dataEaseStatus.value = data.dataease;
+    const text = `DataEase 同步完成：成功 ${data.synced_count} 场，失败 ${data.failed_count} 场，清理旧宽表 ${data.removed_stale_row_count} 行`;
+    if (data.failed_count) message.warning(text);
+    else message.success(text);
   } catch {
     message.error('DataEase 同步失败，请查看后端日志');
   } finally {
@@ -242,10 +252,9 @@ async function applyAsrToggle(enabled: boolean) {
   asrControlLoading.value = true;
   try {
     const res = await setAsrControl(enabled);
-    if (res.data) {
-      asrStatus.value = res.data;
-      message.success(res.data.message);
-    }
+    const data = unwrapServiceData(res, `ASR 话术服务${enabled ? '开启' : '关闭'}失败`);
+    asrStatus.value = data;
+    message.success(data.message);
   } catch {
     message.error(`ASR 话术服务${enabled ? '开启' : '关闭'}失败`);
     await loadData(true);
@@ -298,7 +307,7 @@ function handleClearLogs() {
       clearLogsLoading.value = true;
       try {
         const response = await clearCollectorLogs();
-        const deletedCount = response.data?.deleted_count || 0;
+        const deletedCount = unwrapServiceData(response, '清空采集日志失败').deleted_count || 0;
         logs.value = [];
         selectedLog.value = null;
         logDetailVisible.value = false;
@@ -337,8 +346,9 @@ async function handleAccountHealth(row: Api.Douyin.CollectorAccount) {
   accountHealthLoadingId.value = row.id;
   try {
     const res = await checkCollectorAccountHealth(row.id);
-    if (res.data?.valid) message.success(res.data.message);
-    else message.warning(res.data?.message || '账号登录状态已失效');
+    const data = unwrapServiceData(res, '账号存活检查失败');
+    if (data.valid) message.success(data.message);
+    else message.warning(data.message || '账号登录状态已失效');
     await loadData(true);
   } catch {
     message.error('账号存活检查失败');
@@ -420,6 +430,7 @@ function openLogDetail(log: Api.Douyin.CollectorLog) {
 function startDataPolling() {
   stopDataPolling();
   dataPollTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
     if (collectionRunning.value || collectorStatus.value?.active_task_count || taskDrawerVisible.value) {
       loadData(true);
     }
@@ -431,6 +442,18 @@ function stopDataPolling() {
   dataPollTimer = null;
 }
 
+function startClock() {
+  if (clockTimer) window.clearInterval(clockTimer);
+  clockTimer = window.setInterval(() => {
+    now.value = Date.now();
+  }, 30_000);
+}
+
+function stopClock() {
+  if (clockTimer) window.clearInterval(clockTimer);
+  clockTimer = null;
+}
+
 /* ---------- 扫码登录流程 ---------- */
 async function handleStartLogin() {
   try {
@@ -438,8 +461,8 @@ async function handleStartLogin() {
     loginMessage.value = '';
     stopLoginPoll();
     const res = await startCollectorLogin();
-    if (!res.data) return;
-    loginTaskId.value = res.data.task_id;
+    const data = unwrapServiceData(res, '启动登录失败');
+    loginTaskId.value = data.task_id;
     loginStatus.value = 'pending';
     loginMessage.value = '';
     showQRModal.value = true;
@@ -455,8 +478,8 @@ async function handleReLogin(accountId: number) {
     loginMessage.value = '';
     stopLoginPoll();
     const res = await reCollectorLogin(accountId);
-    if (!res.data) return;
-    loginTaskId.value = res.data.task_id;
+    const data = unwrapServiceData(res, '启动重新登录失败');
+    loginTaskId.value = data.task_id;
     loginStatus.value = 'pending';
     loginMessage.value = '';
     showQRModal.value = true;
@@ -475,7 +498,8 @@ async function handleDeleteAccount(accountId: number) {
     negativeText: $t('common.cancel'),
     onPositiveClick: async () => {
       try {
-        await deleteCollectorAccount(accountId);
+        const result = await deleteCollectorAccount(accountId);
+        if (result.error) throw new Error(getServiceErrorMessage(result.error, '删除采集账号失败'));
         message.success($t('common.deleteSuccess'));
         await loadData();
       } catch {
@@ -496,11 +520,10 @@ async function pollLoginStatus() {
       if (!qrImage.value) {
         try {
           const qrRes = await fetchLoginQR(loginTaskId.value);
-          if (qrRes.data) {
-            qrImage.value = qrRes.data.qr_code_base64;
-            loginStatus.value = 'scanning';
-            loginMessage.value = $t('page.collector.scanQrCode');
-          }
+          const qrData = unwrapServiceData(qrRes, '二维码尚未生成');
+          qrImage.value = qrData.qr_code_base64;
+          loginStatus.value = 'scanning';
+          loginMessage.value = $t('page.collector.scanQrCode');
         } catch {
           // QR 可能还没生成
         }
@@ -508,18 +531,18 @@ async function pollLoginStatus() {
 
       // 检查登录状态
       const statusRes = await fetchLoginStatus(loginTaskId.value);
-      if (!statusRes.data) return;
+      const statusData = unwrapServiceData(statusRes, '登录状态读取失败');
 
-      loginStatus.value = statusRes.data.status as LoginState;
-      loginMessage.value = statusRes.data.message;
+      loginStatus.value = statusData.status as LoginState;
+      loginMessage.value = statusData.message;
 
-      if (statusRes.data.status === 'success') {
+      if (statusData.status === 'success') {
         message.success($t('page.collector.loginSuccess'));
         stopLoginPoll();
         showQRModal.value = false;
         await loadData();
-      } else if (statusRes.data.status === 'failed' || statusRes.data.status === 'timeout') {
-        message.error(statusRes.data.message || $t('page.collector.loginFailed'));
+      } else if (statusData.status === 'failed' || statusData.status === 'timeout') {
+        message.error(statusData.message || $t('page.collector.loginFailed'));
         stopLoginPoll();
       }
     } catch {
@@ -550,6 +573,8 @@ const accountColumns = [
   {
     title: () => $t('page.collector.accountName'),
     key: 'account_name',
+    width: 180,
+    fixed: 'left' as const,
     ellipsis: { tooltip: true }
   },
   {
@@ -598,6 +623,7 @@ const accountColumns = [
     title: () => $t('common.action'),
     key: 'actions',
     width: 220,
+    fixed: 'right' as const,
     render(row: Api.Douyin.CollectorAccount) {
       const btns: ReturnType<typeof h>[] = [];
       btns.push(
@@ -831,20 +857,32 @@ const taskColumns = [
 onMounted(() => {
   loadData();
   startDataPolling();
-  clockTimer = window.setInterval(() => {
-    now.value = Date.now();
-  }, 30_000);
+  startClock();
+});
+
+onActivated(() => {
+  if (!dataPollTimer) {
+    void loadData(true);
+    startDataPolling();
+  }
+  if (!clockTimer) startClock();
+});
+
+onDeactivated(() => {
+  stopLoginPoll();
+  stopDataPolling();
+  stopClock();
 });
 
 onUnmounted(() => {
   stopLoginPoll();
   stopDataPolling();
-  if (clockTimer) window.clearInterval(clockTimer);
+  stopClock();
 });
 </script>
 
 <template>
-  <div class="min-h-full flex flex-col gap-16px">
+  <div class="business-page min-h-full">
     <BusinessPageHeader
       title="数据采集中心"
       description="使用已保存的 Cookie 与浏览器指纹发现全部主播，并持续补齐直播场次、评论、画像、分钟指标和直播流地址。"
@@ -882,7 +920,17 @@ onUnmounted(() => {
       </div>
     </BusinessPageHeader>
 
-    <NSpin :show="loading">
+    <NAlert v-if="dataLoadFailedCount" type="warning" :bordered="false" show-icon>
+      有 {{ dataLoadFailedCount }} 项采集状态暂时未更新，页面已保留其余真实结果。
+      <span v-if="lastDataUpdatedAt" class="ml-6px text-12px text-gray-500">
+        最近尝试 {{ new Date(lastDataUpdatedAt).toLocaleTimeString('zh-CN', { hour12: false }) }}
+      </span>
+      <template #action>
+        <NButton size="small" secondary :loading="loading" @click="() => loadData()">重新加载</NButton>
+      </template>
+    </NAlert>
+
+    <NSpin :show="loading && !collectorStatus" class="business-loading-panel">
       <NSpace vertical :size="16">
         <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">
           <NGi>
@@ -906,7 +954,7 @@ onUnmounted(() => {
           <NGi>
             <NCard
               :bordered="false"
-              class="card-wrapper h-full cursor-pointer transition-shadow hover:shadow-md"
+              class="business-clickable-card card-wrapper h-full"
               size="small"
               role="button"
               tabindex="0"
@@ -944,7 +992,7 @@ onUnmounted(() => {
           <NGi>
             <NCard
               :bordered="false"
-              class="card-wrapper h-full cursor-pointer transition-shadow hover:shadow-md"
+              class="business-clickable-card card-wrapper h-full"
               size="small"
               role="button"
               tabindex="0"
@@ -1155,11 +1203,7 @@ onUnmounted(() => {
                       话术新增排队 {{ collectAllResult.asr_queued_count || 0 }} 场 · 当前
                       {{ collectAllResult.asr_active_count || 0 }}/{{ collectAllResult.asr_queue_capacity || 5 }}
                     </NTag>
-                    <NTag
-                      :type="collectAllResult.postprocess_failed_count ? 'warning' : 'success'"
-                      round
-                      size="small"
-                    >
+                    <NTag :type="collectAllResult.postprocess_failed_count ? 'warning' : 'success'" round size="small">
                       AI复盘入库 {{ collectAllResult.postprocess_completed_count || 0 }} 场 · 待处理
                       {{ collectAllResult.postprocess_pending_count || 0 }} 场
                     </NTag>
@@ -1332,16 +1376,18 @@ onUnmounted(() => {
                 </NButton>
               </NSpace>
             </template>
-            <NDataTable
-              :loading="loading"
-              :columns="accountColumns"
-              :data="accounts"
-              :row-key="getAccountRowKey"
-              :scroll-x="900"
-              :bordered="false"
-              size="small"
-              :empty-text="$t('page.collector.noAccount')"
-            />
+            <div class="business-table-shell">
+              <NDataTable
+                :loading="loading"
+                :columns="accountColumns"
+                :data="accounts"
+                :row-key="getAccountRowKey"
+                :scroll-x="980"
+                :bordered="false"
+                size="small"
+                :empty-text="$t('page.collector.noAccount')"
+              />
+            </div>
           </NCard>
         </div>
 
@@ -1352,7 +1398,7 @@ onUnmounted(() => {
         >
           <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.logTitle')">
             <template #header-extra>
-              <NSpace>
+              <NSpace wrap>
                 <NTag v-if="logTaskId" type="primary" closable @close="clearTaskLogFilter">
                   仅任务 #{{ logTaskId }}
                 </NTag>
@@ -1372,17 +1418,19 @@ onUnmounted(() => {
                 </NButton>
               </NSpace>
             </template>
-            <NDataTable
-              class="collector-log-table"
-              :loading="loading"
-              :columns="logColumns"
-              :data="logs"
-              :row-key="getLogRowKey"
-              :scroll-x="1260"
-              flex-height
-              :bordered="false"
-              size="small"
-            />
+            <div class="business-table-shell">
+              <NDataTable
+                class="collector-log-table"
+                :loading="loading"
+                :columns="logColumns"
+                :data="logs"
+                :row-key="getLogRowKey"
+                :scroll-x="1260"
+                flex-height
+                :bordered="false"
+                size="small"
+              />
+            </div>
           </NCard>
         </div>
       </NSpace>

@@ -463,11 +463,7 @@ export function detectHighIntent(sessionId: number) {
 }
 
 /** 基于真实知识证据的多轮问答 */
-export function askKnowledge(
-  question: string,
-  category?: string,
-  history: Api.Douyin.KnowledgeChatHistory[] = []
-) {
+export function askKnowledge(question: string, category?: string, history: Api.Douyin.KnowledgeChatHistory[] = []) {
   return backendRequest<{ answer: string; sources: Api.Douyin.KnowledgeSource[]; has_result: boolean }>({
     url: `${API_PREFIX}/ai/qa`,
     method: 'POST',
