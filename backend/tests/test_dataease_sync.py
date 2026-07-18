@@ -2,7 +2,7 @@ from unittest.mock import Mock, patch
 
 from app.api.v1.dataease import _coverage
 from app.services.sync.analysis_sync import _score_value
-from app.services.sync.de_sync import sync_sessions
+from app.services.sync.de_sync import pending_complete_session_ids, sync_sessions
 
 
 def test_coverage_counts_missing_and_outdated_sessions():
@@ -32,3 +32,18 @@ def test_sync_sessions_keeps_other_sessions_when_one_fails():
     assert result["failed_count"] == 1
     assert result["errors"] == [{"session_id": 12, "message": "bad row"}]
     db.rollback.assert_called_once()
+
+
+def test_pending_complete_sessions_supports_unlimited_selection():
+    db = Mock()
+    query = Mock()
+    db.query.return_value = query
+    query.outerjoin.return_value = query
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.all.return_value = [(session_id,) for session_id in range(150)]
+
+    session_ids = pending_complete_session_ids(db, limit=None)
+
+    assert len(session_ids) == 150
+    query.limit.assert_not_called()

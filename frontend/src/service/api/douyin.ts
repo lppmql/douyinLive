@@ -409,7 +409,8 @@ export function collectAllData() {
   return backendRequest<Api.Douyin.CollectAllResponse>({
     url: `${API_PREFIX}/collector/collect-all`,
     method: 'POST',
-    timeout: 30 * 60 * 1000
+    // 全量详情采集会按场次串行执行，不能用固定请求时限中断前端反馈。
+    timeout: 0
   });
 }
 

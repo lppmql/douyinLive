@@ -1167,7 +1167,7 @@ onUnmounted(() => {
                       {{ collectAllResult.message }}
                     </span>
                   </div>
-                  <NGrid cols="2 s:3 l:6" responsive="screen" :x-gap="12" :y-gap="12">
+                  <NGrid cols="2 s:4 l:8" responsive="screen" :x-gap="12" :y-gap="12">
                     <NGi><NStatistic label="企业主播" :value="collectAllResult.enterprise_anchor_count || 0" /></NGi>
                     <NGi>
                       <NStatistic label="发现场次" :value="collectAllResult.enterprise_session_discovered_count || 0" />
@@ -1179,10 +1179,16 @@ onUnmounted(() => {
                       <NStatistic label="主播映射" :value="collectAllResult.anchor_profile_synced_count || 0" />
                     </NGi>
                     <NGi>
-                      <NStatistic label="本次补详情" :value="collectAllResult.history_detail_synced_count || 0" />
+                      <NStatistic label="已检查详情" :value="collectAllResult.history_detail_checked_count || 0" />
+                    </NGi>
+                    <NGi>
+                      <NStatistic label="已补齐详情" :value="collectAllResult.history_detail_synced_count || 0" />
                     </NGi>
                     <NGi>
                       <NStatistic label="本次失败" :value="collectAllResult.history_detail_failed_count || 0" />
+                    </NGi>
+                    <NGi>
+                      <NStatistic label="待重试详情" :value="collectAllResult.history_detail_remaining_count || 0" />
                     </NGi>
                   </NGrid>
                   <NDataTable

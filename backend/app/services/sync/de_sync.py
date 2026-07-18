@@ -89,7 +89,7 @@ def source_data_outdated_condition():
     )
 
 
-def pending_complete_session_ids(db, limit: int = 100, force: bool = False) -> list[int]:
+def pending_complete_session_ids(db, limit: int | None = 100, force: bool = False) -> list[int]:
     """选择已完整但尚未同步或业务数据比宽表更新的场次。"""
     query = db.query(LiveSession.id).outerjoin(
         DeLiveSessionAnchorSummary,
@@ -100,7 +100,10 @@ def pending_complete_session_ids(db, limit: int = 100, force: bool = False) -> l
             DeLiveSessionAnchorSummary.id.is_(None),
             source_data_outdated_condition(),
         ))
-    return [row[0] for row in query.order_by(LiveSession.updated_at.desc(), LiveSession.id.desc()).limit(limit).all()]
+    query = query.order_by(LiveSession.updated_at.desc(), LiveSession.id.desc())
+    if limit is not None:
+        query = query.limit(limit)
+    return [row[0] for row in query.all()]
 
 
 def cleanup_stale_dataease_rows(db) -> int:
@@ -121,7 +124,7 @@ def cleanup_stale_dataease_rows(db) -> int:
     return removed
 
 
-def sync_pending_complete_sessions(db, limit: int = 100, force: bool = False) -> dict:
+def sync_pending_complete_sessions(db, limit: int | None = 100, force: bool = False) -> dict:
     """增量同步 DataEase 所需的完整场次。"""
     removed = cleanup_stale_dataease_rows(db)
     result = sync_sessions(db, pending_complete_session_ids(db, limit=limit, force=force))

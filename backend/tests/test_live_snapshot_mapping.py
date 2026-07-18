@@ -1,14 +1,33 @@
 import unittest
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from app.services.collector.manual_collect import (
     _needs_history_enrichment,
     _apply_overview_to_session,
+    _order_history_enrichment_targets,
     _parse_watch_profiles,
 )
 
 
 class LiveSnapshotMappingTest(unittest.TestCase):
+    def test_history_enrichment_keeps_all_pending_sessions(self):
+        start = datetime(2026, 7, 18, 12, 0)
+        sessions = [
+            SimpleNamespace(
+                id=index,
+                detail_collection_status="pending",
+                anchor_name="主播",
+                live_start_time=start - timedelta(minutes=index),
+            )
+            for index in range(25)
+        ]
+
+        targets = _order_history_enrichment_targets(sessions)
+
+        self.assertEqual(len(targets), 25)
+        self.assertEqual({session.id for session in targets}, set(range(25)))
+
     def test_retries_false_complete_session_without_any_detail_data(self):
         session = SimpleNamespace(
             detail_collection_status="complete",

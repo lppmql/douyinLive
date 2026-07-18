@@ -43,7 +43,6 @@ HOME_URL = f"{LEADS_BASE}/pc/growth/home"
 HISTORY_API_URL = f"{LEADS_BASE}/live_console/history"
 HISTORY_DETAIL_TIMEOUT_SECONDS = 45
 HISTORY_DETAIL_CONCURRENCY = 1
-HISTORY_DETAIL_BATCH_SIZE = 20
 ENTERPRISE_PAGE_SIZE = 100
 ENTERPRISE_MAX_PAGES = 200
 CONTEXT_RECOVERY_ATTEMPTS = 2
@@ -267,17 +266,19 @@ async def collect_all(
 
         def report_detail_progress(checked: int, total: int, enriched: int, failed: int) -> None:
             percent = 78 + int(checked / max(total, 1) * 16)
+            remaining = max(0, total - checked)
             report(
                 "detail_enrichment",
                 percent,
                 checked,
                 total,
-                f"场次详情已处理 {checked}/{total}，补齐 {enriched} 场，失败 {failed} 场",
+                f"场次详情已处理 {checked}/{total}，补齐 {enriched} 场，失败 {failed} 场，剩余 {remaining} 场",
                 {
                     "checked_count": checked,
                     "total_count": total,
                     "enriched_count": enriched,
                     "failed_count": failed,
+                    "remaining_count": remaining,
                 },
             )
 
@@ -304,7 +305,7 @@ async def collect_all(
         report("dataease_sync", 98, 0, 0, "正在增量同步 DataEase 分析宽表")
         # DataEase 逐场聚合包含较多同步 SQL，使用独立会话在线程执行，避免卡住状态接口。
         db.commit()
-        dataease_sync = await asyncio.to_thread(_sync_pending_dataease, 100)
+        dataease_sync = await asyncio.to_thread(_sync_pending_dataease, None)
         db.expire_all()
 
         report("asr_queue", 99, 0, settings.ASR_MAX_QUEUED, "正在按安全容量补充话术转写队列")
@@ -380,8 +381,8 @@ def _is_context_closed_message(value: Any) -> bool:
     ))
 
 
-def _sync_pending_dataease(limit: int) -> dict:
-    """使用线程专属数据库会话同步 DataEase，禁止跨线程复用请求会话。"""
+def _sync_pending_dataease(limit: Optional[int]) -> dict:
+    """使用线程专属数据库会话同步 DataEase；limit=None 表示同步全部待处理场次。"""
     sync_db = SessionLocal()
     try:
         return sync_pending_complete_sessions(sync_db, limit=limit)
@@ -1597,6 +1598,18 @@ def _apply_enterprise_profile_to_session(session: LiveSession, profile: dict) ->
     return _apply_session_anchor_profile(session, values)
 
 
+def _order_history_enrichment_targets(pending_sessions: list[LiveSession]) -> list[LiveSession]:
+    """返回本次要处理的全部待补场次，并优先覆盖从未尝试过的最新场次。"""
+    return sorted(
+        pending_sessions,
+        key=lambda session: (
+            session.detail_collection_status == "retryable",
+            not bool(session.anchor_name),
+            -(session.live_start_time.timestamp() if session.live_start_time else 0),
+        ),
+    )
+
+
 def _parse_epoch_dt(value) -> Optional[datetime]:
     """转换员工场次接口返回的 Unix 秒时间。"""
     if value in (None, "", 0, "0"):
@@ -1649,15 +1662,8 @@ async def _enrich_history_sessions(
     if repaired_false_complete:
         db.commit()
         logger.warning("已修复 %s 场无数据但标记完整的历史场次", repaired_false_complete)
-    # 先覆盖从未尝试过的场次，再重试暂时失败的场次，避免 retryable 阻塞全量首轮采集。
-    pending_sessions.sort(
-        key=lambda session: (
-            session.detail_collection_status == "retryable",
-            not bool(session.anchor_name),
-            -(session.live_start_time.timestamp() if session.live_start_time else 0),
-        )
-    )
-    target_sessions = pending_sessions[:HISTORY_DETAIL_BATCH_SIZE]
+    # 全部待补场次都进入本次任务；单浏览器并发仍为 1，避免放开总量后挤爆电脑资源。
+    target_sessions = _order_history_enrichment_targets(pending_sessions)
     enriched = 0
     checked = 0
     failed = 0
@@ -1790,10 +1796,14 @@ async def _enrich_history_sessions(
             bool(session.stream_url),
         )
 
+    remaining = sum(
+        session.detail_collection_status in (None, "", "pending", "retryable")
+        for session in target_sessions
+    )
     progress = {
         "enriched_count": enriched,
         "checked_count": checked,
-        "remaining_count": max(0, len(pending_sessions) - checked),
+        "remaining_count": remaining,
         "batch_size": len(target_sessions),
         "failed_count": failed,
         "concurrency": HISTORY_DETAIL_CONCURRENCY,
