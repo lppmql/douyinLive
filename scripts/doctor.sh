@@ -83,9 +83,17 @@ else
   fail "Docker Desktop 未运行"
 fi
 
-if curl -fsS --max-time 5 http://127.0.0.1:8100/ >/dev/null 2>&1; then
+DATAEASE_PAGE=$(curl -fsS --max-time 60 http://127.0.0.1:8100/ 2>/dev/null || true)
+DATAEASE_OVERLAY_ACTIVE=false
+if [ -n "$DATAEASE_PAGE" ]; then
   pass "DataEase 页面可访问"
-  if "$ROOT_DIR/backend/.venv/bin/python" "$ROOT_DIR/backend/scripts/check_dataease_crypto.py" >/dev/null 2>&1; then
+  if grep -q "douyinLive.dataeaseKeySha256" <<< "$DATAEASE_PAGE"; then
+    DATAEASE_OVERLAY_ACTIVE=true
+    pass "DataEase 登录密钥自动刷新层已启用"
+  else
+    fail "DataEase 登录密钥自动刷新层未生效；请重新创建 dataease 容器"
+  fi
+  if "$ROOT_DIR/backend/.venv/bin/python" "$ROOT_DIR/backend/scripts/check_dataease_crypto.py" --timeout 60 >/dev/null 2>&1; then
     pass "DataEase 登录 RSA 公钥链路正常"
   else
     fail "DataEase 登录 RSA 公钥链路异常"
@@ -107,7 +115,11 @@ else
 fi
 
 if tail -n 500 "$ROOT_DIR/data/dataease/logs/dataease/error.log" 2>/dev/null | grep -q "BadPaddingException"; then
-  warn "DataEase 近期出现旧 RSA 公钥解密失败；请清除 localhost:8100 的 DataEaseKey 站点缓存后刷新登录页"
+  if [ "$DATAEASE_OVERLAY_ACTIVE" = "true" ]; then
+    pass "DataEase 存在历史旧公钥错误，自动刷新层已启用"
+  else
+    warn "DataEase 近期出现旧 RSA 公钥解密失败；请先恢复登录密钥自动刷新层"
+  fi
 fi
 
 if curl -fsS --max-time 3 http://127.0.0.1:8000/health >/dev/null 2>&1; then

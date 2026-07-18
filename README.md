@@ -127,7 +127,7 @@ cd ..
 - Prometheus：<http://localhost:9090>
 - Grafana：<http://localhost:3000>
 
-`start.sh` 按“基础组件与 DataEase → Prometheus/Grafana → 后端 → ASR → 前端”顺序启动全栈，避免首次拉取监控镜像时与 FunASR 模型争抢内存。脚本会检查 FastAPI、DataEase RSA 公钥、Prometheus 和 Grafana，全部通过后才提示启动完成；DataEase 首次初始化约需 3 分钟。后端默认使用稳定单进程模式，避免开发热更新遗留孤儿进程和重复数据库连接；需要修改后端代码并自动重载时可使用 `BACKEND_RELOAD=true ./start.sh`。采集调度器由后端统一管理，不再额外启动第二个采集 Worker；FunASR 限制 2 核、1.8GB 内存，DataEase 限制 1 核、1.2GB 内存，ffmpeg 单线程，ASR Worker 单任务并发且最多排队 5 场。
+`start.sh` 按“基础组件与 DataEase → Prometheus/Grafana → 后端 → ASR → 前端”顺序启动全栈，避免首次拉取监控镜像时与 FunASR 模型争抢内存。脚本会检查 FastAPI、DataEase RSA 公钥及登录密钥自动刷新层、Prometheus 和 Grafana，全部通过后才提示启动完成；DataEase 首次初始化通常需要 3-10 分钟，8GB 电脑同时进行 ASR 时会接近上限。后端默认使用稳定单进程模式，避免开发热更新遗留孤儿进程和重复数据库连接；需要修改后端代码并自动重载时可使用 `BACKEND_RELOAD=true ./start.sh`。采集调度器由后端统一管理，不再额外启动第二个采集 Worker；FunASR 限制 2 核、1.8GB 内存，DataEase 限制 1 核、1.2GB 内存，ffmpeg 单线程，ASR Worker 单任务并发且最多排队 5 场。
 
 DataEase 应使用 `.env` 中的 `DATAEASE_READER_USER` 和 `DATAEASE_READER_PASSWORD` 连接业务 MySQL。该账号只有 `SELECT`、`SHOW VIEW` 权限，不能修改业务数据。现有大屏继续使用 `de_*` 宽表，新数据集优先使用 `de_v_*` 语义视图；统一指标接口为 `GET /api/v1/dataease/semantic-layer`，同步状态接口为 `GET /api/v1/dataease/status`。
 
@@ -372,7 +372,7 @@ douyinLive/
 
 ### DataEase 登录出现 `InvocationTargetException`
 
-如果日志底层同时出现 `BadPaddingException`，通常是 DataEase 数据库恢复或重建后，浏览器仍使用旧的 `DataEaseKey` 公钥缓存。先运行 `make doctor`；若“DataEase 登录 RSA 公钥链路正常”，说明服务端密钥有效，不要删除数据库。请在浏览器中清除 `localhost:8100` 的站点数据，或只删除本地存储中的 `DataEaseKey`，然后重新打开登录页。项目自检不会打印公钥、私钥、密码或登录令牌。
+如果日志底层同时出现 `BadPaddingException`，通常是 DataEase 数据库恢复或重建后，浏览器仍使用旧的 `DataEaseKey` 公钥缓存。项目为 DataEase 登录首页增加了公钥兼容层：页面打开时先淘汰旧值，再读取当前 `/de2api/dekey`，按 DataEase 官方 `web-storage-cache` 格式写入当前公钥后加载官方前端，避免官方预取请求与旧页面缓存竞争。运行 `./start.sh` 应用配置并刷新登录页即可，不需要删除数据库；项目自检不会打印公钥、私钥、密码或登录令牌。
 
 ### Prometheus 或 Grafana 未启动
 

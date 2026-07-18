@@ -77,6 +77,8 @@ def test_one_click_start_waits_for_all_runtime_health_checks():
     assert "if ! wait_for_backend; then" in start_source
     assert "if ! wait_for_dataease; then" in start_source
     assert "scripts/check_dataease_crypto.py" in start_source
+    assert "local ATTEMPTS=600" in start_source
+    assert "douyinLive.dataeaseKeySha256" in start_source
     assert 'wait_for_http "Prometheus"' in start_source
     assert 'wait_for_http "Grafana"' in start_source
     assert start_source.index('echo "[2/6] 启动 Prometheus 与 Grafana..."') < start_source.index(

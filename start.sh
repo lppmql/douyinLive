@@ -50,7 +50,7 @@ wait_for_backend() {
 }
 
 wait_for_dataease() {
-  local ATTEMPTS=240
+  local ATTEMPTS=600
   local RUNNING
   local HEALTH
   for ((i = 1; i <= ATTEMPTS; i++)); do
@@ -66,7 +66,7 @@ wait_for_dataease() {
     fi
     sleep 1
   done
-  echo "  ❌ DataEase 240 秒内未通过健康检查，最近日志如下："
+  echo "  ❌ DataEase 600 秒内未通过健康检查，最近日志如下："
   docker logs --tail 30 douyin_live_dataease 2>&1 || true
   return 1
 }
@@ -101,15 +101,20 @@ cd "$ROOT_DIR"
 docker compose --profile dataease up -d mysql redis dataease
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
-echo "  ⏳ DataEase 正在启动，首次初始化可能需要约 3 分钟"
+echo "  ⏳ DataEase 正在启动，8GB 电脑首次初始化可能需要 3-10 分钟"
 echo "  ℹ️  FunASR 将由后端自动启动：单任务并发、队列上限 5"
 if ! wait_for_dataease; then
   exit 1
 fi
-if ! "$BACKEND_DIR/.venv/bin/python" "$BACKEND_DIR/scripts/check_dataease_crypto.py"; then
+if ! "$BACKEND_DIR/.venv/bin/python" "$BACKEND_DIR/scripts/check_dataease_crypto.py" --timeout 60; then
   echo "  ❌ DataEase 公钥链路异常，请先检查 core_rsa 数据和 DataEase 日志"
   exit 1
 fi
+if ! curl -fsS --max-time 60 http://127.0.0.1:8100/ | grep -q "douyinLive.dataeaseKeySha256"; then
+  echo "  ❌ DataEase 登录密钥自动刷新层未生效，请重新创建 dataease 容器"
+  exit 1
+fi
+echo "  ✅ DataEase 登录密钥自动刷新层已启用"
 echo "  ✅ DataEase: http://localhost:8100"
 
 # 2. ASR 尚未启动时先准备监控组件，避免首次拉镜像与模型争抢内存。
