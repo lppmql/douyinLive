@@ -45,8 +45,7 @@ def upgrade() -> None:
         sa.text("""
             INSERT INTO users (username, password_hash, nickname, roles, status, created_at, updated_at)
             VALUES ('admin', :pwd, '系统管理员', :roles, 'active', NOW(), NOW())
-        """),
-        {"pwd": admin_pwd, "roles": '["R_SUPER"]'}
+        """).bindparams(pwd=admin_pwd, roles='["R_SUPER"]')
     )
 
     # 插入默认普通用户 (user / User123456)
@@ -55,8 +54,7 @@ def upgrade() -> None:
         sa.text("""
             INSERT INTO users (username, password_hash, nickname, roles, status, created_at, updated_at)
             VALUES ('user', :pwd, '普通用户', :roles, 'active', NOW(), NOW())
-        """),
-        {"pwd": user_pwd, "roles": '["R_USER"]'}
+        """).bindparams(pwd=user_pwd, roles='["R_USER"]')
     )
 
 
