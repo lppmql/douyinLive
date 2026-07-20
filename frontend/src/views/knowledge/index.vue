@@ -198,7 +198,7 @@ async function copyText(content: string) {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 56px);
-  background: #ededed;
+  background: #fff;
 }
 
 /* ── 顶部标题栏 ── */
@@ -208,7 +208,7 @@ async function copyText(content: string) {
   justify-content: center;
   flex-shrink: 0;
   height: 44px;
-  background: #ededed;
+  background: #fff;
   border-bottom: 1px solid rgb(0 0 0 / 6%);
   position: relative;
   padding: 0 16px;
@@ -451,7 +451,7 @@ async function copyText(content: string) {
 /* ── 底部输入栏 ── */
 .chat-footer {
   flex-shrink: 0;
-  background: #f7f7f7;
+  background: #fff;
   border-top: 1px solid rgb(0 0 0 / 6%);
   padding: 8px 12px;
   padding-bottom: max(8px, env(safe-area-inset-bottom));
