@@ -9,8 +9,19 @@ const API_PREFIX = '/api/v1';
 
 /* ---------- 仪表盘 ---------- */
 
-export function fetchDashboardSummary() {
-  return backendRequest<Api.Douyin.DashboardSummary>({ url: `${API_PREFIX}/dashboard/summary` });
+export function fetchDashboardSummary(startDate?: string, endDate?: string) {
+  const params: Record<string, string> = {};
+  if (startDate) params.start_date = startDate;
+  if (endDate) params.end_date = endDate;
+  return backendRequest<Api.Douyin.DashboardSummary>({ url: `${API_PREFIX}/dashboard/summary`, params });
+}
+
+/** 按主播分组汇总经营指标 */
+export function fetchDashboardSummaryByAnchor(startDate?: string, endDate?: string) {
+  const params: Record<string, string> = {};
+  if (startDate) params.start_date = startDate;
+  if (endDate) params.end_date = endDate;
+  return backendRequest<Api.Douyin.AnchorSummaryResponse>({ url: `${API_PREFIX}/dashboard/summary/by-anchor`, params });
 }
 
 /* ---------- 主播排班 ---------- */

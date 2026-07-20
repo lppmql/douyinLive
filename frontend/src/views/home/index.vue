@@ -1,228 +1,301 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
-import BusinessPageHeader from '@/components/business/page-header.vue';
-import { fetchCollectorStatus, fetchCollectorTasks, fetchMonitorStatus } from '@/service/api/douyin';
+import { h, onMounted, ref } from 'vue';
+import { fetchDashboardSummary, fetchDashboardSummaryByAnchor } from '@/service/api/douyin';
 
 defineOptions({ name: 'Home' });
 
-const router = useRouter();
-const loading = ref(false);
-const collectorStatus = ref<Api.Douyin.CollectorStatus | null>(null);
-const monitorStatus = ref<Api.Douyin.MonitorStatus | null>(null);
-const tasks = ref<Api.Douyin.CollectorTask[]>([]);
-const loadError = ref('');
-const lastUpdatedAt = ref<number | null>(null);
+// ── 日期筛选 ──
+type DatePreset = 'today' | 'this_week' | 'last_week' | 'this_month' | 'last_month' | 'custom';
+const datePreset = ref<DatePreset>('today');
+const customRange = ref<[number, number] | null>(null);
 
-const runningTaskCount = computed(() => tasks.value.filter(task => task.status === 'running').length);
-const failedTaskCount = computed(() => tasks.value.filter(task => task.status === 'failed').length);
-const lastUpdatedLabel = computed(() => {
-  if (!lastUpdatedAt.value) return '尚未完成状态刷新';
-  return `最后更新 ${new Date(lastUpdatedAt.value).toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  })}`;
-});
+/** 根据预设计算 start_date / end_date（YYYY-MM-DD 字符串） */
+function getDateRange(): { start: string; end: string } {
+  const today = new Date();
+  const fmt = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
 
-const quickActions = [
-  {
-    title: '刷新数据采集',
-    description: '同步全部主播、直播场次、评论与画像',
-    icon: 'mdi:database-sync-outline',
-    route: 'collector'
-  },
-  {
-    title: '直播场次',
-    description: '回看避坑科普内容、证据时间轴与私信转化',
-    icon: 'mdi:video-outline',
-    route: 'live-sessions'
-  },
-  {
-    title: '话术转写',
-    description: '管理 ASR 任务和查看话术时间轴',
-    icon: 'mdi:text-box-outline',
-    route: 'transcripts'
-  },
-  {
-    title: 'AI 复盘',
-    description: '诊断知识价值、资料钩子和站内私信承接',
-    icon: 'mdi:chart-box-outline',
-    route: 'analysis'
+  switch (datePreset.value) {
+    case 'today': {
+      const s = fmt(today);
+      return { start: s, end: s };
+    }
+    case 'this_week': {
+      const day = today.getDay();
+      const monday = new Date(today);
+      monday.setDate(today.getDate() - (day === 0 ? 6 : day - 1));
+      return { start: fmt(monday), end: fmt(today) };
+    }
+    case 'last_week': {
+      const day = today.getDay();
+      const lastMonday = new Date(today);
+      lastMonday.setDate(today.getDate() - (day === 0 ? 6 : day - 1) - 7);
+      const lastSunday = new Date(lastMonday);
+      lastSunday.setDate(lastMonday.getDate() + 6);
+      return { start: fmt(lastMonday), end: fmt(lastSunday) };
+    }
+    case 'this_month': {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { start: fmt(first), end: fmt(today) };
+    }
+    case 'last_month': {
+      const first = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+      const last = new Date(today.getFullYear(), today.getMonth(), 0);
+      return { start: fmt(first), end: fmt(last) };
+    }
+    case 'custom': {
+      if (customRange.value && customRange.value[0] && customRange.value[1]) {
+        return { start: fmt(new Date(customRange.value[0])), end: fmt(new Date(customRange.value[1])) };
+      }
+      return { start: fmt(today), end: fmt(today) };
+    }
+    default:
+      return { start: fmt(today), end: fmt(today) };
   }
-] as const;
+}
 
-async function loadWorkspace() {
+	const presets: Array<{ label: string; key: DatePreset }> = [
+  { label: '今天', key: 'today' },
+  { label: '本周', key: 'this_week' },
+  { label: '上周', key: 'last_week' },
+  { label: '本月', key: 'this_month' },
+  { label: '上月', key: 'last_month' }
+];
+
+function selectPreset(key: DatePreset) {
+  datePreset.value = key;
+  loadData();
+}
+
+function onCustomRangeChange(ts: [number, number] | null) {
+  if (ts && ts[0] && ts[1]) {
+    customRange.value = ts;
+    datePreset.value = 'custom';
+    loadData();
+  }
+}
+
+// ── 数据加载 ──
+const loading = ref(false);
+const loadError = ref('');
+const summary = ref<Api.Douyin.DashboardSummary | null>(null);
+const anchorData = ref<Api.Douyin.AnchorSummaryResponse | null>(null);
+
+async function loadData() {
   loading.value = true;
   loadError.value = '';
-  const [collector, monitor, taskList] = await Promise.allSettled([
-    fetchCollectorStatus(),
-    fetchMonitorStatus(),
-    fetchCollectorTasks()
-  ]);
-  if (collector.status === 'fulfilled' && collector.value.data) collectorStatus.value = collector.value.data;
-  if (monitor.status === 'fulfilled' && monitor.value.data) monitorStatus.value = monitor.value.data;
-  if (taskList.status === 'fulfilled' && taskList.value.data) tasks.value = taskList.value.data;
-  const failedCount = [collector, monitor, taskList].filter(
-    result => result.status === 'rejected' || Boolean(result.value.error)
-  ).length;
-  if (failedCount) loadError.value = `${failedCount} 项运行状态暂时未更新，已保留其余真实数据。`;
-  lastUpdatedAt.value = Date.now();
-  loading.value = false;
+  const { start, end } = getDateRange();
+  try {
+    const [summaryRes, anchorRes] = await Promise.all([
+      fetchDashboardSummary(start, end),
+      fetchDashboardSummaryByAnchor(start, end)
+    ]);
+    if (summaryRes.data) summary.value = summaryRes.data;
+    if (anchorRes.data) anchorData.value = anchorRes.data;
+    if (summaryRes.error) loadError.value = `汇总数据加载失败: ${summaryRes.error.message || '未知错误'}`;
+    if (anchorRes.error) loadError.value += ` 主播数据加载失败: ${anchorRes.error.message || '未知错误'}`;
+  } catch (err) {
+    loadError.value = (err as { message?: string }).message || '数据加载失败';
+  } finally {
+    loading.value = false;
+  }
 }
 
-function openRoute(name: 'collector' | 'live-sessions' | 'transcripts' | 'analysis') {
-  void router.push({ name });
+onMounted(loadData);
+
+// ── 格式化 ──
+function fmtNum(n: number | undefined | null): string {
+  if (n == null || !Number.isFinite(n)) return '0';
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万';
+  return n.toLocaleString('zh-CN');
 }
 
-onMounted(loadWorkspace);
+function fmtMoney(n: number | undefined | null): string {
+  if (n == null || !Number.isFinite(n)) return '¥0';
+  return '¥' + n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ── 主播表格列定义 ──
+const anchorColumns = [
+  {
+    title: '主播',
+    key: 'anchor_name',
+    width: 180,
+    render(row: Api.Douyin.AnchorSummaryItem) {
+      return h('div', { class: 'flex items-center gap-10px' }, [
+        h('img', {
+          src: row.anchor_avatar_url || '',
+          class: 'size-32px rounded-full object-cover shrink-0',
+          onError: (e: Event) => { (e.target as HTMLImageElement).style.display = 'none'; }
+        }),
+        h('div', { class: 'min-w-0' }, [
+          h('div', { class: 'text-13px font-600 truncate' }, row.anchor_name || '未知主播'),
+          h('div', { class: 'text-11px text-gray-400 truncate' }, `抖音号: ${row.douyin_id || '-'}`)
+        ])
+      ]);
+    }
+  },
+  { title: '场次', key: 'session_count', width: 60, align: 'center' as const },
+  { title: '观看', key: 'total_viewers', width: 80, align: 'right' as const, render: (row: Api.Douyin.AnchorSummaryItem) => fmtNum(row.total_viewers) },
+  { title: '评论', key: 'total_comments', width: 70, align: 'right' as const, render: (row: Api.Douyin.AnchorSummaryItem) => fmtNum(row.total_comments) },
+  { title: '私信', key: 'total_private_messages', width: 70, align: 'right' as const, render: (row: Api.Douyin.AnchorSummaryItem) => fmtNum(row.total_private_messages) },
+  { title: '线索', key: 'total_leads', width: 70, align: 'right' as const, render: (row: Api.Douyin.AnchorSummaryItem) => fmtNum(row.total_leads) },
+  { title: '新增粉丝', key: 'total_new_followers', width: 80, align: 'right' as const, render: (row: Api.Douyin.AnchorSummaryItem) => fmtNum(row.total_new_followers) },
+  { title: '互动', key: 'total_interactions', width: 70, align: 'right' as const, render: (row: Api.Douyin.AnchorSummaryItem) => fmtNum(row.total_interactions) },
+  { title: '广告花费', key: 'total_ad_cost', width: 90, align: 'right' as const, render: (row: Api.Douyin.AnchorSummaryItem) => fmtMoney(row.total_ad_cost) }
+];
 </script>
 
 <template>
   <NSpace vertical :size="16" class="business-page">
-    <BusinessPageHeader
-      title="零食店避坑直播复盘工作台"
-      description="围绕选址、预算、品牌、供应链、毛利损耗和证照科普，复盘资料钩子是否带来真实站内私信。"
-      icon="mdi:view-dashboard-outline"
-      eyebrow="知识科普与私信留资"
-      :status="
-        loadError ? '部分状态更新失败' : failedTaskCount ? `${failedTaskCount} 个历史失败任务` : '系统状态已汇总'
-      "
-      :status-type="loadError || failedTaskCount ? 'error' : 'success'"
-    >
-      <template #actions>
-        <NButton type="primary" :loading="loading" @click="loadWorkspace">
-          <template #icon><SvgIcon icon="mdi:refresh" /></template>
-          刷新工作台
+    <!-- 日期筛选 + 刷新 -->
+    <div class="flex flex-wrap items-center justify-between gap-12px">
+      <div class="flex flex-wrap items-center gap-10px">
+        <NButton
+          v-for="p in presets"
+          :key="p.key"
+          size="small"
+          :type="datePreset === p.key ? 'primary' : 'default'"
+          :secondary="datePreset !== p.key"
+          @click="selectPreset(p.key)"
+        >
+          {{ p.label }}
         </NButton>
-      </template>
-      <div class="flex flex-wrap items-center gap-x-18px gap-y-6px text-12px text-gray-500">
-        <span class="flex items-center gap-5px">
-          <SvgIcon icon="mdi:numeric-1-circle-outline" />
-          扫码并检查账号
-        </span>
-        <span class="flex items-center gap-5px">
-          <SvgIcon icon="mdi:numeric-2-circle-outline" />
-          刷新或实时采集
-        </span>
-        <span class="flex items-center gap-5px">
-          <SvgIcon icon="mdi:numeric-3-circle-outline" />
-          核对场次详情
-        </span>
-        <span class="flex items-center gap-5px">
-          <SvgIcon icon="mdi:numeric-4-circle-outline" />
-          转写与 AI 分析
-        </span>
-        <span class="ml-auto text-gray-400 lt-sm:ml-0">{{ lastUpdatedLabel }}</span>
+        <NDatePicker
+          type="daterange"
+          :value="customRange"
+          clearable
+          placeholder="自定义日期范围"
+          size="small"
+          class="w-210px"
+          @update:value="onCustomRangeChange"
+        />
       </div>
-    </BusinessPageHeader>
+      <NButton size="small" :loading="loading" @click="loadData">
+        <template #icon><SvgIcon icon="mdi:refresh" /></template>
+        刷新
+      </NButton>
+    </div>
 
+    <!-- 错误提示 -->
     <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
       {{ loadError }}
-      <NButton size="small" secondary :loading="loading" @click="loadWorkspace">重新刷新</NButton>
+      <NButton size="small" secondary :loading="loading" @click="loadData">重新加载</NButton>
     </NAlert>
 
-    <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">
-      <NGi>
-        <NCard
-          :bordered="false"
-          class="business-clickable-card card-wrapper h-full"
-          size="small"
-          role="button"
-          tabindex="0"
-          aria-label="查看采集服务状态"
-          @click="openRoute('collector')"
-          @keydown.enter="openRoute('collector')"
-          @keydown.space.prevent="openRoute('collector')"
-        >
-          <NStatistic label="采集服务" :value="collectorStatus?.connected ? '正常' : '异常'" />
-          <NTag class="mt-12px" :type="collectorStatus?.connected ? 'success' : 'error'" round size="small">
-            {{ collectorStatus?.connected ? '服务连接正常' : '等待采集账号' }}
-          </NTag>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard
-          :bordered="false"
-          class="business-clickable-card card-wrapper h-full"
-          size="small"
-          role="button"
-          tabindex="0"
-          aria-label="管理采集账号"
-          @click="openRoute('collector')"
-          @keydown.enter="openRoute('collector')"
-          @keydown.space.prevent="openRoute('collector')"
-        >
-          <NStatistic
-            label="可用采集账号"
-            :value="collectorStatus?.default_account?.login_status === 'logged_in' ? 1 : 0"
-          >
-            <template #suffix>个</template>
-          </NStatistic>
-          <div class="mt-12px text-12px text-gray-500">Cookie 与浏览器指纹已持久化</div>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard
-          :bordered="false"
-          class="business-clickable-card card-wrapper h-full"
-          size="small"
-          role="button"
-          tabindex="0"
-          aria-label="查看实时监控"
-          @click="openRoute('collector')"
-          @keydown.enter="openRoute('collector')"
-          @keydown.space.prevent="openRoute('collector')"
-        >
-          <NStatistic label="实时监控" :value="monitorStatus?.active_session_count || 0">
-            <template #suffix>场</template>
-          </NStatistic>
-          <NTag class="mt-12px" :type="monitorStatus?.running ? 'success' : 'default'" round size="small">
-            {{ monitorStatus?.running ? '监控运行中' : '监控已停止' }}
-          </NTag>
-        </NCard>
-      </NGi>
-      <NGi>
-        <NCard
-          :bordered="false"
-          class="business-clickable-card card-wrapper h-full"
-          size="small"
-          role="button"
-          tabindex="0"
-          aria-label="查看采集任务"
-          @click="openRoute('collector')"
-          @keydown.enter="openRoute('collector')"
-          @keydown.space.prevent="openRoute('collector')"
-        >
-          <NStatistic label="运行任务" :value="runningTaskCount">
-            <template #suffix>个</template>
-          </NStatistic>
-          <div class="mt-12px text-12px" :class="failedTaskCount ? 'text-error' : 'text-gray-500'">
-            历史失败 {{ failedTaskCount }} 个
-          </div>
-        </NCard>
-      </NGi>
-    </NGrid>
-
-    <NCard :bordered="false" class="card-wrapper" title="常用功能">
-      <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="12" :y-gap="12">
-        <NGi v-for="item in quickActions" :key="item.route">
-          <button
-            type="button"
-            class="business-focus-ring business-active-press h-full w-full flex items-start gap-12px rounded-10px border border-gray-200 bg-transparent p-14px text-left transition hover:border-primary hover:bg-primary-50 dark:border-white/10 dark:hover:bg-primary-900/15"
-            @click="openRoute(item.route)"
-          >
-            <div class="size-40px flex-center shrink-0 rounded-10px bg-primary-100 text-primary dark:bg-primary-900/30">
-              <SvgIcon :icon="item.icon" class="text-21px" />
+    <NSpin :show="loading && !summary">
+      <!-- 总体指标卡片 -->
+      <NGrid v-if="summary" cols="2 s:4" responsive="screen" :x-gap="14" :y-gap="14">
+        <NGi>
+          <NCard :bordered="false" size="small" class="card-wrapper">
+            <NStatistic label="总场次" :value="summary.session_count">
+              <template #suffix>场</template>
+            </NStatistic>
+            <div class="mt-6px text-11px text-gray-400">
+              采集完成率 {{ summary.detail_completion_rate }}%
             </div>
-            <div class="min-w-0">
-              <div class="font-600">{{ item.title }}</div>
-              <div class="mt-4px text-12px leading-18px text-gray-500">{{ item.description }}</div>
+          </NCard>
+        </NGi>
+        <NGi>
+          <NCard :bordered="false" size="small" class="card-wrapper">
+            <NStatistic label="总观看" :value="fmtNum(summary.total_viewers)">
+              <template #suffix>人</template>
+            </NStatistic>
+            <div class="mt-6px text-11px text-gray-400">
+              {{ summary.anchor_count }} 位主播 · {{ summary.live_session_count }} 场直播中
             </div>
-          </button>
+          </NCard>
+        </NGi>
+        <NGi>
+          <NCard :bordered="false" size="small" class="card-wrapper">
+            <NStatistic label="总评论" :value="fmtNum(summary.total_comments)">
+              <template #suffix>条</template>
+            </NStatistic>
+            <div class="mt-6px text-11px text-gray-400">
+              高意向 {{ fmtNum(summary.high_intent_comment_count) }} 条
+            </div>
+          </NCard>
+        </NGi>
+        <NGi>
+          <NCard :bordered="false" size="small" class="card-wrapper">
+            <NStatistic label="总私信 / 线索" :value="fmtNum(summary.total_private_messages)">
+              <template #suffix>人</template>
+            </NStatistic>
+            <div class="mt-6px text-11px text-gray-400">
+              线索 {{ fmtNum(summary.total_leads) }} 条
+            </div>
+          </NCard>
+        </NGi>
+        <NGi>
+          <NCard :bordered="false" size="small" class="card-wrapper">
+            <NStatistic label="广告总花费" :value="fmtMoney(summary.total_ad_cost)" />
+            <div class="mt-6px text-11px text-gray-400">
+              抖音推广消耗
+            </div>
+          </NCard>
+        </NGi>
+        <NGi>
+          <NCard :bordered="false" size="small" class="card-wrapper">
+            <NStatistic label="平均线索成本" :value="fmtMoney(summary.average_lead_cost)" />
+            <div class="mt-6px text-11px text-gray-400">
+              广告花费 ÷ 线索数
+            </div>
+          </NCard>
+        </NGi>
+        <NGi>
+          <NCard :bordered="false" size="small" class="card-wrapper">
+            <NStatistic label="待办复盘" :value="summary.open_review_action_count">
+              <template #suffix>个</template>
+            </NStatistic>
+            <div class="mt-6px text-11px text-gray-400">
+              待处理或进行中
+            </div>
+          </NCard>
+        </NGi>
+        <NGi>
+          <NCard :bordered="false" size="small" class="card-wrapper">
+            <NStatistic label="活跃主播" :value="summary.anchor_count">
+              <template #suffix>位</template>
+            </NStatistic>
+            <div class="mt-6px text-11px text-gray-400">
+              有真实场次记录
+            </div>
+          </NCard>
         </NGi>
       </NGrid>
-    </NCard>
+
+      <!-- 空数据提示 -->
+      <NEmpty
+        v-else-if="!loading"
+        description="该日期范围内暂无直播数据"
+        class="py-40px"
+      />
+
+      <!-- 主播数据明细表 -->
+      <NCard
+        v-if="anchorData && anchorData.anchors.length"
+        :bordered="false"
+        size="small"
+        class="card-wrapper"
+        title="主播数据明细"
+      >
+        <template #header-extra>
+          <NTag size="small" type="info" :bordered="false">{{ anchorData.anchors.length }} 位主播</NTag>
+        </template>
+        <NDataTable
+          :columns="anchorColumns"
+          :data="anchorData.anchors"
+          :bordered="false"
+          :single-line="false"
+          size="small"
+          :max-height="400"
+          striped
+        />
+      </NCard>
+    </NSpin>
   </NSpace>
 </template>

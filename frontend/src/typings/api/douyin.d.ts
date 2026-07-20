@@ -21,6 +21,25 @@ declare namespace Api {
       open_review_action_count: number;
     }
 
+    interface AnchorSummaryItem {
+      douyin_id: string;
+      anchor_name: string;
+      anchor_avatar_url: string;
+      session_count: number;
+      total_viewers: number;
+      total_comments: number;
+      total_private_messages: number;
+      total_leads: number;
+      total_ad_cost: number;
+      total_interactions: number;
+      total_new_followers: number;
+    }
+
+    interface AnchorSummaryResponse {
+      anchors: AnchorSummaryItem[];
+      total: Record<string, number>;
+    }
+
     /* ---------- 主播排班 ---------- */
     type AnchorScheduleStatus = 'upcoming' | 'live' | 'completed' | 'missing' | 'duration_short' | 'invalid' | 'extra';
 

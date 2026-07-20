@@ -1,7 +1,9 @@
 """仪表盘 & DataEase — Pydantic 响应模型"""
 
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 
 class DashboardSummaryResponse(BaseModel):
@@ -19,6 +21,27 @@ class DashboardSummaryResponse(BaseModel):
     total_ad_cost: float = 0
     average_lead_cost: float = 0
     open_review_action_count: int = 0
+
+
+class AnchorSummaryItem(BaseModel):
+    """按主播分组的经营指标"""
+    douyin_id: str = ""
+    anchor_name: str = ""
+    anchor_avatar_url: str = ""
+    session_count: int = 0
+    total_viewers: int = 0
+    total_comments: int = 0
+    total_private_messages: int = 0
+    total_leads: int = 0
+    total_ad_cost: float = 0
+    total_interactions: int = 0
+    total_new_followers: int = 0
+
+
+class AnchorSummaryResponse(BaseModel):
+    """GET /dashboard/summary/by-anchor"""
+    anchors: list[AnchorSummaryItem] = Field(default_factory=list)
+    total: dict[str, Any] = Field(default_factory=dict)
 
 
 class DataEaseStatusResponse(BaseModel):
