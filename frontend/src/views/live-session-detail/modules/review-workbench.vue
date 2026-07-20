@@ -146,8 +146,11 @@ async function changeAssetStatus(item: Api.Douyin.ScriptAsset, status: Api.Douyi
 
 onMounted(async () => {
   reviewStore.initialize(props.sessionId);
-  const [, sessionsResponse] = await Promise.all([loadWorkbench(), fetchLiveSessionPage({ current: 1, size: 100 })]);
-  sessions.value = sessionsResponse.data?.records || [];
+  await loadWorkbench(false);
+  // 后台静默加载场次列表（供跨场对比使用）
+  fetchLiveSessionPage({ current: 1, size: 100 }).then(res => {
+    sessions.value = res.data?.records || [];
+  }).catch(() => {});
   if (props.detail.session.live_status === 'live') {
     pollTimer = setInterval(() => loadWorkbench(false), 15_000);
   }
