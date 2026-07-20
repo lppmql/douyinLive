@@ -222,6 +222,8 @@ onBeforeUnmount(() => {
           :session-id="sessionId"
           :stream-url="detail.stream_url"
           :title="detail.session.session_title || '直播场次回放'"
+          :duration-seconds="detail.session.live_duration_seconds || 0"
+          :findings="workbench.findings || []"
         />
         <NCard title="统一复盘分析" :bordered="false" class="card-wrapper min-w-0">
           <template #header-extra>
