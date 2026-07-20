@@ -20,7 +20,6 @@ const question = ref('');
 const chatting = ref(false);
 const messages = ref<ChatMessage[]>([]);
 const chatEndRef = ref<HTMLElement | null>(null);
-const conversationTurnCount = computed(() => messages.value.filter(item => item.role === 'user').length);
 let messageId = 0;
 
 async function scrollChatToEnd() {
@@ -72,288 +71,464 @@ function clearConversation() {
 
 async function copyText(content: string) {
   await navigator.clipboard.writeText(content);
-  message.success('内容已复制');
+  message.success('已复制');
 }
 </script>
 
 <template>
-  <div class="knowledge-chat-page">
-    <NCard :bordered="false" class="chat-card">
-      <template #header>
-        <div class="flex items-center justify-between gap-12px">
-          <div>
-            <div class="flex items-center gap-8px text-18px font-800">
-              <SvgIcon icon="mdi:message-processing-outline" class="text-primary" />
-              直播经营知识问答
+  <div class="wechat-chat">
+    <!-- 顶部标题栏 -->
+    <header class="chat-header">
+      <span class="chat-header__title">直播经营知识问答</span>
+      <button
+        v-if="messages.length"
+        type="button"
+        class="chat-header__action"
+        @click="clearConversation"
+      >
+        <SvgIcon icon="mdi:plus" class="text-20px" />
+      </button>
+    </header>
+
+    <!-- 消息区域 -->
+    <div class="chat-body">
+      <NScrollbar class="chat-scroll">
+        <div class="chat-messages">
+          <!-- 欢迎提示 -->
+          <div v-if="!messages.length" class="chat-welcome">
+            <div class="chat-welcome__avatar">
+              <SvgIcon icon="mdi:robot-outline" class="text-36px" />
             </div>
-            <div class="mt-3px text-12px font-normal text-gray-500">
-              基于真实直播数据检索话术、评论、指标与复盘结论
-            </div>
+            <div class="mt-16px text-16px font-600 text-gray-700">零食店避坑 · 知识问答助手</div>
+            <p class="mb-0 mt-6px max-w-300px text-center text-13px leading-20px text-gray-400">
+              基于真实直播话术、评论和指标数据回答你的问题
+            </p>
           </div>
-          <NButton v-if="messages.length" secondary size="small" @click="clearConversation">
-            <template #icon><SvgIcon icon="mdi:message-plus-outline" /></template>
-            新对话
-          </NButton>
-        </div>
-      </template>
 
-      <div class="chat-body">
-        <NScrollbar class="chat-scroll">
-          <div class="chat-messages">
-            <!-- 欢迎提示 -->
-            <div v-if="!messages.length" class="chat-welcome">
-              <span class="chat-welcome__icon"><SvgIcon icon="mdi:database-search-outline" /></span>
-              <div class="mt-12px text-18px font-800">从真实直播数据里找答案</div>
-              <p class="mb-0 mt-8px max-w-520px text-center text-13px leading-22px text-gray-500">
-                可以直接询问主播话术、用户评论、开店地区与预算、高意向线索、分钟趋势或跨场次差异。
-              </p>
-              <div class="mt-12px flex flex-wrap justify-center gap-8px">
-                <NButton
-                  v-for="q in ['哪些用户问题最适合引导私信领取资料？', '最近场次中用户最常问哪些开店预算问题？', '找出有明确地区和预算的高意向评论']"
-                  :key="q"
-                  size="small"
-                  secondary
-                  :disabled="chatting"
-                  @click="sendQuestion(q)"
-                >
-                  {{ q }}
-                </NButton>
+          <!-- 对话消息 -->
+          <div v-for="chatMessage in messages" :key="chatMessage.id" class="msg-block">
+            <!-- AI 消息（左侧，带头像） -->
+            <div v-if="chatMessage.role === 'ai'" class="msg-row msg-row--ai">
+              <div class="msg-avatar msg-avatar--ai">
+                <SvgIcon icon="mdi:robot-outline" class="text-20px" />
               </div>
-            </div>
-
-            <!-- 对话消息 -->
-            <div v-for="chatMessage in messages" :key="chatMessage.id" class="mb-12px">
-              <div :class="chatMessage.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+              <div class="msg-content msg-content--ai">
                 <div
-                  class="chat-bubble"
-                  :class="[
-                    chatMessage.role === 'user' ? 'chat-bubble--user' : 'chat-bubble--ai',
-                    { 'chat-bubble--error': chatMessage.error }
-                  ]"
+                  class="msg-bubble msg-bubble--ai"
+                  :class="{ 'msg-bubble--error': chatMessage.error }"
                 >
                   <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
-                  <div v-if="chatMessage.role === 'ai' && !chatMessage.error" class="mt-8px flex justify-end">
-                    <NButton text size="tiny" @click="copyText(chatMessage.content)">
-                      <template #icon><SvgIcon icon="mdi:content-copy" /></template>
-                      复制
-                    </NButton>
+                </div>
+                <!-- 操作按钮 -->
+                <div v-if="!chatMessage.error" class="msg-actions">
+                  <button type="button" class="msg-action-btn" @click="copyText(chatMessage.content)">
+                    复制
+                  </button>
+                </div>
+                <!-- 引用来源 -->
+                <div v-if="chatMessage.sources?.length" class="msg-sources">
+                  <div class="msg-sources__title">
+                    <SvgIcon icon="mdi:link-variant" class="text-13px" />
+                    引用 {{ chatMessage.sources.length }} 条真实来源
+                  </div>
+                  <div
+                    v-for="source in chatMessage.sources"
+                    :key="`${source.source_type}-${source.id}`"
+                    class="msg-source-item"
+                  >
+                    <span class="msg-source-item__name">{{ source.title || source.anchor_name || '未命名' }}</span>
+                    <span v-if="source.excerpt" class="msg-source-item__excerpt">{{ source.excerpt }}</span>
                   </div>
                 </div>
               </div>
-
-              <!-- 引用来源 -->
-              <NCollapse v-if="chatMessage.sources?.length" class="source-collapse" arrow-placement="right">
-                <NCollapseItem :title="`查看 ${chatMessage.sources.length} 条真实来源`" :name="chatMessage.id">
-                  <div class="grid grid-cols-2 gap-8px lt-lg:grid-cols-1">
-                    <div
-                      v-for="source in chatMessage.sources"
-                      :key="`${source.source_type}-${source.id}`"
-                      class="source-card"
-                    >
-                      <div class="min-w-0">
-                        <div class="truncate text-12px font-700">{{ source.title || '未命名来源' }}</div>
-                        <div class="mt-2px text-11px text-gray-400">
-                          {{ source.anchor_name || source.source_type }}
-                        </div>
-                      </div>
-                      <div
-                        v-if="source.excerpt"
-                        class="line-clamp-2 mt-5px text-11px leading-18px text-gray-500"
-                      >
-                        {{ source.excerpt }}
-                      </div>
-                    </div>
-                  </div>
-                </NCollapseItem>
-              </NCollapse>
             </div>
 
-            <!-- 加载中 -->
-            <div v-if="chatting" class="mb-12px flex justify-start">
-              <div class="chat-bubble chat-bubble--ai flex items-center gap-8px text-gray-500">
-                <NSpin :size="14" />
-                正在检索真实话术、评论和指标…
+            <!-- 用户消息（右侧，无头像） -->
+            <div v-else class="msg-row msg-row--user">
+              <div class="msg-bubble msg-bubble--user">
+                <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
               </div>
             </div>
-            <div ref="chatEndRef" />
           </div>
-        </NScrollbar>
-      </div>
 
-      <!-- 输入区域 -->
-      <div class="chat-composer">
-        <div class="mb-8px flex items-center justify-between gap-8px">
-          <span class="flex items-center gap-5px text-12px font-700">
-            <SvgIcon icon="mdi:pencil-outline" class="text-primary" />
-            输入你的问题
-          </span>
-          <span class="text-11px text-gray-400">Enter 发送，Shift+Enter 换行</span>
+          <!-- 加载中 -->
+          <div v-if="chatting" class="msg-row msg-row--ai">
+            <div class="msg-avatar msg-avatar--ai">
+              <SvgIcon icon="mdi:robot-outline" class="text-20px" />
+            </div>
+            <div class="msg-bubble msg-bubble--ai msg-bubble--typing">
+              <span class="typing-dot" />
+              <span class="typing-dot" />
+              <span class="typing-dot" />
+            </div>
+          </div>
+          <div ref="chatEndRef" />
         </div>
-        <NInput
-          v-model:value="question"
-          type="textarea"
-          :autosize="{ minRows: 1, maxRows: 4 }"
+      </NScrollbar>
+    </div>
+
+    <!-- 底部输入栏 -->
+    <footer class="chat-footer">
+      <div class="chat-footer__inner">
+        <input
+          v-model="question"
+          class="chat-input"
+          type="text"
           maxlength="500"
-          show-count
-          placeholder="输入复盘问题，Enter 发送，Shift+Enter 换行"
+          placeholder="输入问题..."
           :disabled="chatting"
           @keydown="handleQuestionKeydown"
         />
-        <div class="mt-8px flex items-center justify-between gap-8px">
-          <span class="text-11px text-gray-400">回答基于已同步的真实直播数据</span>
-          <NButton
-            type="primary"
-            :loading="chatting"
-            :disabled="!question.trim() || chatting"
-            @click="sendQuestion()"
-          >
-            <template #icon><SvgIcon icon="mdi:send" /></template>
-            发送
-          </NButton>
-        </div>
+        <button
+          type="button"
+          class="chat-send-btn"
+          :class="{ 'chat-send-btn--active': question.trim() && !chatting }"
+          :disabled="!question.trim() || chatting"
+          @click="sendQuestion()"
+        >
+          <SvgIcon icon="mdi:send" class="text-18px" />
+        </button>
       </div>
-    </NCard>
+    </footer>
   </div>
 </template>
 
 <style scoped>
-.knowledge-chat-page {
+.wechat-chat {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 128px);
-  padding: 16px;
+  height: calc(100vh - 56px);
+  background: #ededed;
 }
 
-/* 让 NCard 填满并限制高度，内容区也撑开 */
-.chat-card {
+/* ── 顶部标题栏 ── */
+.chat-header {
   display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-
-.chat-card :deep(.n-card__content) {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  padding-top: 0;
-  overflow: hidden;
-}
-
-/* 聊天区（滚动区 + 输入区）撑满卡片内容 */
-.chat-body {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  border: 1px solid rgb(148 163 184 / 16%);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--card-color) 97%, rgb(var(--primary-color)) 3%);
-  overflow: hidden;
-}
-
-/* 消息滚动区：占满剩余高度，超出时出现滚动条 */
-.chat-scroll {
-  flex: 1;
-  min-height: 0;
-}
-
-.chat-scroll :deep(.n-scrollbar-container) {
-  min-height: 0;
-}
-
-.chat-messages {
-  padding: 16px 12px 8px 16px;
-}
-
-.chat-welcome {
-  display: flex;
-  min-height: 260px;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 18px;
+  flex-shrink: 0;
+  height: 44px;
+  background: #ededed;
+  border-bottom: 1px solid rgb(0 0 0 / 6%);
+  position: relative;
+  padding: 0 16px;
 }
 
-.chat-welcome__icon {
+.chat-header__title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #191919;
+}
+
+.chat-header__action {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 58px;
-  height: 58px;
-  border-radius: 18px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #191919;
+  cursor: pointer;
+}
+
+.chat-header__action:active {
+  background: rgb(0 0 0 / 6%);
+}
+
+/* ── 消息滚动区 ── */
+.chat-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-scroll {
+  height: 100%;
+}
+
+.chat-messages {
+  padding: 12px 14px 20px;
+}
+
+/* ── 欢迎提示 ── */
+.chat-welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px 40px;
+}
+
+.chat-welcome__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: white;
   color: rgb(var(--primary-color));
-  background: linear-gradient(135deg, rgb(var(--primary-color) / 15%), rgb(24 160 88 / 10%));
-  font-size: 28px;
+  box-shadow: 0 2px 12px rgb(0 0 0 / 6%);
 }
 
-/* 输入区固定在底部，不参与滚动 */
-.chat-composer {
+/* ── 消息行 ── */
+.msg-block {
+  margin-bottom: 16px;
+}
+
+.msg-row {
+  display: flex;
+  align-items: flex-start;
+}
+
+.msg-row--ai {
+  justify-content: flex-start;
+  padding-right: 60px;
+}
+
+.msg-row--user {
+  justify-content: flex-end;
+  padding-left: 60px;
+}
+
+/* ── 头像 ── */
+.msg-avatar {
   flex-shrink: 0;
-  border-top: 1px solid rgb(148 163 184 / 14%);
-  background: var(--card-color);
-  padding: 14px 16px 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  margin-right: 10px;
+  margin-top: 2px;
 }
 
-.chat-bubble {
-  max-width: 92%;
-  border-radius: 12px;
+.msg-avatar--ai {
+  background: white;
+  color: rgb(var(--primary-color));
+  box-shadow: 0 1px 4px rgb(0 0 0 / 6%);
+}
+
+/* ── 消息内容区 ── */
+.msg-content--ai {
+  min-width: 0;
+}
+
+/* ── 气泡 ── */
+.msg-bubble {
+  display: inline-block;
+  max-width: 100%;
   padding: 10px 14px;
-  font-size: 13px;
-  line-height: 21px;
+  font-size: 15px;
+  line-height: 22px;
+  word-break: break-word;
+  position: relative;
 }
 
-.chat-bubble--user {
+.msg-bubble--user {
+  background: #95ec69;
+  color: #000;
+  border-radius: 4px;
+  border-top-right-radius: 4px;
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
   border-bottom-right-radius: 4px;
+}
+
+.msg-bubble--ai {
+  background: white;
+  color: #353535;
+  border-radius: 4px;
+  box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
+}
+
+.msg-bubble--error {
+  background: #fff2f2;
+  color: #d03050;
+}
+
+/* ── 正在输入动画 ── */
+.msg-bubble--typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 18px;
+}
+
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #bbb;
+  animation: typing-bounce 1.4s infinite ease-in-out both;
+}
+
+.typing-dot:nth-child(1) { animation-delay: 0s; }
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.5; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+/* ── 消息操作 ── */
+.msg-actions {
+  margin-top: 4px;
+  padding-left: 2px;
+}
+
+.msg-action-btn {
+  border: none;
+  background: transparent;
+  color: #888;
+  font-size: 11px;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+
+.msg-action-btn:active {
+  background: rgb(0 0 0 / 5%);
+}
+
+/* ── 引用来源 ── */
+.msg-sources {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: white;
+  border-radius: 4px;
+  box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
+  max-width: 100%;
+}
+
+.msg-sources__title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: rgb(var(--primary-color));
+  font-weight: 600;
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgb(0 0 0 / 5%);
+}
+
+.msg-source-item {
+  padding: 5px 0;
+  border-bottom: 1px solid rgb(0 0 0 / 3%);
+}
+
+.msg-source-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.msg-source-item__name {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+}
+
+.msg-source-item__excerpt {
+  display: block;
+  margin-top: 3px;
+  font-size: 11px;
+  color: #999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── 底部输入栏 ── */
+.chat-footer {
+  flex-shrink: 0;
+  background: #f7f7f7;
+  border-top: 1px solid rgb(0 0 0 / 6%);
+  padding: 8px 12px;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+.chat-footer__inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-input {
+  flex: 1;
+  height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 6px;
+  background: white;
+  font-size: 15px;
+  color: #333;
+  outline: none;
+}
+
+.chat-input::placeholder {
+  color: #bbb;
+}
+
+.chat-input:disabled {
+  background: #fdfdfd;
+  color: #999;
+}
+
+.chat-send-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: #e0e0e0;
+  color: #bbb;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.chat-send-btn--active {
   background: rgb(var(--primary-color));
   color: white;
 }
 
-.chat-bubble--ai {
-  border-bottom-left-radius: 4px;
-  background: rgb(148 163 184 / 11%);
-  color: var(--text-color-1);
+.chat-send-btn:active {
+  transform: scale(0.95);
 }
 
-.chat-bubble--error {
-  background: rgb(208 48 80 / 9%);
-  color: #d03050;
-}
-
-.source-collapse {
-  margin-top: 7px;
-  border-radius: 10px;
-  background: rgb(148 163 184 / 6%);
-  padding: 0 10px;
-}
-
-.source-collapse :deep(.n-collapse-item__header-main) {
-  color: rgb(var(--primary-color));
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.source-card {
-  border: 1px solid rgb(148 163 184 / 16%);
-  border-radius: 9px;
-  background: var(--card-color);
-  padding: 8px 10px;
-}
-
+/* ── 响应式 ── */
 @media (max-width: 640px) {
-  .knowledge-chat-page {
-    height: calc(100vh - 100px);
-    padding: 10px;
+  .wechat-chat {
+    height: calc(100vh - 48px);
+  }
+
+  .msg-row--ai {
+    padding-right: 40px;
+  }
+
+  .msg-row--user {
+    padding-left: 40px;
+  }
+
+  .msg-bubble {
+    font-size: 14px;
+    padding: 8px 12px;
   }
 
   .chat-messages {
-    padding: 12px 8px 6px 12px;
-  }
-
-  .chat-composer {
-    padding: 10px 12px 12px;
+    padding: 10px 10px 16px;
   }
 }
 </style>
