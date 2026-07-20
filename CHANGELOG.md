@@ -6,6 +6,13 @@
 
 ## [2026-07-20]
 
+### Fixed
+- **直播场次详情页 `Cannot read properties of undefined (reading 'map')` 崩溃**：
+  - 根因：`ReviewComparisonResponse` Pydantic schema 字段名（`primary`/`baseline`）与 `compare_sessions()` 实际返回（`current`/`baseline`/`dimensions`/`current_series`/`baseline_series`/`comparison_note`）不匹配
+  - FastAPI `response_model` 过滤掉未声明字段 → 前端 `comparison.value.current_series` 为 `undefined` → `.map()` 崩溃
+  - 修复：schema 字段改为匹配实际返回值，前端添加防御性 `|| []` 保护
+  - 新增全局 Vue 错误处理器（`main.ts`）：捕获 `.map()` 错误并输出精确堆栈
+
 ### Added
 - 根 `.env` 新增 `CORS_ORIGINS` / `BACKEND_RELOAD` 变量
 - `config.py` 新增 `extra="ignore"`，兼容 docker-compose / start.sh 专用变量
