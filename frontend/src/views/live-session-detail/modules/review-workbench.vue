@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
             />
           </div>
           <div class="grid grid-cols-3 gap-8px sm:grid-cols-4 lg:grid-cols-7">
-            <NTooltip v-for="item in workbench.completeness.components" :key="item.name">
+            <NTooltip v-for="item in (workbench.completeness.components || [])" :key="item.name">
               <template #trigger>
                 <div
                   class="rounded-8px px-8px py-7px text-center"
@@ -236,17 +236,17 @@ onBeforeUnmount(() => {
               </NAlert>
               <ReviewTimeline
                 :session-start="detail.session.live_start_time"
-                :metrics="detail.metrics"
-                :comments="detail.comments"
-                :segments="workbench.transcript_segments"
-                :findings="workbench.findings"
-                :alerts="workbench.live_alerts"
+                :metrics="detail.metrics || []"
+                :comments="detail.comments || []"
+                :segments="workbench.transcript_segments || []"
+                :findings="workbench.findings || []"
+                :alerts="workbench.live_alerts || []"
                 @create-asset="openAssetModal"
                 @update-finding="updateFinding"
               />
             </NTabPane>
             <NTabPane name="metrics" :tab="`分钟曲线 (${detail.metrics.length})`" display-directive="if">
-              <MetricsChart :metrics="detail.metrics" />
+              <MetricsChart :metrics="detail.metrics || []" />
             </NTabPane>
             <NTabPane name="ai" tab="AI 分析" display-directive="if">
               <AiPanel :session-id="sessionId" :detail="detail" />
@@ -262,9 +262,9 @@ onBeforeUnmount(() => {
           </NTabPane>
           <NTabPane name="assets" :tab="`话术资产与合规 (${workbench.script_assets.length})`" display-directive="if">
             <ScriptAssetsPanel
-              :assets="workbench.script_assets"
-              :coverage="workbench.domain_coverage"
-              :findings="workbench.findings"
+              :assets="workbench.script_assets || []"
+              :coverage="workbench.domain_coverage || []"
+              :findings="workbench.findings || []"
               :updating-id="updatingAssetId"
               @update-asset="changeAssetStatus"
             />
