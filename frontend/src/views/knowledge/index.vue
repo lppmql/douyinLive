@@ -220,14 +220,16 @@ async function copyText(content: string) {
 .knowledge-chat-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 120px);
+  height: calc(100vh - 128px);
   padding: 16px;
 }
 
+/* 让 NCard 填满并限制高度，内容区也撑开 */
 .chat-card {
   display: flex;
   flex: 1;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -237,8 +239,10 @@ async function copyText(content: string) {
   flex-direction: column;
   min-height: 0;
   padding-top: 0;
+  overflow: hidden;
 }
 
+/* 聊天区（滚动区 + 输入区）撑满卡片内容 */
 .chat-body {
   display: flex;
   flex: 1;
@@ -250,8 +254,13 @@ async function copyText(content: string) {
   overflow: hidden;
 }
 
+/* 消息滚动区：占满剩余高度，超出时出现滚动条 */
 .chat-scroll {
   flex: 1;
+  min-height: 0;
+}
+
+.chat-scroll :deep(.n-scrollbar-container) {
   min-height: 0;
 }
 
@@ -280,8 +289,9 @@ async function copyText(content: string) {
   font-size: 28px;
 }
 
+/* 输入区固定在底部，不参与滚动 */
 .chat-composer {
-  flex: none;
+  flex-shrink: 0;
   border-top: 1px solid rgb(148 163 184 / 14%);
   background: var(--card-color);
   padding: 14px 16px 16px;
