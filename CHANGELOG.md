@@ -11,12 +11,23 @@
 - `config.py` 新增 `extra="ignore"`，兼容 docker-compose / start.sh 专用变量
 - 前端 `VITE_ICONIFY_URL` 待配置注释
 - 后端 ~40 个端点补齐 Pydantic `response_model`（`schemas/ai.py`, `transcript.py`, `dashboard.py`, `knowledge.py`）
+- **契约强制**：`openapi-typescript` 自动从后端 OpenAPI schema 生成前端 TypeScript 类型（`pnpm gen-api`）
+- CI 新增 `check-api-types` job：后端改 Pydantic 字段 → 前端类型不同步 → 构建变红
+- `frontend/scripts/generate-api-types.ts`：支持本地和 CI 两种模式
+- `frontend/src/typings/api/generated.d.ts`：7910 行自动生成的 API 类型定义
+- Dependabot groups：npm/pip 的 patch 和 minor 各合并为一个 PR（不再 10 个分散 PR）
+- pytest-cov + CI 覆盖率红线（初始阈值 50%）
+- `docs/adr/` 目录：5 个架构决策记录（只增不改）
+- `docs/architecture/README.md`：架构文档导航
+- `docs/adr/0002-*`：绞杀者迁移模板（7 步标准流程）
+- `CHANGELOG.md`：按时间倒序的版本变更记录
 
 ### Changed
 - CORS `allow_origins` 从 `main.py` 硬编码改为读取 `settings.CORS_ORIGINS`
 - docker-compose `DATAEASE_ORIGIN_LIST` 改为 `${CORS_ORIGINS:-...}`
 - 前后端 `.env` 分离：根 `.env` 纯后端变量，`frontend/.env` 纯 VITE_* 变量
 - `.gitignore`: `.env` → `/.env`（只忽略根目录含密钥的 .env）
+- 部分架构文档从 `docs/architecture/` 迁移为 ADR 格式
 
 ### Removed
 - `packages/alova/` — 未使用的 HTTP 客户端包（项目用 `@sa/axios`）
