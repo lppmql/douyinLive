@@ -1,21 +1,17 @@
 import process from 'node:process';
-import path from 'node:path';
 import { URL, fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv } from 'vite';
 import { setupVitePlugins } from './build/plugins';
 import { createViteProxy, getBuildTime } from './build/config';
 
 export default defineConfig(configEnv => {
-  // 从项目根目录加载 .env，与后端共用同一配置文件
-  const rootDir = path.resolve(process.cwd(), '..');
-  const viteEnv = loadEnv(configEnv.mode, rootDir, '') as unknown as Env.ImportMeta;
+  const viteEnv = loadEnv(configEnv.mode, process.cwd()) as unknown as Env.ImportMeta;
 
   const buildTime = getBuildTime();
 
   const enableProxy = configEnv.command === 'serve' && !configEnv.isPreview;
 
   return {
-    envDir: '../',
     base: viteEnv.VITE_BASE_URL,
     resolve: {
       alias: {

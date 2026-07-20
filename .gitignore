@@ -4,8 +4,8 @@ backend/__pycache__/
 *.pyc
 *.pyo
 
-# Environment
-.env
+# Environment（只忽略根目录含密钥的 .env，frontend/.env 为公开前端配置）
+/.env
 
 # IDE
 .idea/
