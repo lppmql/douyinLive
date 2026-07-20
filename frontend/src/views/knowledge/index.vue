@@ -76,7 +76,8 @@ async function copyText(content: string) {
 </script>
 
 <template>
-  <div class="wechat-chat">
+  <div class="knowledge-chat-page">
+    <div class="wechat-chat">
     <!-- 顶部标题栏 -->
     <header class="chat-header">
       <span class="chat-header__title">直播经营知识问答</span>
@@ -190,15 +191,28 @@ async function copyText(content: string) {
         </button>
       </div>
     </footer>
+    </div>
   </div>
 </template>
 
+<style>
+/* 非 scoped：锁定路由容器，禁止外层页面滚动 */
+.knowledge-chat-page {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+</style>
+
 <style scoped>
+/* 确保聊天页撑满父容器并禁止自身滚动，只有消息区滚动 */
 .wechat-chat {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 56px);
   background: #fff;
+  overflow: hidden;
 }
 
 /* ── 顶部标题栏 ── */
@@ -517,10 +531,6 @@ async function copyText(content: string) {
 
 /* ── 响应式 ── */
 @media (max-width: 640px) {
-  .wechat-chat {
-    height: calc(100vh - 48px);
-  }
-
   .msg-row--ai {
     padding-right: 40px;
   }
