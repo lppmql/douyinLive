@@ -44,7 +44,7 @@ function reloadPage() {
 </script>
 
 <template>
-  <div class="size-full min-h-520px flex-col-center gap-18px overflow-hidden px-20px text-center">
+  <div class="size-full min-h-520px flex-col-center gap-16px overflow-hidden px-20px text-center">
     <div class="flex text-260px text-primary lt-sm:text-180px">
       <SvgIcon :local-icon="icon" />
     </div>

@@ -33,7 +33,7 @@ const complianceFindings = computed(() =>
             "
             @click="item.first_seconds !== null && reviewStore.seekTo(item.first_seconds)"
           >
-            <div class="flex items-center gap-7px text-12px font-700">
+            <div class="flex items-center gap-8px text-12px font-700">
               <SvgIcon
                 :icon="item.covered ? 'mdi:check-circle-outline' : 'mdi:circle-outline'"
                 :class="item.covered ? 'text-success' : 'text-gray-400'"

@@ -219,7 +219,7 @@ function sortSessionsByLatest(items: Api.Douyin.LiveSession[]) {
 
 function renderSessionLabel(option: SelectOption) {
   const sessionOption = option as SessionSelectOption;
-  return h('div', { class: 'flex min-w-0 items-center gap-9px' }, [
+  return h('div', { class: 'flex min-w-0 items-center gap-8px' }, [
     h(AnchorAvatar, { size: 26, src: sessionOption.avatarUrl || undefined, name: sessionOption.anchorName }),
     h('span', { class: 'min-w-0 flex-1 truncate' }, String(sessionOption.label || ''))
   ]);
@@ -464,7 +464,7 @@ onUnmounted(() => {
         v-for="card in taskStatusCards"
         :key="card.status"
         type="button"
-        class="business-clickable-card status-card rounded-12px bg-white p-14px text-left dark:bg-dark sm:p-16px"
+        class="business-clickable-card business-focus-ring status-card rounded-12px bg-white p-14px text-left dark:bg-dark sm:p-16px"
         :class="`status-card--${card.tone}`"
         @click="openTaskDrawer(card.status)"
       >
@@ -473,7 +473,7 @@ onUnmounted(() => {
             <div class="text-12px text-gray-500">{{ card.label }}</div>
             <div class="mt-5px text-26px font-800">{{ card.value }}</div>
           </div>
-          <div class="status-icon flex-center rounded-10px p-9px"><SvgIcon :icon="card.icon" class="text-24px" /></div>
+          <div class="status-icon flex-center rounded-10px p-8px"><SvgIcon :icon="card.icon" class="text-24px" /></div>
         </div>
         <div class="mt-8px text-11px text-gray-400">点击查看真实任务明细</div>
       </button>
@@ -487,7 +487,7 @@ onUnmounted(() => {
     <NCard :bordered="false" class="card-wrapper">
       <div class="business-toolbar">
         <div class="min-w-0 flex-1">
-          <div class="mb-7px flex items-center gap-7px text-12px font-600 text-gray-500">
+          <div class="mb-8px flex items-center gap-8px text-12px font-600 text-gray-500">
             <span>当前复盘场次</span>
             <NTag size="tiny" type="info" :bordered="false" round>默认最新</NTag>
           </div>
@@ -624,7 +624,7 @@ onUnmounted(() => {
                   <div class="flex items-start gap-12px">
                     <button
                       type="button"
-                      class="time-button shrink-0 rounded-7px px-8px py-5px font-mono text-12px font-700"
+                      class="time-button shrink-0 rounded-7px px-8px py-4px font-mono text-12px font-700"
                       @click="jumpToSegment(item)"
                     >
                       {{ formatTime(item.segment_start) }}
@@ -633,7 +633,7 @@ onUnmounted(() => {
                       <p class="whitespace-pre-wrap text-14px leading-23px">
                         {{ item.text_content || '该片段没有识别出有效文字' }}
                       </p>
-                      <div class="mt-9px flex flex-wrap items-center gap-7px">
+                      <div class="mt-8px flex flex-wrap items-center gap-8px">
                         <NTag size="tiny" :bordered="false">{{ item.segment_type || '未分类' }}</NTag>
                         <NTag size="tiny" :type="getStatusType(item.asr_status)" :bordered="false">
                           {{ getStatusLabel(item.asr_status) }}
@@ -706,7 +706,7 @@ onUnmounted(() => {
               <template #default="{ item }">
                 <button
                   type="button"
-                  class="timeline-link mb-7px w-full flex items-start gap-9px rounded-8px p-9px text-left"
+                  class="timeline-link mb-8px w-full flex items-start gap-8px rounded-8px p-8px text-left"
                   @click="jumpToSegment(item)"
                 >
                   <span class="shrink-0 font-mono text-11px font-700 text-primary">
@@ -740,7 +740,7 @@ onUnmounted(() => {
           <NCard v-for="task in filteredTasks" :key="task.id" size="small" :bordered="true">
             <div class="flex items-start justify-between gap-12px">
               <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-center gap-7px">
+                <div class="flex flex-wrap items-center gap-8px">
                   <strong class="text-14px">{{ task.anchor_name }}</strong>
                   <NTag size="tiny" :type="getStatusType(task.status)" :bordered="false">
                     {{ getStatusLabel(task.status) }}
@@ -797,24 +797,24 @@ onUnmounted(() => {
 }
 .status-icon,
 .time-button {
-  background: rgba(32, 128, 240, 0.1);
-  color: rgb(32, 128, 240);
+  background: rgba(var(--primary-color), 0.1);
+  color: rgb(var(--primary-color));
 }
 .status-card--warning .status-icon {
-  background: rgba(240, 160, 32, 0.12);
-  color: rgb(240, 160, 32);
+  background: rgba(var(--warning-color), 0.12);
+  color: rgb(var(--warning-color));
 }
 .status-card--success .status-icon {
-  background: rgba(24, 160, 88, 0.12);
-  color: rgb(24, 160, 88);
+  background: rgba(var(--success-color), 0.12);
+  color: rgb(var(--success-color));
 }
 .status-card--error .status-icon {
-  background: rgba(208, 48, 80, 0.12);
-  color: rgb(208, 48, 80);
+  background: rgba(var(--error-color), 0.12);
+  color: rgb(var(--error-color));
 }
 .segment-card,
 .full-text {
-  border: 1px solid rgba(128, 128, 128, 0.14);
+  border: 1px solid var(--border-color, rgba(128, 128, 128, 0.14));
   background: rgba(128, 128, 128, 0.035);
 }
 .segment-card {

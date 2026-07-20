@@ -79,7 +79,7 @@ async function goTo(name: string) {
           v-for="(item, index) in workflow"
           :key="`${item.route}-${index}`"
           type="button"
-          class="guide-step w-full flex items-start gap-12px rounded-10px border border-gray-200 bg-transparent p-12px text-left dark:border-white/10"
+          class="guide-step business-focus-ring business-active-press w-full flex items-start gap-12px rounded-10px border border-gray-200 bg-transparent p-12px text-left dark:border-white/10"
           @click="goTo(item.route)"
         >
           <div class="size-38px flex-center shrink-0 rounded-10px bg-primary-100 text-primary dark:bg-primary-900/30">

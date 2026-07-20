@@ -303,6 +303,7 @@ async function handleReset() {
             v-model:value="searchForm.anchorName"
             clearable
             placeholder="搜索主播昵称"
+            aria-label="搜索主播昵称"
             class="w-200px"
             @keyup.enter="handleSearch"
           />
@@ -310,6 +311,7 @@ async function handleReset() {
             v-model:value="searchForm.liveStatus"
             clearable
             placeholder="直播状态"
+            aria-label="直播状态筛选"
             class="w-140px lt-sm:w-full"
             :options="[
               { label: '直播中', value: 'live' },
@@ -321,6 +323,7 @@ async function handleReset() {
             v-model:value="searchForm.detailStatus"
             clearable
             placeholder="详情状态"
+            aria-label="详情采集状态筛选"
             class="w-140px lt-sm:w-full"
             :options="[
               { label: '详情完整', value: 'complete' },

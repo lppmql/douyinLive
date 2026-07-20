@@ -554,7 +554,7 @@ onMounted(loadPage);
                         </div>
                       </div>
                     </div>
-                    <div class="flex flex-wrap items-center justify-end gap-6px">
+                    <div class="flex flex-wrap items-center justify-end gap-8px">
                       <NTag v-if="slice.transcript_text" size="small" round :bordered="false" type="success">话术</NTag>
                       <NTag v-if="slice.comment_count" size="small" round :bordered="false" type="info">评论</NTag>
                       <NTag v-if="slice.metric_point_count" size="small" round :bordered="false" type="warning">
@@ -569,7 +569,7 @@ onMounted(loadPage);
                     </div>
                   </div>
 
-                  <div class="mt-10px grid grid-cols-4 gap-7px lt-sm:grid-cols-2">
+                  <div class="mt-10px grid grid-cols-4 gap-8px lt-sm:grid-cols-2">
                     <div class="metric-chip">
                       <span>评论</span>
                       <strong>{{ slice.comment_count }}</strong>
@@ -609,7 +609,7 @@ onMounted(loadPage);
                   </div>
 
                   <div
-                    class="mt-10px flex items-center justify-between gap-10px border-t border-gray-100 pt-9px dark:border-dark-100"
+                    class="mt-10px flex items-center justify-between gap-10px border-t border-gray-100 pt-8px dark:border-dark-100"
                   >
                     <span class="text-11px text-gray-400">平台时间 {{ formatDateTime(slice.slice_start_time) }}</span>
                     <NButton text type="primary" size="small" @click="openSession(slice.session_id)">
@@ -682,7 +682,7 @@ onMounted(loadPage);
                     {{ item.content || '暂无真实内容' }}
                   </p>
                   <div
-                    class="mt-10px flex items-center justify-between border-t border-gray-100 pt-9px dark:border-dark-100"
+                    class="mt-10px flex items-center justify-between border-t border-gray-100 pt-8px dark:border-dark-100"
                   >
                     <span class="text-11px text-gray-400">{{ sourceTypeLabel(item.source_type) }}</span>
                     <NButton
@@ -718,7 +718,7 @@ onMounted(loadPage);
       <NCard :bordered="false" class="card-wrapper assistant-card order-2">
         <template #header>
           <div>
-            <div class="flex items-center gap-7px text-16px font-800">
+            <div class="flex items-center gap-8px text-16px font-800">
               <SvgIcon icon="mdi:message-processing-outline" class="text-primary" />
               知识库自由问答
             </div>
@@ -744,12 +744,12 @@ onMounted(loadPage);
             </div>
             <NSelect
               v-model:value="assistantCategory"
-              class="mt-9px"
+              class="mt-8px"
               clearable
               :options="assistantCategoryOptions"
               placeholder="全部知识分类"
             />
-            <div class="mt-9px grid grid-cols-2 gap-6px text-11px text-gray-500">
+            <div class="mt-8px grid grid-cols-2 gap-8px text-11px text-gray-500">
               <span>{{ formatNumber(sliceStatus?.transcript_slice_count || 0) }} 个话术片段</span>
               <span>{{ formatNumber(sliceStatus?.comment_slice_count || 0) }} 个评论片段</span>
               <span>{{ formatNumber(sliceStatus?.metric_slice_count || 0) }} 个指标片段</span>
@@ -762,12 +762,12 @@ onMounted(loadPage);
               <div class="text-12px font-700">{{ messages.length ? '继续追问' : '推荐提问' }}</div>
               <span v-if="messages.length" class="text-11px text-gray-400">已问 {{ conversationTurnCount }} 轮</span>
             </div>
-            <div class="mt-8px grid gap-7px">
+            <div class="mt-8px grid gap-8px">
               <button
                 v-for="prompt in messages.length ? followUpQuestions : suggestedQuestions"
                 :key="prompt"
                 type="button"
-                class="question-prompt"
+                class="question-prompt business-focus-ring"
                 :disabled="chatting"
                 @click="sendQuestion(prompt)"
               >
@@ -787,7 +787,7 @@ onMounted(loadPage);
               <div v-if="!messages.length" class="chat-welcome">
                 <span class="chat-welcome__icon"><SvgIcon icon="mdi:database-search-outline" /></span>
                 <div class="mt-12px text-18px font-800">从真实直播数据里找答案</div>
-                <p class="mb-0 mt-7px max-w-520px text-center text-13px leading-22px text-gray-500">
+                <p class="mb-0 mt-8px max-w-520px text-center text-13px leading-22px text-gray-500">
                   可以直接询问主播话术、用户评论、开店地区与预算、高意向线索、分钟趋势或跨场次差异，也可以在回答后继续追问“对应哪些场次”。
                 </p>
                 <NTag class="mt-12px" round :bordered="false" type="success">已连接真实知识证据</NTag>
@@ -813,7 +813,7 @@ onMounted(loadPage);
 
                 <NCollapse v-if="chatMessage.sources?.length" class="source-collapse" arrow-placement="right">
                   <NCollapseItem :title="`查看 ${chatMessage.sources.length} 条真实来源`" :name="chatMessage.id">
-                    <div class="grid grid-cols-2 gap-7px lt-lg:grid-cols-1">
+                    <div class="grid grid-cols-2 gap-8px lt-lg:grid-cols-1">
                       <button
                         v-for="source in chatMessage.sources"
                         :key="`${source.source_type}-${source.id}`"
@@ -849,7 +849,7 @@ onMounted(loadPage);
               </div>
 
               <div v-if="chatting" class="mb-12px flex justify-start">
-                <div class="chat-bubble chat-bubble--ai flex items-center gap-7px text-gray-500">
+                <div class="chat-bubble chat-bubble--ai flex items-center gap-8px text-gray-500">
                   <NSpin :size="14" />
                   正在检索真实话术、评论和指标…
                 </div>
@@ -929,16 +929,16 @@ onMounted(loadPage);
 }
 
 .summary-card--success {
-  --summary-tone: #18a058;
+  --summary-tone: rgb(var(--success-color));
 }
 .summary-card--info {
-  --summary-tone: #2080f0;
+  --summary-tone: rgb(var(--primary-color));
 }
 .summary-card--warning {
-  --summary-tone: #f0a020;
+  --summary-tone: rgb(var(--warning-color));
 }
 .summary-card--danger {
-  --summary-tone: #d03050;
+  --summary-tone: rgb(var(--error-color));
 }
 
 .assistant-card :deep(.n-card-content) {

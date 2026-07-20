@@ -212,7 +212,7 @@ onMounted(loadWorkspace);
         <NGi v-for="item in quickActions" :key="item.route">
           <button
             type="button"
-            class="h-full w-full flex items-start gap-12px rounded-10px border border-gray-200 bg-transparent p-14px text-left transition hover:border-primary hover:bg-primary-50 dark:border-white/10 dark:hover:bg-primary-900/15"
+            class="business-focus-ring business-active-press h-full w-full flex items-start gap-12px rounded-10px border border-gray-200 bg-transparent p-14px text-left transition hover:border-primary hover:bg-primary-50 dark:border-white/10 dark:hover:bg-primary-900/15"
             @click="openRoute(item.route)"
           >
             <div class="size-40px flex-center shrink-0 rounded-10px bg-primary-100 text-primary dark:bg-primary-900/30">

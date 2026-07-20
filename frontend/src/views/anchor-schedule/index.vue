@@ -441,7 +441,7 @@ onBeforeUnmount(() => {
         <NGi v-for="anchor in dashboard?.anchors || []" :key="anchor.source_anchor_name">
           <button
             type="button"
-            class="anchor-card"
+            class="anchor-card business-focus-ring business-active-press"
             :class="{ 'anchor-card-active': selectedAnchor === anchor.source_anchor_name }"
             :aria-pressed="selectedAnchor === anchor.source_anchor_name"
             @click="toggleAnchor(anchor.source_anchor_name)"

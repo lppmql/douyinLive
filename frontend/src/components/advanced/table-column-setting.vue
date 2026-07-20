@@ -86,7 +86,7 @@ function toggleSelectAll(checked: boolean) {
         <div
           v-for="item in columns"
           :key="item.key"
-          class="h-36px flex-y-center justify-between gap-6px"
+          class="h-36px flex-y-center justify-between gap-8px"
           :class="{ hidden: !item.visible }"
         >
           <div class="h-full flex-y-center flex-1 rd-4px hover:(bg-primary bg-opacity-20)">

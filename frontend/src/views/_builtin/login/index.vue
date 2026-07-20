@@ -53,7 +53,7 @@ const bgColor = computed(() => {
 <template>
   <div class="relative size-full flex-center overflow-hidden p-16px lt-sm:p-12px" :style="{ backgroundColor: bgColor }">
     <WaveBg :theme-color="bgThemeColor" />
-    <div class="relative z-4 grid w-full max-w-820px items-stretch gap-18px lg:grid-cols-[360px_440px]">
+    <div class="relative z-4 grid w-full max-w-820px items-stretch gap-16px lg:grid-cols-[360px_440px]">
       <section
         class="login-intro hidden overflow-hidden rounded-14px p-32px text-white lg:flex lg:flex-col lg:justify-between"
       >

@@ -30,7 +30,7 @@ if (!hasCustomTrigger.value && !props.icon && !props.localIcon) {
   <NTooltip :placement="placement">
     <template #trigger>
       <slot name="trigger">
-        <div class="cursor-pointer">
+        <div class="cursor-pointer" role="button" tabindex="0" :aria-label="desc || icon">
           <SvgIcon :icon="icon" :local-icon="localIcon" />
         </div>
       </slot>

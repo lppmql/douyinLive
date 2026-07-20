@@ -58,11 +58,48 @@
     0 12px 30px rgb(15 23 42 / 9%);
 }
 
+.business-clickable-card:active {
+  transform: scale(0.97);
+}
+
+/* 通用焦点环 — 用于自定义 button 组件 */
+.business-focus-ring:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary-color) 40%, transparent);
+  outline-offset: 2px;
+}
+
+/* 通用按压态 — 用于自定义 button 组件 */
+.business-active-press:active {
+  transform: scale(0.97);
+  filter: brightness(0.95);
+}
+
 .business-loading-panel {
   min-height: 280px;
 }
 
-@media (max-width: 768px) {
+/* 安全区域适配 — 刘海屏 / 灵动岛 */
+:root {
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+}
+
+/* 固定头部为安全区域预留空间 */
+.n-layout-header {
+  padding-top: var(--safe-area-inset-top) !important;
+  padding-left: var(--safe-area-inset-left) !important;
+  padding-right: var(--safe-area-inset-right) !important;
+}
+
+/* 底部 Tab 为安全区域预留空间 */
+.n-layout-tab {
+  padding-bottom: var(--safe-area-inset-bottom) !important;
+}
+
+/* 响应式断点：对齐 UnoCSS 预设 (sm=640px, md=768px, lg=1024px, xl=1280px) */
+@media (max-width: 767px) {
   .business-page {
     gap: 12px;
   }

@@ -201,7 +201,7 @@ function sortSessionsByLatest(items: Api.Douyin.LiveSession[]) {
 
 function renderSessionLabel(option: SelectOption) {
   const sessionOption = option as SessionSelectOption;
-  return h('div', { class: 'flex min-w-0 items-center gap-9px' }, [
+  return h('div', { class: 'flex min-w-0 items-center gap-8px' }, [
     h(AnchorAvatar, { size: 26, src: sessionOption.avatarUrl || undefined, name: sessionOption.anchorName }),
     h('span', { class: 'min-w-0 flex-1 truncate' }, String(sessionOption.label || ''))
   ]);
@@ -498,7 +498,7 @@ onMounted(initializePage);
                 <span>{{ formatDuration(selectedSession.live_duration_seconds) }}</span>
               </div>
             </div>
-            <div class="flex shrink-0 flex-wrap gap-6px lt-sm:hidden">
+            <div class="flex shrink-0 flex-wrap gap-8px lt-sm:hidden">
               <NTag
                 :type="selectedSession.live_status === 'live' ? 'error' : 'default'"
                 round
@@ -541,7 +541,7 @@ onMounted(initializePage);
             </template>
             当前数据不足，请先补齐分钟指标、评论或 ASR 话术
           </NTooltip>
-          <div class="mt-9px min-h-18px text-12px" :class="actionBusy ? 'text-primary' : 'text-gray-400'">
+          <div class="mt-8px min-h-18px text-12px" :class="actionBusy ? 'text-primary' : 'text-gray-400'">
             {{
               actionStageLabel() ||
                 (latestReport ? `最近报告 ${formatFullDate(latestReport.created_at)}` : '尚未生成分析报告')
@@ -576,7 +576,7 @@ onMounted(initializePage);
             <SvgIcon icon="mdi:database-check-outline" class="text-25px text-success" />
           </div>
           <NProgress
-            class="mt-9px"
+            class="mt-8px"
             :percentage="workbench?.completeness.score || 0"
             :height="6"
             :show-indicator="false"
@@ -727,7 +727,7 @@ onMounted(initializePage);
                   <NAlert v-if="optimizeResult?.summary" type="info" :bordered="false" class="mb-12px">
                     {{ optimizeResult.summary }}
                   </NAlert>
-                  <div v-if="improvementSuggestions.length" class="grid grid-cols-1 gap-9px l:grid-cols-2">
+                  <div v-if="improvementSuggestions.length" class="grid grid-cols-1 gap-8px l:grid-cols-2">
                     <div v-for="(item, index) in improvementSuggestions" :key="`${index}-${item}`" class="action-item">
                       <span class="action-number">{{ String(index + 1).padStart(2, '0') }}</span>
                       <span>{{ item }}</span>
@@ -747,7 +747,7 @@ onMounted(initializePage);
                   size="small"
                   title="下一场直播节奏"
                 >
-                  <div class="grid grid-cols-1 gap-9px m:grid-cols-2 xl:grid-cols-3">
+                  <div class="grid grid-cols-1 gap-8px m:grid-cols-2 xl:grid-cols-3">
                     <div v-for="(item, index) in nextLivePlan" :key="`${item.stage}-${index}`" class="next-live-item">
                       <div class="flex items-center justify-between gap-8px">
                         <NTag size="small" round :bordered="false" type="info">
@@ -755,8 +755,8 @@ onMounted(initializePage);
                         </NTag>
                         <span class="text-11px text-gray-400">{{ index + 1 }}/{{ nextLivePlan.length }}</span>
                       </div>
-                      <div class="mt-9px text-13px font-600 leading-21px">{{ item.action || '待补充执行动作' }}</div>
-                      <div class="mt-7px border-t border-gray-100 pt-7px text-12px text-gray-500 dark:border-white/8">
+                      <div class="mt-8px text-13px font-600 leading-21px">{{ item.action || '待补充执行动作' }}</div>
+                      <div class="mt-8px border-t border-gray-100 pt-8px text-12px text-gray-500 dark:border-white/8">
                         验证：{{ item.success_metric || '下一场人工记录结果' }}
                       </div>
                     </div>
@@ -820,7 +820,7 @@ onMounted(initializePage);
                 <div v-for="item in workbench.findings" :key="item.id" class="finding-card">
                   <div class="flex items-start justify-between gap-12px">
                     <div class="min-w-0">
-                      <div class="flex flex-wrap items-center gap-7px">
+                      <div class="flex flex-wrap items-center gap-8px">
                         <NTag size="small" round :bordered="false" :type="findingType(item)">
                           {{ findingLabel(item) }}
                         </NTag>
@@ -834,12 +834,12 @@ onMounted(initializePage);
                       }}
                     </span>
                   </div>
-                  <p v-if="item.description" class="mb-0 mt-7px text-12px leading-20px text-gray-500">
+                  <p v-if="item.description" class="mb-0 mt-8px text-12px leading-20px text-gray-500">
                     {{ item.description }}
                   </p>
                   <div
                     v-if="item.evidence_text"
-                    class="mt-9px rounded-8px bg-gray-50 px-10px py-8px text-12px leading-20px dark:bg-dark-300"
+                    class="mt-8px rounded-8px bg-gray-50 px-10px py-8px text-12px leading-20px dark:bg-dark-300"
                   >
                     {{ item.evidence_text }}
                   </div>
@@ -854,7 +854,7 @@ onMounted(initializePage);
               </NEmpty>
 
               <NCard v-if="scoreResult?.evidence?.length" :bordered="false" size="small" title="AI 评分引用的话术证据">
-                <div class="grid grid-cols-1 gap-9px l:grid-cols-2">
+                <div class="grid grid-cols-1 gap-8px l:grid-cols-2">
                   <div
                     v-for="(item, index) in scoreResult.evidence"
                     :key="`${item.start_seconds}-${index}`"
@@ -1005,18 +1005,18 @@ onMounted(initializePage);
 }
 
 .success-index {
-  background: rgba(16, 185, 129, 0.12);
-  color: rgb(5, 150, 105);
+  background: rgba(var(--success-color), 0.12);
+  color: rgb(var(--success-color));
 }
 
 .warning-index {
-  background: rgba(245, 158, 11, 0.13);
-  color: rgb(217, 119, 6);
+  background: rgba(var(--warning-color), 0.13);
+  color: rgb(var(--warning-color));
 }
 
 .action-number {
-  background: rgba(37, 99, 235, 0.1);
-  color: rgb(37, 99, 235);
+  background: rgba(var(--primary-color), 0.1);
+  color: rgb(var(--primary-color));
 }
 
 .next-live-item,
@@ -1040,7 +1040,7 @@ onMounted(initializePage);
 :global(.dark) .next-live-item,
 :global(.dark) .finding-card,
 :global(.dark) .quote-card {
-  background: rgba(255, 255, 255, 0.035);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 @media (max-width: 640px) {

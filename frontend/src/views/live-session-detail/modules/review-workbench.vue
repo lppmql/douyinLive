@@ -161,7 +161,7 @@ onBeforeUnmount(() => {
   <NSpin :show="loading && !workbench">
     <NSpace v-if="workbench" vertical :size="16">
       <NCard :bordered="false" class="card-wrapper" size="small">
-        <div class="grid grid-cols-[180px_1fr_auto] items-center gap-18px lt-md:grid-cols-1">
+        <div class="grid grid-cols-[180px_1fr_auto] items-center gap-16px lt-md:grid-cols-1">
           <div>
             <div class="text-12px text-gray-500">复盘数据可信度</div>
             <div class="mt-4px flex items-end gap-5px">

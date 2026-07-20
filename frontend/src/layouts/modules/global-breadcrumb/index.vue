@@ -25,12 +25,12 @@ function handleClickMenu(key: RouteKey) {
 </script>
 
 <template>
-  <NBreadcrumb v-if="themeStore.header.breadcrumb.visible">
+  <NBreadcrumb v-if="themeStore.header.breadcrumb.visible" class="lt-sm:max-w-240px lt-sm:overflow-hidden">
     <!-- define component start: BreadcrumbContent -->
     <DefineBreadcrumbContent v-slot="{ breadcrumb }">
       <div class="i-flex-y-center align-middle">
         <component :is="breadcrumb.icon" v-if="themeStore.header.breadcrumb.showIcon" class="mr-4px text-icon" />
-        {{ breadcrumb.label }}
+        <span class="lt-sm:max-w-100px lt-sm:truncate">{{ breadcrumb.label }}</span>
       </div>
     </DefineBreadcrumbContent>
     <!-- define component end: BreadcrumbContent -->

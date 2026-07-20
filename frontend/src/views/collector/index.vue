@@ -632,7 +632,7 @@ const accountColumns = [
           {
             text: true,
             type: 'primary',
-            size: 'tiny',
+            size: 'small',
             loading: accountHealthLoadingId.value === row.id,
             disabled: collectionRunning.value || Boolean(monitorStatus.value?.running),
             onClick: () => handleAccountHealth(row)
@@ -647,7 +647,7 @@ const accountColumns = [
             {
               text: true,
               type: 'warning',
-              size: 'tiny',
+              size: 'small',
               onClick: () => handleReLogin(row.id)
             },
             { default: () => $t('page.collector.reLogin') }
@@ -660,7 +660,7 @@ const accountColumns = [
           {
             text: true,
             type: 'error',
-            size: 'tiny',
+            size: 'small',
             onClick: () => handleDeleteAccount(row.id)
           },
           { default: () => $t('page.collector.deleteAccount') }
@@ -1281,7 +1281,9 @@ onUnmounted(() => {
                       最近错误：{{ monitorStatus.last_error }}
                     </div>
                   </div>
-                  <NBadge :type="monitorStatus?.running ? 'success' : 'default'" dot />
+                  <NBadge :type="monitorStatus?.running ? 'success' : 'default'" dot>
+                    <span class="text-12px ml-4px">{{ monitorStatus?.running ? '运行中' : '已停止' }}</span>
+                  </NBadge>
                 </div>
                 <NButton
                   block
@@ -1508,6 +1510,9 @@ onUnmounted(() => {
         >
           {{ loginMessage || $t('page.collector.scanQrCode') }}
         </NAlert>
+        <div class="mt-10px text-center text-11px text-gray-400">
+          按 <kbd class="rounded-4px border border-gray-300 bg-gray-100 px-4px py-1px text-11px dark:border-white/15 dark:bg-white/8">Esc</kbd> 或点击「取消」关闭此窗口
+        </div>
       </div>
 
       <template #footer>

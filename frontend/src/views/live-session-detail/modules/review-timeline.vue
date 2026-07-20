@@ -175,7 +175,7 @@ function isActive(item: TimelineEvent) {
           </div>
           <SvgIcon :icon="kindIcon(item.kind)" class="mt-2px shrink-0 text-20px text-primary" />
           <div class="min-w-0 flex-1">
-            <div class="flex flex-wrap items-center gap-7px">
+            <div class="flex flex-wrap items-center gap-8px">
               <span class="text-13px font-700">{{ item.title }}</span>
               <NTag v-if="item.category" size="tiny" round :bordered="false">{{ item.category }}</NTag>
               <NTag v-if="item.severity === 'critical'" size="tiny" type="error">重点复核</NTag>
