@@ -79,9 +79,13 @@ class ReviewGenerateResponse(BaseModel):
 
 
 class ReviewComparisonResponse(BaseModel):
-    """GET /reviews/{session_id}/comparison"""
-    primary: dict[str, Any] = Field(default_factory=dict)
+    """GET /reviews/{session_id}/comparison — 跨场对比"""
+    current: dict[str, Any] = Field(default_factory=dict)
     baseline: dict[str, Any] = Field(default_factory=dict)
+    dimensions: list[dict[str, Any]] = Field(default_factory=list)
+    current_series: list[dict[str, Any]] = Field(default_factory=list)
+    baseline_series: list[dict[str, Any]] = Field(default_factory=list)
+    comparison_note: str = ""
 
 
 class ReviewFindingOut(BaseModel):

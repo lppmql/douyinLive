@@ -11,7 +11,7 @@ const loading = ref(false);
 const selectedId = ref<number | null>(null);
 const comparison = ref<Api.Douyin.SessionComparison | null>(null);
 const options = computed(() =>
-  props.sessions
+  (props.sessions || [])
     .filter(item => item.id !== props.sessionId)
     .map(item => ({
       value: item.id,
@@ -30,14 +30,17 @@ const { domRef, updateOptions } = useEcharts(() => ({
 
 function refreshChart() {
   if (!comparison.value) return;
+  const currentSeries = comparison.value.current_series || [];
+  const baselineSeries = comparison.value.baseline_series || [];
+  if (!currentSeries.length && !baselineSeries.length) return;
   const maxMinute = Math.max(
-    ...comparison.value.current_series.map(item => item.minute),
-    ...comparison.value.baseline_series.map(item => item.minute),
+    ...currentSeries.map(item => item.minute),
+    ...baselineSeries.map(item => item.minute),
     0
   );
   const minutes = Array.from({ length: maxMinute + 1 }, (_, index) => index);
-  const currentMap = new Map(comparison.value.current_series.map(item => [item.minute, item.online_count]));
-  const baselineMap = new Map(comparison.value.baseline_series.map(item => [item.minute, item.online_count]));
+  const currentMap = new Map(currentSeries.map(item => [item.minute, item.online_count]));
+  const baselineMap = new Map(baselineSeries.map(item => [item.minute, item.online_count]));
   updateOptions(optionsValue => {
     optionsValue.xAxis.data = minutes;
     optionsValue.series = [
