@@ -4,7 +4,7 @@ import type { SelectOption, TagProps } from 'naive-ui';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import AnchorAvatar from '@/components/business/anchor-avatar.vue';
-import BusinessPageHeader from '@/components/business/page-header.vue';
+
 import { unwrapServiceData } from '@/utils/service';
 import {
   fetchAnalysisReports,
@@ -413,38 +413,6 @@ onMounted(initializePage);
 
 <template>
   <NSpace vertical :size="16" class="analysis-page business-page" :aria-busy="loading">
-    <BusinessPageHeader
-      title="零食店避坑直播 AI 复盘"
-      description="把真实场次指标、评论、ASR 话术和历史报告放进同一套复盘流程，定位知识价值、资料钩子与站内私信承接问题。"
-      icon="mdi:chart-box-outline"
-      eyebrow="证据化运营复盘"
-      :status="
-        loading && !sessions.length
-          ? '正在读取真实场次'
-          : loadError
-            ? '页面加载失败'
-            : selectedSession
-              ? `${selectedSession.anchor_name} · ${scoreLevel(scoreResult?.total_score)}`
-              : '请选择场次'
-      "
-      :status-type="loadError ? 'error' : scoreResult ? 'success' : selectedSession ? 'warning' : 'default'"
-    >
-      <template #actions>
-        <NButton secondary :loading="refreshing" :disabled="!selectedSessionId" @click="refreshPage">
-          <template #icon><SvgIcon icon="mdi:refresh" /></template>
-          刷新数据
-        </NButton>
-        <NButton type="primary" ghost :disabled="!selectedSessionId" @click="openSessionDetail">
-          <template #icon><SvgIcon icon="mdi:open-in-new" /></template>
-          查看场次详情
-        </NButton>
-      </template>
-      <div class="flex flex-wrap gap-x-18px gap-y-6px text-12px text-gray-500">
-        <span>真实数据可信度决定结论强度</span>
-        <span>综合评分满分 50 分，单项满分 10 分</span>
-        <span>所有建议均保留场次与报告来源</span>
-      </div>
-    </BusinessPageHeader>
 
     <NResult
       v-if="loadError && !sessions.length"

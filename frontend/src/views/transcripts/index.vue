@@ -5,7 +5,7 @@ import { useIntervalFn, useWebSocket } from '@vueuse/core';
 import type { SelectOption } from 'naive-ui';
 import { useMessage } from 'naive-ui';
 import AnchorAvatar from '@/components/business/anchor-avatar.vue';
-import BusinessPageHeader from '@/components/business/page-header.vue';
+
 import {
   fetchLiveSessions,
   fetchTranscriptFullText,
@@ -431,26 +431,6 @@ onUnmounted(() => {
 
 <template>
   <NSpace vertical :size="16" class="business-page">
-    <BusinessPageHeader
-      title="主播话术"
-      description="查看真实直播 ASR 话术、转写覆盖和内容结构，快速定位开店避坑知识、资料钩子与私信承接证据。"
-      icon="mdi:account-voice"
-      :status="activeTaskCount ? `${activeTaskCount} 个任务运行中` : 'ASR 队列空闲'"
-      :status-type="taskSummary.failed ? 'warning' : activeTaskCount ? 'info' : 'success'"
-    >
-      <template #actions>
-        <NButton secondary :loading="refreshing" @click="refreshPage">
-          <template #icon><SvgIcon icon="mdi:refresh" /></template>
-          刷新数据
-        </NButton>
-      </template>
-      <div class="flex flex-wrap items-center gap-x-16px gap-y-6px text-12px text-gray-500">
-        <span>选择真实场次</span>
-        <span>查看分段与覆盖</span>
-        <span>定位高价值话术</span>
-        <span>分析并同步知识库</span>
-      </div>
-    </BusinessPageHeader>
 
     <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
       主播话术数据未能完整更新：{{ loadError }}

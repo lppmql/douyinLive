@@ -2,7 +2,7 @@
 import { computed, h, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
 import { NButton, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
-import BusinessPageHeader from '@/components/business/page-header.vue';
+
 import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
 import {
   fetchCollectorStatus,
@@ -883,42 +883,6 @@ onUnmounted(() => {
 
 <template>
   <div class="business-page min-h-full">
-    <BusinessPageHeader
-      title="数据采集中心"
-      description="使用已保存的 Cookie 与浏览器指纹发现全部主播，并持续补齐直播场次、评论、画像、分钟指标和直播流地址。"
-      icon="mdi:database-sync-outline"
-      :status="hasAvailableAccount ? `${loggedInAccountCount} 个账号可用` : '需要扫码登录'"
-      :status-type="hasAvailableAccount ? 'success' : 'error'"
-    >
-      <template #actions>
-        <NButton secondary @click="openAccounts">
-          <template #icon><SvgIcon icon="mdi:account-key-outline" /></template>
-          管理采集账号
-        </NButton>
-        <NButton type="primary" :disabled="!hasAvailableAccount" @click="openTasks">
-          <template #icon><SvgIcon icon="mdi:clipboard-text-clock-outline" /></template>
-          查看任务队列
-        </NButton>
-      </template>
-      <div class="flex flex-wrap items-center gap-x-18px gap-y-6px text-12px text-gray-500">
-        <span class="flex items-center gap-5px">
-          <SvgIcon icon="mdi:numeric-1-circle-outline" />
-          扫码并检查存活
-        </span>
-        <span class="flex items-center gap-5px">
-          <SvgIcon icon="mdi:numeric-2-circle-outline" />
-          选择刷新采集或实时监控
-        </span>
-        <span class="flex items-center gap-5px">
-          <SvgIcon icon="mdi:numeric-3-circle-outline" />
-          查看进度与失败日志
-        </span>
-        <span class="flex items-center gap-5px">
-          <SvgIcon icon="mdi:numeric-4-circle-outline" />
-          同步 DataEase
-        </span>
-      </div>
-    </BusinessPageHeader>
 
     <NAlert v-if="dataLoadFailedCount" type="warning" :bordered="false" show-icon>
       有 {{ dataLoadFailedCount }} 项采集状态暂时未更新，页面已保留其余真实结果。
