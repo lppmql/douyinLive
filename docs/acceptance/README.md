@@ -1,6 +1,6 @@
 # 核心链路验收
 
-这里记录项目关键能力的可重复验收方法。自动化测试可以使用脱敏固定样本，但业务验收必须选择数据库中已经采集到的真实账号、主播和直播场次，不允许为了“通过”而补写模拟数据。
+这里记录项目关键能力的可重复验收方法。自动化测试可以使用脱敏固定样本，但业务验收必须选择数据库中已经采集到的真实账号、主播和直播场次，不允许为了"通过"而补写模拟数据。
 
 ## 文档导航
 
@@ -10,8 +10,8 @@
 - [知识库验收](knowledge-acceptance.md)
 - [主播排班验收](schedule-acceptance.md)
 - [可观测性验收](observability-acceptance.md)
-- [2026-07-18 前后端协调验收](2026-07-18-frontend-backend-coordination.md)
-- [2026-07-18 DataEase 与监控恢复验收](2026-07-18-dataease-observability-recovery.md)
+
+历史验收结论已归档至 [ADR 目录](../adr/) 和 [CHANGELOG.md](../../CHANGELOG.md)。
 
 ## 统一记录要求
 

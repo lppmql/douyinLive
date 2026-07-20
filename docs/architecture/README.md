@@ -1,19 +1,15 @@
 # 架构文档
 
-本目录保留原始架构调研和评估文件。
-
 ## ADR（架构决策记录）
 
-架构决策请查阅 [`docs/adr/`](../adr/) 下的编号文件：
-- [ADR 0001: 模块化单体 + 轻量可观测性](../adr/0001-modular-monolith-with-lightweight-observability.md)
-- [ADR 0002: 维护边界与延迟项](../adr/0002-maintenance-boundaries-and-deferred-items.md)
+所有架构决策以 ADR 格式记录在 [`docs/adr/`](../adr/) 下，只增不改：
 
-## 现有文件
-
-- [`maintenance-roadmap.md`](maintenance-roadmap.md) — 模块化维护路线（原始版，已迁移到 ADR 0002）
-- [`deep-research-assessment-2026-07-18.md`](deep-research-assessment-2026-07-18.md) — 深度调研落地评估（原始版，已迁移到 ADR 0001）
+- [ADR 0001: 模块化单体架构与轻量可观测性](../adr/0001-模块化单体架构与轻量可观测性.md)
+- [ADR 0002: 维护边界与延迟项决策](../adr/0002-维护边界与延迟项决策.md)
+- [ADR 0003: DataEase 公钥兼容与监控恢复](../adr/0003-DataEase公钥兼容与监控恢复.md)
+- [ADR 0004: 前后端契约测试与协调验收](../adr/0004-前后端契约测试与协调验收.md)
+- [ADR 0005: 前端 UI/UX 优化与环境变量整合](../adr/0005-前端UI-UX优化与环境变量整合.md)
 
 ## 验收文档
 
-验收报告请查阅 [`docs/acceptance/`](../acceptance/) 目录。
-最近结论已卷进项目 [`CHANGELOG.md`](../../CHANGELOG.md)。
+功能验收规程见 [`docs/acceptance/`](../acceptance/)，版本变更记录见 [CHANGELOG.md](../../CHANGELOG.md)。
