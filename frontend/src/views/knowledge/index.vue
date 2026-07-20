@@ -467,12 +467,18 @@ async function copyText(content: string) {
   flex: 1;
   height: 36px;
   padding: 0 12px;
-  border: none;
+  border: 1px solid rgb(0 0 0 / 8%);
   border-radius: 6px;
-  background: white;
+  background: #f5f5f5;
   font-size: 15px;
   color: #333;
   outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.chat-input:focus {
+  border-color: rgb(var(--primary-color) / 30%);
+  background: #fff;
 }
 
 .chat-input::placeholder {
@@ -480,7 +486,7 @@ async function copyText(content: string) {
 }
 
 .chat-input:disabled {
-  background: #fdfdfd;
+  background: #fafafa;
   color: #999;
 }
 
@@ -493,8 +499,8 @@ async function copyText(content: string) {
   height: 36px;
   border: none;
   border-radius: 6px;
-  background: #e0e0e0;
-  color: #bbb;
+  background: rgb(var(--primary-color) / 12%);
+  color: rgb(var(--primary-color) / 40%);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -502,6 +508,7 @@ async function copyText(content: string) {
 .chat-send-btn--active {
   background: rgb(var(--primary-color));
   color: white;
+  box-shadow: 0 2px 6px rgb(var(--primary-color) / 25%);
 }
 
 .chat-send-btn:active {
