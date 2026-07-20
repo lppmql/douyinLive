@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT / ".env"),
         env_file_encoding="utf-8",
+        extra="ignore",  # 忽略 docker-compose / start.sh 用但 Python 不用的变量
     )
 
     # 应用
@@ -81,6 +82,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 小时
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # 跨域与部署
+    CORS_ORIGINS: str = "http://localhost:9527,http://127.0.0.1:9527"
 
     @property
     def db_url(self) -> str:

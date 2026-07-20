@@ -62,8 +62,8 @@ services:
     environment:
       # 外部首页仅负责淘汰数据库恢复前遗留的旧 RSA 公钥，其他资源继续使用官方 JAR。
       SPRING_WEB_RESOURCES_STATIC_LOCATIONS: file:/opt/dataease-overlay/,classpath:/META-INF/resources/,classpath:/resources/,classpath:/static/,classpath:/public/
-      # DataEase 官方 iframe 嵌入要求：只允许项目实际使用的前端来源。
-      DATAEASE_ORIGIN_LIST: "http://localhost:9527,http://127.0.0.1:9527"
+      # DataEase 官方 iframe 嵌入要求：与根 .env 的 CORS_ORIGINS 保持一致
+      DATAEASE_ORIGIN_LIST: ${CORS_ORIGINS:-http://localhost:9527,http://127.0.0.1:9527}
     volumes:
       - ./dataease/conf/application.yml:/opt/apps/config/application.yml
       - ./deploy/dataease-overlay/static:/opt/dataease-overlay:ro
