@@ -29,6 +29,7 @@ const { domRef, updateOptions } = useEcharts(() => ({
 }));
 
 function refreshChart() {
+  if (!Array.isArray(props.metrics) || !props.metrics.length) return;
   updateOptions(options => {
     options.xAxis.data = props.metrics.map(item =>
       new Date(item.metric_time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })

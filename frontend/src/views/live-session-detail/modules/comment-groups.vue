@@ -8,7 +8,7 @@ const pageSize = 12;
 
 const groups = computed(() => {
   const map = new Map<string, { user: string; comments: Api.Douyin.LiveComment[] }>();
-  props.comments.forEach(comment => {
+  (props.comments || []).forEach(comment => {
     const user = comment.user_nickname?.trim() || '匿名用户';
     const identity = comment.user_sec_uid || user;
     const group = map.get(identity) || { user, comments: [] };
