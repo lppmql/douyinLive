@@ -26,6 +26,11 @@ const reviewStore = useReviewStore();
 const { seekToken } = storeToRefs(reviewStore);
 let loadingTimer: ReturnType<typeof setTimeout> | undefined;
 
+// ── 播放进度节流：timeupdate 每秒触发 4-10 次，节流到 ~4fps (250ms) 避免卡顿 ──
+let lastSyncTime = 0;
+const SYNC_INTERVAL_MS = 250;
+let rafId: ReturnType<typeof requestAnimationFrame> | undefined;
+
 const playbackUrl = computed(() => getLiveSessionPlaybackUrl(props.sessionId, playbackOffset.value));
 
 /** 当前播放位置（秒），用于进度条 */
@@ -131,12 +136,23 @@ function seekByProgress(event: MouseEvent) {
   reviewStore.seekTo(targetSecond);
 }
 
+/** 节流的播放进度同步：用时间间隔 + requestAnimationFrame 避免高频触发重渲染 */
 function updatePlayback() {
   const video = videoRef.value;
   if (!video) return;
-  const position = playbackOffset.value + video.currentTime;
-  reviewStore.updatePlayback(position, !video.paused);
-  isPlaying.value = !video.paused;
+  const now = Date.now();
+  // 距上次同步不到 250ms 且播放状态没变 → 跳过
+  const playing = !video.paused;
+  if (now - lastSyncTime < SYNC_INTERVAL_MS && isPlaying.value === playing) return;
+  lastSyncTime = now;
+  if (isPlaying.value !== playing) isPlaying.value = playing;
+
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(() => {
+    const v = videoRef.value;
+    if (!v) return;
+    reviewStore.updatePlayback(playbackOffset.value + v.currentTime, !v.paused);
+  });
 }
 
 function handleLoaded() {
@@ -166,6 +182,7 @@ watch(seekToken, () => restartAt(reviewStore.currentSecond));
 
 onBeforeUnmount(() => {
   clearLoadingTimer();
+  if (rafId) cancelAnimationFrame(rafId);
   releaseVideo();
 });
 </script>
@@ -237,14 +254,14 @@ onBeforeUnmount(() => {
       >
         <!-- 进度条底色 -->
         <div class="absolute bottom-7px h-5px w-full rounded-full bg-white/15"></div>
-        <!-- 已播放进度 -->
+        <!-- 已播放进度（GPU 合成层：transform scaleX 不触发 Reflow） -->
         <div
-          class="absolute bottom-7px h-5px rounded-full bg-primary transition-[width] duration-200"
-          :style="{ width: `${progressPercent}%` }"
+          class="absolute bottom-7px h-5px w-full origin-left rounded-full bg-primary"
+          :style="{ transform: `scaleX(${progressPercent / 100})` }"
         ></div>
         <!-- 拖拽圆点 -->
         <div
-          class="absolute bottom-1px z-10 h-17px w-17px -translate-x-1/2 rounded-full bg-white shadow-md shadow-black/30 transition-[left] duration-200"
+          class="absolute bottom-1px z-10 h-17px w-17px -translate-x-1/2 rounded-full bg-white shadow-md shadow-black/30"
           :style="{ left: `${progressPercent}%` }"
         ></div>
         <!-- 复盘发现标记点 -->
@@ -303,6 +320,11 @@ onBeforeUnmount(() => {
 .session-progress-bar:focus-visible {
   outline: 2px solid rgba(32, 128, 240, 0.7);
   outline-offset: 2px;
+}
+
+/* GPU 合成层：进度条 scaleX 动画走 Composite 阶段，不触发 Reflow/Repaint */
+.session-progress-bar .origin-left {
+  will-change: transform;
 }
 
 .player-controls {

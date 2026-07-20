@@ -14,6 +14,11 @@
   - 视频播放进度实时同步到右侧复盘时间轴（高亮当前节点）
   - 点击时间轴节点 → 视频同步跳转
   - 键盘 ← → 控制快退/快进 10 秒
+- **播放器卡顿优化**：
+  - timeupdate 节流到 250ms（~4fps），Pinia store 更新频率降低 60-75%
+  - 进度条 width → transform: scaleX()，GPU 合成层，避免 Layout Reflow
+  - 去掉进度条 CSS transition，避免 200ms 动画与高频更新互相冲突导致抖动
+  - isPlaying 只在状态真正变化时更新，避免无谓重渲染
 
 ### Fixed
 - **直播场次详情页 `Cannot read properties of undefined (reading 'map')` 崩溃**：
