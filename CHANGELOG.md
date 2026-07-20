@@ -6,6 +6,15 @@
 
 ## [2026-07-20]
 
+### Changed
+- **播放器整场进度条 + 复盘时间轴联动**：
+  - 去掉原生 video controls，改为自定义控制栏
+  - 进度条宽度 = 整场直播时长（非仅视频缓冲），点击直接跳转
+  - 进度条上标记复盘发现（红/黄/蓝小竖线），hover 显示标题
+  - 视频播放进度实时同步到右侧复盘时间轴（高亮当前节点）
+  - 点击时间轴节点 → 视频同步跳转
+  - 键盘 ← → 控制快退/快进 10 秒
+
 ### Fixed
 - **直播场次详情页 `Cannot read properties of undefined (reading 'map')` 崩溃**：
   - 根因：`ReviewComparisonResponse` Pydantic schema 字段名（`primary`/`baseline`）与 `compare_sessions()` 实际返回（`current`/`baseline`/`dimensions`/`current_series`/`baseline_series`/`comparison_note`）不匹配
