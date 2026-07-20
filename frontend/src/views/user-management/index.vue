@@ -317,7 +317,7 @@ function handleDelete(row: UserRecord) {
     <NCard :bordered="false" class="card-wrapper h-full" title="用户列表">
       <NAlert v-if="tableError" class="mb-16px" type="error" :bordered="false" show-icon>
         {{ tableError }}
-        <template #action><NButton size="small" secondary @click="getData">重新加载</NButton></template>
+        <NButton size="small" secondary @click="getData">重新加载</NButton>
       </NAlert>
       <div class="business-toolbar mb-16px">
         <div class="business-toolbar__filters">

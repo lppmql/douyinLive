@@ -120,9 +120,7 @@ onMounted(loadWorkspace);
 
     <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
       {{ loadError }}
-      <template #action>
-        <NButton size="small" secondary :loading="loading" @click="loadWorkspace">重新刷新</NButton>
-      </template>
+      <NButton size="small" secondary :loading="loading" @click="loadWorkspace">重新刷新</NButton>
     </NAlert>
 
     <NGrid cols="1 s:2 l:4" responsive="screen" :x-gap="16" :y-gap="16">

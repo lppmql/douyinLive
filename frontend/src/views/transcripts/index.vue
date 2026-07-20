@@ -454,9 +454,7 @@ onUnmounted(() => {
 
     <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
       主播话术数据未能完整更新：{{ loadError }}
-      <template #action>
-        <NButton size="small" secondary :loading="loading || refreshing" @click="initializePage">重新加载</NButton>
-      </template>
+      <NButton size="small" secondary :loading="loading || refreshing" @click="initializePage">重新加载</NButton>
     </NAlert>
 
     <div class="grid grid-cols-2 gap-12px lg:grid-cols-4">

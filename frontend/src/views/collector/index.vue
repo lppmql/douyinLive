@@ -925,9 +925,7 @@ onUnmounted(() => {
       <span v-if="lastDataUpdatedAt" class="ml-6px text-12px text-gray-500">
         最近尝试 {{ new Date(lastDataUpdatedAt).toLocaleTimeString('zh-CN', { hour12: false }) }}
       </span>
-      <template #action>
-        <NButton size="small" secondary :loading="loading" @click="() => loadData()">重新加载</NButton>
-      </template>
+      <NButton size="small" secondary :loading="loading" @click="() => loadData()">重新加载</NButton>
     </NAlert>
 
     <NSpin :show="loading && !collectorStatus" class="business-loading-panel">

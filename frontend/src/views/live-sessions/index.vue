@@ -294,7 +294,7 @@ async function handleReset() {
       </NAlert>
       <NAlert v-if="tableError" class="mb-14px" type="error" :bordered="false" show-icon>
         {{ tableError }}
-        <template #action><NButton size="small" secondary @click="getData">重新加载</NButton></template>
+        <NButton size="small" secondary @click="getData">重新加载</NButton>
       </NAlert>
 
       <div class="business-toolbar mb-16px">

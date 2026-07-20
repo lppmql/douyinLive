@@ -451,9 +451,7 @@ onMounted(loadPage);
 
     <NAlert v-if="loadError" class="order-2" type="warning" :bordered="false" show-icon>
       知识证据未能完整更新：{{ loadError }}
-      <template #action>
-        <NButton size="small" secondary :loading="initialLoading || refreshing" @click="loadPage">重新加载</NButton>
-      </template>
+      <NButton size="small" secondary :loading="initialLoading || refreshing" @click="loadPage">重新加载</NButton>
     </NAlert>
 
     <div class="order-3 grid grid-cols-2 gap-12px xl:grid-cols-5">

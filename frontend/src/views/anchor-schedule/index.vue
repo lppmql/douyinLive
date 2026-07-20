@@ -362,9 +362,7 @@ onBeforeUnmount(() => {
 
     <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
       排班核对数据未能更新：{{ loadError }}
-      <template #action>
-        <NButton size="small" secondary :loading="loading" @click="loadSchedule()">重新加载</NButton>
-      </template>
+      <NButton size="small" secondary :loading="loading" @click="loadSchedule()">重新加载</NButton>
     </NAlert>
 
     <NAlert
