@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { useMessage } from 'naive-ui';
 import { unwrapServiceData } from '@/utils/service';
 import { askKnowledge } from '@/service/api/douyin';
@@ -22,6 +22,24 @@ const messages = ref<ChatMessage[]>([]);
 const chatEndRef = ref<HTMLElement | null>(null);
 let messageId = 0;
 
+// 右侧引用面板：默认显示最后一条有来源的 AI 消息
+const activeSources = ref<Api.Douyin.KnowledgeSource[]>([]);
+const activeSourceMsgId = ref<number | null>(null);
+
+watch(messages, () => {
+  // 自动选中最后一条带来源的 AI 消息
+  const lastWithSources = [...messages.value].reverse().find(m => m.role === 'ai' && m.sources?.length);
+  if (lastWithSources) {
+    activeSources.value = lastWithSources.sources!;
+    activeSourceMsgId.value = lastWithSources.id;
+  }
+}, { deep: true });
+
+function selectSources(chatMessage: ChatMessage) {
+  activeSources.value = chatMessage.sources || [];
+  activeSourceMsgId.value = chatMessage.id;
+}
+
 async function scrollChatToEnd() {
   await nextTick();
   chatEndRef.value?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -39,12 +57,17 @@ async function sendQuestion(preset?: string) {
   try {
     const response = await askKnowledge(content);
     const answer = unwrapServiceData(response, '知识检索请求失败');
-    messages.value.push({
+    const aiMsg: ChatMessage = {
       id: ++messageId,
       role: 'ai',
       content: answer.answer || '当前真实知识库没有返回可用结论。',
       sources: answer.sources || []
-    });
+    };
+    messages.value.push(aiMsg);
+    if (aiMsg.sources?.length) {
+      activeSources.value = aiMsg.sources;
+      activeSourceMsgId.value = aiMsg.id;
+    }
   } catch (error) {
     messages.value.push({
       id: ++messageId,
@@ -66,6 +89,8 @@ function handleQuestionKeydown(event: KeyboardEvent) {
 
 function clearConversation() {
   messages.value = [];
+  activeSources.value = [];
+  activeSourceMsgId.value = null;
   message.success('对话已清空');
 }
 
@@ -77,145 +102,188 @@ async function copyText(content: string) {
 
 <template>
   <div class="knowledge-chat-page">
-    <div class="wechat-chat">
-    <!-- 顶部标题栏 -->
-    <header class="chat-header">
-      <span class="chat-header__title">直播经营知识问答</span>
-      <button
-        v-if="messages.length"
-        type="button"
-        class="chat-header__action"
-        @click="clearConversation"
-      >
-        <SvgIcon icon="mdi:plus" class="text-20px" />
-      </button>
-    </header>
+    <!-- ========== 左侧：聊天窗口 ========== -->
+    <div class="chat-panel">
+      <!-- 标题栏 -->
+      <header class="chat-header">
+        <span class="chat-header__title">直播经营知识问答</span>
+        <button
+          v-if="messages.length"
+          type="button"
+          class="chat-header__action"
+          @click="clearConversation"
+        >
+          <SvgIcon icon="mdi:plus" class="text-20px" />
+        </button>
+      </header>
 
-    <!-- 消息区域 -->
-    <div class="chat-body">
-      <NScrollbar class="chat-scroll">
-        <div class="chat-messages">
-          <!-- 欢迎提示 -->
-          <div v-if="!messages.length" class="chat-welcome">
-            <div class="chat-welcome__avatar">
-              <SvgIcon icon="mdi:robot-outline" class="text-36px" />
+      <!-- 消息区域 -->
+      <div class="chat-body">
+        <NScrollbar class="chat-scroll">
+          <div class="chat-messages">
+            <!-- 欢迎提示 -->
+            <div v-if="!messages.length" class="chat-welcome">
+              <div class="chat-welcome__avatar">
+                <SvgIcon icon="mdi:robot-outline" class="text-36px" />
+              </div>
+              <div class="mt-16px text-16px font-600 text-gray-700">零食店避坑 · 知识问答助手</div>
+              <p class="mb-0 mt-6px max-w-300px text-center text-13px leading-20px text-gray-400">
+                基于真实直播话术、评论和指标数据回答你的问题
+              </p>
             </div>
-            <div class="mt-16px text-16px font-600 text-gray-700">零食店避坑 · 知识问答助手</div>
-            <p class="mb-0 mt-6px max-w-300px text-center text-13px leading-20px text-gray-400">
-              基于真实直播话术、评论和指标数据回答你的问题
-            </p>
-          </div>
 
-          <!-- 对话消息 -->
-          <div v-for="chatMessage in messages" :key="chatMessage.id" class="msg-block">
-            <!-- AI 消息（左侧，带头像） -->
-            <div v-if="chatMessage.role === 'ai'" class="msg-row msg-row--ai">
+            <!-- 对话消息 -->
+            <div v-for="chatMessage in messages" :key="chatMessage.id" class="msg-block">
+              <!-- AI 消息（左侧，带头像） -->
+              <div v-if="chatMessage.role === 'ai'" class="msg-row msg-row--ai">
+                <div class="msg-avatar msg-avatar--ai">
+                  <SvgIcon icon="mdi:robot-outline" class="text-20px" />
+                </div>
+                <div class="msg-content msg-content--ai">
+                  <div
+                    class="msg-bubble msg-bubble--ai"
+                    :class="{ 'msg-bubble--error': chatMessage.error }"
+                  >
+                    <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
+                  </div>
+                  <div class="msg-actions">
+                    <button
+                      v-if="!chatMessage.error"
+                      type="button"
+                      class="msg-action-btn"
+                      @click="copyText(chatMessage.content)"
+                    >
+                      复制
+                    </button>
+                    <button
+                      v-if="chatMessage.sources?.length"
+                      type="button"
+                      class="msg-action-btn msg-action-btn--source"
+                      :class="{ 'msg-action-btn--active': activeSourceMsgId === chatMessage.id }"
+                      @click="selectSources(chatMessage)"
+                    >
+                      <SvgIcon icon="mdi:link-variant" class="text-13px" />
+                      {{ chatMessage.sources.length }} 条来源
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 用户消息（右侧，无头像） -->
+              <div v-else class="msg-row msg-row--user">
+                <div class="msg-bubble msg-bubble--user">
+                  <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 加载中 -->
+            <div v-if="chatting" class="msg-row msg-row--ai">
               <div class="msg-avatar msg-avatar--ai">
                 <SvgIcon icon="mdi:robot-outline" class="text-20px" />
               </div>
-              <div class="msg-content msg-content--ai">
-                <div
-                  class="msg-bubble msg-bubble--ai"
-                  :class="{ 'msg-bubble--error': chatMessage.error }"
-                >
-                  <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
-                </div>
-                <!-- 操作按钮 -->
-                <div v-if="!chatMessage.error" class="msg-actions">
-                  <button type="button" class="msg-action-btn" @click="copyText(chatMessage.content)">
-                    复制
-                  </button>
-                </div>
-                <!-- 引用来源 -->
-                <div v-if="chatMessage.sources?.length" class="msg-sources">
-                  <div class="msg-sources__title">
-                    <SvgIcon icon="mdi:link-variant" class="text-13px" />
-                    引用 {{ chatMessage.sources.length }} 条真实来源
-                  </div>
-                  <div
-                    v-for="source in chatMessage.sources"
-                    :key="`${source.source_type}-${source.id}`"
-                    class="msg-source-item"
-                  >
-                    <span class="msg-source-item__name">{{ source.title || source.anchor_name || '未命名' }}</span>
-                    <span v-if="source.excerpt" class="msg-source-item__excerpt">{{ source.excerpt }}</span>
-                  </div>
-                </div>
+              <div class="msg-bubble msg-bubble--ai msg-bubble--typing">
+                <span class="typing-dot" />
+                <span class="typing-dot" />
+                <span class="typing-dot" />
               </div>
             </div>
+            <div ref="chatEndRef" />
+          </div>
+        </NScrollbar>
+      </div>
 
-            <!-- 用户消息（右侧，无头像） -->
-            <div v-else class="msg-row msg-row--user">
-              <div class="msg-bubble msg-bubble--user">
-                <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
-              </div>
+      <!-- 底部输入栏 -->
+      <footer class="chat-footer">
+        <div class="chat-footer__inner">
+          <input
+            v-model="question"
+            class="chat-input"
+            type="text"
+            maxlength="500"
+            placeholder="输入问题..."
+            :disabled="chatting"
+            @keydown="handleQuestionKeydown"
+          />
+          <button
+            type="button"
+            class="chat-send-btn"
+            :class="{ 'chat-send-btn--active': question.trim() && !chatting }"
+            :disabled="!question.trim() || chatting"
+            @click="sendQuestion()"
+          >
+            <SvgIcon icon="mdi:send" class="text-18px" />
+          </button>
+        </div>
+      </footer>
+    </div>
+
+    <!-- ========== 右侧：引用来源 ========== -->
+    <aside class="sources-panel">
+      <div class="sources-panel__header">
+        <SvgIcon icon="mdi:link-variant" class="text-18px text-primary" />
+        <span>引用来源</span>
+        <span v-if="activeSources.length" class="sources-panel__count">{{ activeSources.length }}</span>
+      </div>
+
+      <NScrollbar class="sources-panel__body">
+        <div v-if="!activeSources.length" class="sources-panel__empty">
+          <SvgIcon icon="mdi:database-search-outline" class="text-36px text-gray-300" />
+          <p class="mt-10px text-13px text-gray-400">发送问题后，AI 引用的真实数据来源会显示在这里</p>
+        </div>
+
+        <div v-else class="sources-list">
+          <div
+            v-for="(source, idx) in activeSources"
+            :key="idx"
+            class="source-card"
+          >
+            <div class="source-card__header">
+              <span class="source-card__type">
+                {{ source.source_type === 'transcript' ? '话术' : source.source_type === 'comments' ? '评论' : source.source_type === 'metrics' ? '指标' : '知识' }}
+              </span>
+              <span class="source-card__index">#{{ idx + 1 }}</span>
+            </div>
+            <div class="source-card__title">{{ source.title || '未命名来源' }}</div>
+            <div v-if="source.anchor_name" class="source-card__anchor">
+              <SvgIcon icon="mdi:account-circle-outline" class="text-13px" />
+              {{ source.anchor_name }}
+            </div>
+            <div v-if="source.excerpt" class="source-card__excerpt">
+              {{ source.excerpt }}
+            </div>
+            <div v-if="source.time_range" class="source-card__time">
+              <SvgIcon icon="mdi:clock-outline" class="text-12px" />
+              {{ source.time_range }}
             </div>
           </div>
-
-          <!-- 加载中 -->
-          <div v-if="chatting" class="msg-row msg-row--ai">
-            <div class="msg-avatar msg-avatar--ai">
-              <SvgIcon icon="mdi:robot-outline" class="text-20px" />
-            </div>
-            <div class="msg-bubble msg-bubble--ai msg-bubble--typing">
-              <span class="typing-dot" />
-              <span class="typing-dot" />
-              <span class="typing-dot" />
-            </div>
-          </div>
-          <div ref="chatEndRef" />
         </div>
       </NScrollbar>
-    </div>
-
-    <!-- 底部输入栏 -->
-    <footer class="chat-footer">
-      <div class="chat-footer__inner">
-        <input
-          v-model="question"
-          class="chat-input"
-          type="text"
-          maxlength="500"
-          placeholder="输入问题..."
-          :disabled="chatting"
-          @keydown="handleQuestionKeydown"
-        />
-        <button
-          type="button"
-          class="chat-send-btn"
-          :class="{ 'chat-send-btn--active': question.trim() && !chatting }"
-          :disabled="!question.trim() || chatting"
-          @click="sendQuestion()"
-        >
-          <SvgIcon icon="mdi:send" class="text-18px" />
-        </button>
-      </div>
-    </footer>
-    </div>
+    </aside>
   </div>
 </template>
 
 <style>
-/* 非 scoped：锁定路由容器，禁止外层页面滚动 */
 .knowledge-chat-page {
   position: relative;
   height: 100%;
   overflow: hidden;
+  display: flex;
+  background: #fff;
 }
 </style>
 
 <style scoped>
-/* 确保聊天页撑满父容器并禁止自身滚动，只有消息区滚动 */
-.wechat-chat {
-  position: absolute;
-  inset: 0;
+/* ========== 左侧聊天面板 ========== */
+.chat-panel {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  overflow: hidden;
+  border-right: 1px solid rgb(0 0 0 / 6%);
 }
 
-/* ── 顶部标题栏 ── */
+/* ── 标题栏 ── */
 .chat-header {
   display: flex;
   align-items: center;
@@ -303,7 +371,7 @@ async function copyText(content: string) {
 
 .msg-row--ai {
   justify-content: flex-start;
-  padding-right: 60px;
+  padding-right: 20px;
 }
 
 .msg-row--user {
@@ -330,7 +398,6 @@ async function copyText(content: string) {
   box-shadow: 0 1px 4px rgb(0 0 0 / 6%);
 }
 
-/* ── 消息内容区 ── */
 .msg-content--ai {
   min-width: 0;
 }
@@ -343,17 +410,12 @@ async function copyText(content: string) {
   font-size: 15px;
   line-height: 22px;
   word-break: break-word;
-  position: relative;
 }
 
 .msg-bubble--user {
   background: #95ec69;
   color: #000;
   border-radius: 4px;
-  border-top-right-radius: 4px;
-  border-top-left-radius: 4px;
-  border-bottom-left-radius: 4px;
-  border-bottom-right-radius: 4px;
 }
 
 .msg-bubble--ai {
@@ -395,16 +457,22 @@ async function copyText(content: string) {
 
 /* ── 消息操作 ── */
 .msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   margin-top: 4px;
   padding-left: 2px;
 }
 
 .msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   border: none;
   background: transparent;
   color: #888;
   font-size: 11px;
-  padding: 2px 4px;
+  padding: 2px 6px;
   cursor: pointer;
   border-radius: 3px;
 }
@@ -413,53 +481,14 @@ async function copyText(content: string) {
   background: rgb(0 0 0 / 5%);
 }
 
-/* ── 引用来源 ── */
-.msg-sources {
-  margin-top: 6px;
-  padding: 8px 10px;
-  background: white;
-  border-radius: 4px;
-  box-shadow: 0 1px 1px rgb(0 0 0 / 4%);
-  max-width: 100%;
+.msg-action-btn--source {
+  color: rgb(var(--primary-color) / 70%);
 }
 
-.msg-sources__title {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
+.msg-action-btn--active {
+  background: rgb(var(--primary-color) / 8%);
   color: rgb(var(--primary-color));
   font-weight: 600;
-  margin-bottom: 6px;
-  padding-bottom: 5px;
-  border-bottom: 1px solid rgb(0 0 0 / 5%);
-}
-
-.msg-source-item {
-  padding: 5px 0;
-  border-bottom: 1px solid rgb(0 0 0 / 3%);
-}
-
-.msg-source-item:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
-}
-
-.msg-source-item__name {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  color: #555;
-}
-
-.msg-source-item__excerpt {
-  display: block;
-  margin-top: 3px;
-  font-size: 11px;
-  color: #999;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ── 底部输入栏 ── */
@@ -529,10 +558,148 @@ async function copyText(content: string) {
   transform: scale(0.95);
 }
 
+/* ========== 右侧引用来源面板 ========== */
+.sources-panel {
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fafafa;
+}
+
+.sources-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+  border-bottom: 1px solid rgb(0 0 0 / 6%);
+  background: #fff;
+}
+
+.sources-panel__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: rgb(var(--primary-color) / 10%);
+  color: rgb(var(--primary-color));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.sources-panel__body {
+  flex: 1;
+  min-height: 0;
+}
+
+.sources-panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 24px;
+  text-align: center;
+}
+
+.sources-list {
+  padding: 12px 14px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.source-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 4%);
+  border: 1px solid rgb(0 0 0 / 4%);
+}
+
+.source-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.source-card__type {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgb(var(--primary-color) / 8%);
+  color: rgb(var(--primary-color));
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.source-card__index {
+  font-size: 10px;
+  color: #bbb;
+}
+
+.source-card__title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #333;
+  line-height: 19px;
+  margin-bottom: 4px;
+}
+
+.source-card__anchor {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 6px;
+}
+
+.source-card__excerpt {
+  font-size: 12px;
+  color: #666;
+  line-height: 18px;
+  padding: 6px 8px;
+  background: #f9f9f9;
+  border-radius: 4px;
+  border-left: 2px solid rgb(var(--primary-color) / 20%);
+}
+
+.source-card__time {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #aaa;
+}
+
 /* ── 响应式 ── */
-@media (max-width: 640px) {
+@media (max-width: 900px) {
+  .sources-panel {
+    width: 280px;
+  }
+}
+
+@media (max-width: 768px) {
+  .chat-panel {
+    border-right: none;
+  }
+
+  .sources-panel {
+    display: none;
+  }
+
   .msg-row--ai {
-    padding-right: 40px;
+    padding-right: 20px;
   }
 
   .msg-row--user {
