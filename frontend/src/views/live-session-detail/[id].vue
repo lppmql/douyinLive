@@ -4,6 +4,7 @@ import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { fetchLiveSessionData, getLiveSessionVideoDownloadUrl } from '@/service/api/douyin';
 import { unwrapServiceData } from '@/utils/service';
+import BusinessPageHeader from '@/components/business/page-header.vue';
 import CommentGroups from './modules/comment-groups.vue';
 import ReviewWorkbench from './modules/review-workbench.vue';
 
@@ -16,6 +17,16 @@ const videoDownloading = ref(false);
 const detail = ref<Api.Douyin.LiveSessionDetail | null>(null);
 const loadError = ref('');
 const session = computed(() => detail.value?.session);
+const headerStatus = computed(() => {
+  if (loading.value && !session.value) return '读取中';
+  if (loadError.value) return '加载失败';
+  return session.value?.live_status === 'live' ? '直播中' : '已结束';
+});
+const headerStatusType = computed(() => {
+  if (loadError.value) return 'error';
+  if (loading.value && !session.value) return 'info';
+  return session.value?.live_status === 'live' ? 'success' : 'default';
+});
 
 const profilesColumns: NaiveUI.TableColumn<Api.Douyin.LiveAudienceProfile>[] = [
   { title: '画像维度', key: 'dimension_type', width: 140 },
@@ -110,6 +121,24 @@ onMounted(load);
 
 <template>
   <NSpace vertical :size="16" class="business-page" :aria-busy="loading">
+    <BusinessPageHeader
+      :title="session?.anchor_name || '直播场次详情'"
+      :description="session?.session_title || loadError || '正在读取真实场次信息，请稍候'"
+      icon="mdi:video-vintage"
+      eyebrow="场次详情与 AI 分析"
+      :status="headerStatus"
+      :status-type="headerStatusType"
+    >
+      <template #actions>
+        <NButton @click="router.push({ name: 'live-sessions' })">返回列表</NButton>
+      </template>
+      <div class="flex flex-wrap items-center gap-12px text-12px text-gray-500">
+        <NAvatar v-if="session" round :size="28" :src="session.anchor_avatar_url || undefined" />
+        <span v-if="session">抖音号 {{ session.douyin_id || '未获取' }}</span>
+        <span>场次 #{{ id }}</span>
+        <span>详情状态：{{ session?.detail_collection_status || (loading ? '读取中' : '-') }}</span>
+      </div>
+    </BusinessPageHeader>
 
     <NCard v-if="loading && !detail" :bordered="false" class="business-loading-panel card-wrapper">
       <NSkeleton text :repeat="2" />
