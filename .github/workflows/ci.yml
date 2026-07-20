@@ -73,7 +73,7 @@ jobs:
           node-version: 22
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: cp .env.ci .env
+      - run: cp .env.ci ../.env
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm exec oxlint .
