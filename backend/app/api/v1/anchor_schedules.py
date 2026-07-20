@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.schemas.knowledge import AnchorScheduleDashboardResponse
 from app.services.schedule_service import build_schedule_dashboard, build_schedule_range_dashboard
 
 
 router = APIRouter(prefix="/anchor-schedules", tags=["主播排班"])
 
 
-@router.get("/dashboard")
+@router.get("/dashboard", response_model=AnchorScheduleDashboardResponse)
 def get_schedule_dashboard(
     schedule_date: date | None = Query(None, description="排班日期，默认今天"),
     start_date: date | None = Query(None, description="范围开始日期，和结束日期同时使用"),

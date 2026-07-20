@@ -19,6 +19,20 @@ from app.models.high_intent_users import HighIntentUser
 from app.models.live_sessions import LiveSession
 from app.models.comments import Comment
 from app.models.transcript_segments import TranscriptSegment
+from app.schemas.ai import (
+    AiTestResponse,
+    AiScoreResponse,
+    AiPipelineResponse,
+    AiBatchScoreResponse,
+    AiTrendResponse,
+    AiAnomalyResponse,
+    AiOptimizeResponse,
+    AiHighIntentResponse,
+    HighIntentUserOut,
+    AiQaResponse,
+    AiKbSaveResponse,
+    AiKbSyncRecentResponse,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ai", tags=["AI-分析"])
@@ -57,7 +71,7 @@ def ai_chat(req: ChatRequest, db: Session = Depends(get_db)):
     return ChatResponse(reply=reply)
 
 
-@router.post("/test")
+@router.post("/test", response_model=AiTestResponse)
 def test_connection():
     """测试 DeepSeek API 连通性"""
     try:
@@ -75,7 +89,7 @@ def test_connection():
 
 # ── 话术评分 ──
 
-@router.post("/score/{session_id}")
+@router.post("/score/{session_id}", response_model=AiScoreResponse)
 def score_session(session_id: int, db: Session = Depends(get_db)):
     """对指定场次进行话术评分"""
     result = score_session_transcript(session_id, db)
@@ -84,7 +98,7 @@ def score_session(session_id: int, db: Session = Depends(get_db)):
     return {"status": "ok", "result": result}
 
 
-@router.post("/pipeline/{session_id}")
+@router.post("/pipeline/{session_id}", response_model=AiPipelineResponse)
 def run_transcript_ai_pipeline(session_id: int, db: Session = Depends(get_db)):
     """手动重跑与自动链路相同的评分、复盘、知识库和 DataEase 后处理。"""
     try:
@@ -100,7 +114,7 @@ def run_transcript_ai_pipeline(session_id: int, db: Session = Depends(get_db)):
     }
 
 
-@router.post("/score/batch")
+@router.post("/score/batch", response_model=AiBatchScoreResponse)
 def batch_score(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_db)):
     """批量评分最近有话术但未评分的场次"""
     scored = batch_score_recent(db, limit=limit)
@@ -109,7 +123,7 @@ def batch_score(limit: int = Query(10, ge=1, le=100), db: Session = Depends(get_
 
 # ── 趋势分析 ──
 
-@router.post("/trend")
+@router.post("/trend", response_model=AiTrendResponse)
 def trend_analysis(
     session_ids: list[int] = Query(..., min_length=2),
     db: Session = Depends(get_db),
@@ -123,7 +137,7 @@ def trend_analysis(
 
 # ── 异常检测 ──
 
-@router.post("/anomaly/{session_id}")
+@router.post("/anomaly/{session_id}", response_model=AiAnomalyResponse)
 def anomaly_detection(session_id: int, db: Session = Depends(get_db)):
     """检测单场直播的异常"""
     result = detect_anomalies(session_id, db)
@@ -134,7 +148,7 @@ def anomaly_detection(session_id: int, db: Session = Depends(get_db)):
 
 # ── 优化建议 ──
 
-@router.post("/optimize/{session_id}")
+@router.post("/optimize/{session_id}", response_model=AiOptimizeResponse)
 def optimize_session(session_id: int, db: Session = Depends(get_db)):
     """生成单场直播的优化建议"""
     session = db.get(LiveSession, session_id)
@@ -227,14 +241,14 @@ def optimize_session(session_id: int, db: Session = Depends(get_db)):
 
 # ── 高意向用户 ──
 
-@router.post("/high-intent/{session_id}")
+@router.post("/high-intent/{session_id}", response_model=AiHighIntentResponse)
 def detect_high_intent(session_id: int, db: Session = Depends(get_db)):
     """AI 识别高意向用户"""
     users = identify_high_intent(session_id, db)
     return {"status": "ok", "count": len(users), "users": users}
 
 
-@router.get("/high-intent", response_model=list[dict])
+@router.get("/high-intent", response_model=list[HighIntentUserOut])
 def list_high_intent(
     session_id: int | None = Query(None),
     intent_level: str | None = Query(None),
@@ -274,7 +288,7 @@ class QaRequest(BaseModel):
     history: list[QaHistoryMessage] = Field(default_factory=list, max_length=8)
 
 
-@router.post("/qa")
+@router.post("/qa", response_model=AiQaResponse)
 def knowledge_qa(req: QaRequest, db: Session = Depends(get_db)):
     """知识库问答"""
     history = [item.model_dump() for item in req.history[-8:]]
@@ -282,7 +296,7 @@ def knowledge_qa(req: QaRequest, db: Session = Depends(get_db)):
     return result
 
 
-@router.post("/kb/save/{session_id}")
+@router.post("/kb/save/{session_id}", response_model=AiKbSaveResponse)
 def save_to_knowledge_base(session_id: int, db: Session = Depends(get_db)):
     """将直播数据、评论、话术和分析结果统一保存到知识库。"""
     if not db.get(LiveSession, session_id):
@@ -290,7 +304,7 @@ def save_to_knowledge_base(session_id: int, db: Session = Depends(get_db)):
     return {"status": "ok", **sync_session_to_kb(db, session_id)}
 
 
-@router.post("/kb/sync/recent")
+@router.post("/kb/sync/recent", response_model=AiKbSyncRecentResponse)
 def sync_recent_to_knowledge_base(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),

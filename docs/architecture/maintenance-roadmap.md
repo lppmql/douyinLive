@@ -42,6 +42,27 @@
 
 现有任务已经具备 MySQL 状态、幂等键、心跳、重试和 Redis Streams 生命周期事件。没有独立压测和迁移收益数据前，不再叠加 Taskiq；Chroma/pgvector 先以真实问答召回基线做 POC；RAGFlow、Milvus、Temporal、完整 Langfuse、Dify 和 FastGPT 不进入 8GB 本机默认栈。
 
+## 目录迁移流程（绞杀者模式）
+
+后续任何模块搬迁都必须遵循以下步骤：
+
+1. **每次只迁 1 个模块** — 不一次性批量搬迁
+2. **先补回归测试** — 覆盖模块当前行为，锁定现有契约
+3. **移动代码到新位置** — 保持内部实现不变
+4. **旧路径留 shim** — 旧路径保留一个薄薄的重导出层，转发到新位置
+5. **撑过一个发布周期** — 确认没有遗漏的引用
+6. **删 shim** — 确认安全后删除旧路径的转发代码
+7. **提交 + 关联 ADR** — 每次搬迁一个 commit，关联对应的 ADR
+
+示例：
+```python
+# 旧路径: backend/app/services/ai/scoring.py
+# 新路径: backend/app/services/ai/scoring/service.py
+#
+# 旧路径留 shim:
+# from app.services.ai.scoring.service import score_session_transcript  # noqa
+```
+
 ## 下一阶段进入条件
 
 1. CI 连续通过。

@@ -11,6 +11,14 @@ from app.models.stream_sources import StreamSource
 from app.models.asr_tasks import AsrTask
 from app.services.asr.queue import queue_session_transcription
 from app.services.asr.websocket_manager import ws_manager
+from app.schemas.transcript import (
+    TranscriptQueueResponse,
+    TranscriptBatchResponse,
+    TranscriptTaskStatusResponse,
+    TranscriptTaskOut,
+    TranscriptSegmentOut,
+    TranscriptFullTextResponse,
+)
 
 # REST 路由（注册到 v1_router）
 rest_router = APIRouter(prefix="/transcripts", tags=["话术转写"])
@@ -53,7 +61,7 @@ def serialize_transcription_task(task: AsrTask, session: LiveSession, segment_co
     }
 
 
-@rest_router.post("/{session_id:int}/queue")
+@rest_router.post("/{session_id:int}/queue", response_model=TranscriptQueueResponse)
 def queue_transcription(session_id: int, db: Session = Depends(get_db)):
     """为指定场次排队转写，复用已采集流源并避免重复任务。"""
     session = db.get(LiveSession, session_id)
@@ -69,7 +77,7 @@ def queue_transcription(session_id: int, db: Session = Depends(get_db)):
     return {"task_id": task.id, "status": task.status, "created": created}
 
 
-@rest_router.post("/batch/queue-by-anchor")
+@rest_router.post("/batch/queue-by-anchor", response_model=TranscriptBatchResponse)
 def queue_transcription_by_anchor(
     per_anchor: int = Query(1, ge=1, le=3),
     min_duration_seconds: int = Query(600, ge=60, le=7200),
@@ -134,7 +142,7 @@ def queue_transcription_by_anchor(
     }
 
 
-@rest_router.get("/tasks/status")
+@rest_router.get("/tasks/status", response_model=TranscriptTaskStatusResponse)
 def get_transcription_task_status(db: Session = Depends(get_db)):
     """返回话术任务汇总，供页面显示真实排队进度。"""
     counts = {"queued": 0, "processing": 0, "completed": 0, "failed": 0}
@@ -143,7 +151,7 @@ def get_transcription_task_status(db: Session = Depends(get_db)):
     return counts
 
 
-@rest_router.get("/tasks")
+@rest_router.get("/tasks", response_model=list[TranscriptTaskOut])
 def list_transcription_tasks(
     status: str | None = Query(None, pattern="^(queued|processing|completed|failed)$"),
     limit: int = Query(100, ge=1, le=200),
@@ -181,7 +189,7 @@ def list_transcription_tasks(
     return [serialize_transcription_task(task, session, segment_count) for task, session, segment_count in rows]
 
 
-@rest_router.get("/{session_id:int}/segments")
+@rest_router.get("/{session_id:int}/segments", response_model=list[TranscriptSegmentOut])
 def list_transcript_segments(
     session_id: int,
     limit: int = Query(200, le=500),
@@ -210,7 +218,7 @@ def list_transcript_segments(
     ]
 
 
-@rest_router.get("/{session_id:int}/full-text")
+@rest_router.get("/{session_id:int}/full-text", response_model=TranscriptFullTextResponse)
 def get_full_text(session_id: int, db: Session = Depends(get_db)):
     """获取某场直播的完整话术文本"""
     record = (

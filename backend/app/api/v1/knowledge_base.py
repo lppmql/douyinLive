@@ -9,6 +9,13 @@ from app.models.knowledge_time_slices import KnowledgeTimeSlice
 from app.models.live_sessions import LiveSession
 from app.core.config import settings
 from app.schemas import KnowledgeBaseCreate, KnowledgeBaseResponse
+from app.schemas.knowledge import (
+    KnowledgePageResponse,
+    KnowledgeTimeSliceStatusResponse,
+    KnowledgeTimeSliceSearchResponse,
+    KnowledgeTimeSliceSyncResponse,
+    KnowledgeDeleteResponse,
+)
 from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices
 
 router = APIRouter(prefix="/knowledge-base", tags=["知识库"])
@@ -53,7 +60,7 @@ def list_knowledge(
     return q.order_by(KnowledgeBase.created_at.desc()).offset(skip).limit(limit).all()
 
 
-@router.get("/page")
+@router.get("/page", response_model=KnowledgePageResponse)
 def page_knowledge(
     current: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=100),
@@ -77,7 +84,7 @@ def page_knowledge(
     return {"records": rows, "total": total, "current": current, "size": size}
 
 
-@router.get("/time-slices/status")
+@router.get("/time-slices/status", response_model=KnowledgeTimeSliceStatusResponse)
 def time_slice_status(db: Session = Depends(get_db)):
     """返回真实知识时间片覆盖情况。"""
     session_count = db.query(func.count(func.distinct(KnowledgeTimeSlice.session_id))).scalar() or 0
@@ -104,7 +111,7 @@ def time_slice_status(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/time-slices/search")
+@router.get("/time-slices/search", response_model=KnowledgeTimeSliceSearchResponse)
 def search_slices(
     query: str = Query(..., min_length=1, max_length=500),
     limit: int = Query(20, ge=1, le=100),
@@ -114,7 +121,7 @@ def search_slices(
     return search_time_slices(db, question=query, limit=limit)
 
 
-@router.post("/time-slices/sync/{session_id}")
+@router.post("/time-slices/sync/{session_id}", response_model=KnowledgeTimeSliceSyncResponse)
 def sync_time_slices(session_id: int, db: Session = Depends(get_db)):
     """幂等同步单场真实数据的知识时间片。"""
     if not db.get(LiveSession, session_id):
@@ -123,7 +130,7 @@ def sync_time_slices(session_id: int, db: Session = Depends(get_db)):
     return {"status": "ok", "session_id": session_id, **result}
 
 
-@router.get("/time-slices")
+@router.get("/time-slices", response_model=list[dict])
 def list_time_slices(
     session_id: int | None = Query(None),
     skip: int = Query(0, ge=0),
@@ -141,7 +148,7 @@ def list_time_slices(
     return [_serialize_time_slice(row) for row in rows]
 
 
-@router.get("/time-slices/page")
+@router.get("/time-slices/page", response_model=KnowledgePageResponse)
 def page_time_slices(
     current: int = Query(1, ge=1),
     size: int = Query(10, ge=1, le=100),
@@ -203,7 +210,7 @@ def create_knowledge(data: KnowledgeBaseCreate, db: Session = Depends(get_db)):
     return k
 
 
-@router.delete("/{kb_id}")
+@router.delete("/{kb_id}", response_model=KnowledgeDeleteResponse)
 def delete_knowledge(kb_id: int, db: Session = Depends(get_db)):
     k = db.get(KnowledgeBase, kb_id)
     if not k:

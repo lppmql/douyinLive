@@ -19,6 +19,11 @@ from app.services.sync import sync_pending_complete_sessions
 from app.services.sync.de_sync import source_data_outdated_condition
 from app.services.metrics import METRIC_DEFINITIONS, SEMANTIC_DATASETS
 from app.core.observability import DATAEASE_SYNC_TOTAL
+from app.schemas.dashboard import (
+    DataEaseStatusResponse,
+    DataEaseSemanticResponse,
+    DataEaseSyncResponse,
+)
 
 router = APIRouter(prefix="/dataease", tags=["DataEase"])
 
@@ -61,13 +66,13 @@ def _status(db: Session) -> dict:
     }
 
 
-@router.get("/status")
+@router.get("/status", response_model=DataEaseStatusResponse)
 def get_dataease_status(db: Session = Depends(get_db)):
     """返回业务完整场次到 DataEase 宽表的真实覆盖情况。"""
     return _status(db)
 
 
-@router.get("/semantic-layer")
+@router.get("/semantic-layer", response_model=DataEaseSemanticResponse)
 def get_semantic_layer():
     """返回 DataEase、前端和 API 共用的指标口径与只读数据集。"""
     return {
@@ -83,7 +88,7 @@ def get_semantic_layer():
     }
 
 
-@router.post("/sync")
+@router.post("/sync", response_model=DataEaseSyncResponse)
 def sync_dataease(
     limit: int = Query(100, ge=1, le=500),
     force: bool = Query(False),

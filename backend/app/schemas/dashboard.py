@@ -1,0 +1,54 @@
+"""仪表盘 & DataEase — Pydantic 响应模型"""
+
+from datetime import datetime
+from pydantic import BaseModel
+
+
+class DashboardSummaryResponse(BaseModel):
+    """GET /dashboard/summary"""
+    anchor_count: int = 0
+    session_count: int = 0
+    live_session_count: int = 0
+    detail_complete_count: int = 0
+    detail_completion_rate: float = 0
+    total_viewers: int = 0
+    total_comments: int = 0
+    high_intent_comment_count: int = 0
+    total_private_messages: int = 0
+    total_leads: int = 0
+    total_ad_cost: float = 0
+    average_lead_cost: float = 0
+    open_review_action_count: int = 0
+
+
+class DataEaseStatusResponse(BaseModel):
+    """GET /dataease/status"""
+    source_session_count: int = 0
+    synced_session_count: int = 0
+    pending_session_count: int = 0
+    outdated_session_count: int = 0
+    coverage_rate: float = 100.0
+    metric_row_count: int = 0
+    profile_row_count: int = 0
+    comment_summary_count: int = 0
+    transcript_summary_count: int = 0
+    ai_summary_count: int = 0
+    last_synced_at: datetime | None = None
+
+
+class DataEaseSemanticResponse(BaseModel):
+    """GET /dataease/semantic-layer"""
+    version: str = "semantic-v1"
+    metrics: list[dict] = []
+    datasets: list[dict] = []
+    time_policy: dict = {}
+    dataease_access: str = ""
+
+
+class DataEaseSyncResponse(BaseModel):
+    """POST /dataease/sync"""
+    status: str = "ok"
+    synced_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+    dataease: DataEaseStatusResponse | None = None

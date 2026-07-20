@@ -5,13 +5,30 @@ updates:
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    groups:
+      npm-patch:
+        update-types: [patch]
+      npm-minor:
+        update-types: [minor]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
+
   - package-ecosystem: pip
     directory: /backend
     schedule:
       interval: monthly
     open-pull-requests-limit: 5
+    groups:
+      pip-patch:
+        update-types: [patch]
+      pip-minor:
+        update-types: [minor]
+    ignore:
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 5

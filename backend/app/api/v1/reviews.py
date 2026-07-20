@@ -14,6 +14,13 @@ from app.schemas.review import (
     ReviewActionUpdate,
     ScriptAssetCreate,
     ScriptAssetUpdate,
+    ReviewWorkbenchResponse,
+    ReviewGenerateResponse,
+    ReviewComparisonResponse,
+    ReviewFindingOut,
+    ReviewActionOut,
+    ReviewScriptAssetOut,
+    ComplianceRuleOut,
 )
 from app.services.ai.review_service import build_workbench, compare_sessions, generate_findings
 
@@ -29,7 +36,7 @@ def _row_dict(row) -> dict:
     return data
 
 
-@router.get("/{session_id}/workbench")
+@router.get("/{session_id}/workbench", response_model=ReviewWorkbenchResponse)
 def get_workbench(
     session_id: int,
     refresh_findings: bool = Query(False),
@@ -41,7 +48,7 @@ def get_workbench(
         raise HTTPException(404, str(exc)) from exc
 
 
-@router.post("/{session_id}/generate")
+@router.post("/{session_id}/generate", response_model=ReviewGenerateResponse)
 def generate_session_review(session_id: int, db: Session = Depends(get_db)):
     try:
         findings = generate_findings(db, session_id)
@@ -54,7 +61,7 @@ def generate_session_review(session_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, str(exc)) from exc
 
 
-@router.get("/{session_id}/comparison")
+@router.get("/{session_id}/comparison", response_model=ReviewComparisonResponse)
 def get_comparison(
     session_id: int,
     other_session_id: int | None = Query(None),
@@ -66,7 +73,7 @@ def get_comparison(
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.patch("/{session_id}/findings/{finding_id}")
+@router.patch("/{session_id}/findings/{finding_id}", response_model=ReviewFindingOut)
 def update_finding_status(
     session_id: int,
     finding_id: int,
@@ -85,7 +92,7 @@ def update_finding_status(
     return _row_dict(finding)
 
 
-@router.post("/{session_id}/actions")
+@router.post("/{session_id}/actions", response_model=ReviewActionOut)
 def create_action(
     session_id: int,
     data: ReviewActionCreate,
@@ -107,7 +114,7 @@ def create_action(
     return _row_dict(action)
 
 
-@router.patch("/{session_id}/actions/{action_id}")
+@router.patch("/{session_id}/actions/{action_id}", response_model=ReviewActionOut)
 def update_action(
     session_id: int,
     action_id: int,
@@ -131,7 +138,7 @@ def update_action(
     return _row_dict(action)
 
 
-@router.post("/{session_id}/script-assets")
+@router.post("/{session_id}/script-assets", response_model=ReviewScriptAssetOut)
 def create_script_asset(
     session_id: int,
     data: ScriptAssetCreate,
@@ -169,7 +176,7 @@ def create_script_asset(
     return _row_dict(asset)
 
 
-@router.patch("/{session_id}/script-assets/{asset_id}")
+@router.patch("/{session_id}/script-assets/{asset_id}", response_model=ReviewScriptAssetOut)
 def update_script_asset(
     session_id: int,
     asset_id: int,
@@ -189,7 +196,7 @@ def update_script_asset(
     return _row_dict(asset)
 
 
-@router.get("/compliance/rules")
+@router.get("/compliance/rules", response_model=list[ComplianceRuleOut])
 def list_compliance_rules(db: Session = Depends(get_db)):
     rows = db.query(ComplianceRule).filter(ComplianceRule.enabled == 1).order_by(
         ComplianceRule.category.asc(), ComplianceRule.id.asc()

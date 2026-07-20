@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.models.comments import Comment
 from app.models.live_sessions import LiveSession
 from app.models.review import ReviewActionItem
+from app.schemas.dashboard import DashboardSummaryResponse
 
 
 router = APIRouter(prefix="/dashboard", tags=["仪表盘"])
@@ -35,7 +36,7 @@ def _serialize_summary(row, high_intent_comment_count: int = 0, open_review_acti
     }
 
 
-@router.get("/summary")
+@router.get("/summary", response_model=DashboardSummaryResponse)
 def get_dashboard_summary(db: Session = Depends(get_db)):
     """返回基于真实直播场次的核心经营数据。"""
     row = db.query(
