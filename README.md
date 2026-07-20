@@ -238,6 +238,19 @@ GET   /api/v1/reviews/compliance/rules
 - 异步操作必须展示加载、成功结果或可恢复的失败原因，危险操作必须二次确认。
 - 数据大屏的主播数量按唯一抖音号去重，避免同一主播修改昵称后被重复计数。
 
+### 2026-07-20 全站 UI/UX 优化
+
+基于 SoybeanAdmin 官方规范，统一 22 个前端文件的无障碍、交互和视觉细节：
+
+- **无障碍**：6 个图标按钮自动派生 aria-label（屏幕阅读器可读）；登录、搜索表单添加 aria-label；所有自定义按钮支持 `:focus-visible` 焦点环。
+- **触控**：图标按钮触控目标从 36px 提升到 44px（符合 Apple HIG）；表格操作按钮 `tiny`→`small`；NBadge 状态指示附文字标签。
+- **间距规范**：全站 gap/margin/padding 统一为 8px 节奏（8、16、24、32），替换非标准值 6/7/9/18px。
+- **暗色模式**：卡片背景对比度 0.035→0.06（WCAG AA）；硬编码颜色替换为语义 CSS 变量（`--primary-color`、`--success-color` 等）。
+- **安全区域**：新增 `safe-area-inset-*` CSS 变量，适配刘海屏和灵动岛。
+- **图标统一**：full-screen/menu-toggler/lang-switch 从 gridicons/line-md/ph/heroicons 统一为 `mdi:`（SoybeanAdmin 默认图标集）。
+- **响应式**：断点对齐 UnoCSS 预设（768px→767px）；面包屑小屏截断；`prefers-reduced-motion` 支持。
+- **清理**：删除未使用的 `packages/alova/` 包（项目零引用，实际使用 `@sa/axios`），工作区从 8 个减为 7 个。
+
 ### 2026-07-18 全站前端体验优化
 
 - 页面头采用统一的响应式栅格，标题、状态、日期和操作按钮在桌面与窄屏下都能完整展示。
