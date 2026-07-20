@@ -81,7 +81,8 @@ def page_knowledge(
 
     total = query.count()
     rows = query.order_by(KnowledgeBase.created_at.desc(), KnowledgeBase.id.desc()).offset((current - 1) * size).limit(size).all()
-    return {"records": rows, "total": total, "current": current, "size": size}
+    records = [{c.name: getattr(r, c.name) for c in r.__table__.columns} for r in rows]
+    return {"records": records, "total": total, "current": current, "size": size}
 
 
 @router.get("/time-slices/status", response_model=KnowledgeTimeSliceStatusResponse)
@@ -118,7 +119,8 @@ def search_slices(
     db: Session = Depends(get_db),
 ):
     """搜索话术、评论和分钟指标已绑定的时间片。"""
-    return search_time_slices(db, question=query, limit=limit)
+    results = search_time_slices(db, question=query, limit=limit)
+    return {"results": results, "total": len(results)}
 
 
 @router.post("/time-slices/sync/{session_id}", response_model=KnowledgeTimeSliceSyncResponse)
