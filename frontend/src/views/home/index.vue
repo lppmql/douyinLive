@@ -292,7 +292,6 @@ const anchorColumns = [
           :bordered="false"
           :single-line="false"
           size="small"
-          :max-height="400"
           striped
         />
       </NCard>
