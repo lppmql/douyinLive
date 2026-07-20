@@ -231,8 +231,8 @@ onBeforeUnmount(() => {
           </template>
           <NTabs type="line" animated default-value="timeline">
             <NTabPane name="timeline" tab="统一时间轴" display-directive="if">
-              <NAlert v-if="workbench.live_alerts.length" type="warning" :bordered="false" class="mb-12px">
-                当前有 {{ workbench.live_alerts.length }} 条实时告警，已按发生时间合并到时间轴中。
+              <NAlert v-if="workbench.live_alerts?.length" type="warning" :bordered="false" class="mb-12px">
+                当前有 {{ workbench.live_alerts?.length || 0 }} 条实时告警，已按发生时间合并到时间轴中。
               </NAlert>
               <ReviewTimeline
                 :session-start="detail.session.live_start_time"

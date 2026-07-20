@@ -57,12 +57,18 @@ class ReviewWorkbenchResponse(BaseModel):
     session_id: int | None = None
     anchor_name: str | None = None
     session_title: str | None = None
+    business_context: str | None = None
     completeness: dict[str, Any] = Field(default_factory=dict)
+    transcript_segments: list[dict[str, Any]] = Field(default_factory=list)
+    domain_coverage: list[dict[str, Any]] = Field(default_factory=list)
     timeline: list[dict[str, Any]] = Field(default_factory=list)
     findings: list[dict[str, Any]] = Field(default_factory=list)
     score: dict[str, Any] | None = None
     actions: list[dict[str, Any]] = Field(default_factory=list)
     assets: list[dict[str, Any]] = Field(default_factory=list)
+    script_assets: list[dict[str, Any]] = Field(default_factory=list)
+    live_alerts: list[dict[str, Any]] = Field(default_factory=list)
+    latest_reports: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReviewGenerateResponse(BaseModel):
