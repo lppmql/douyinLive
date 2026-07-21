@@ -6,6 +6,11 @@
  * 所有状态、计算属性、异步操作都在 useTranscriptWorkbench 中管理。
  */
 import { useTranscriptWorkbench } from './composables/useTranscriptWorkbench';
+import TranscriptTaskCards from './components/TranscriptTaskCards.vue';
+import TranscriptSessionControl from './components/TranscriptSessionControl.vue';
+import TranscriptStatCards from './components/TranscriptStatCards.vue';
+import TranscriptContentPanel from './components/TranscriptContentPanel.vue';
+import TranscriptTaskDrawer from './components/TranscriptTaskDrawer.vue';
 
 defineOptions({ name: 'Transcripts' });
 
@@ -79,7 +84,7 @@ const {
     <TranscriptTaskCards
       :task-status-cards="taskStatusCards"
       :failed-count="taskSummary.failed"
-      @open-drawer="openTaskDrawer"
+      @open-drawer="(status: any) => openTaskDrawer(status)"
     />
 
     <!-- 2. 场次选择 + 操作工具栏 -->
@@ -101,7 +106,7 @@ const {
       @run-ai-pipeline="runAiPipeline"
       @copy-full-text="copyFullText"
       @queue-anchor-batch="queueAnchorBatch"
-      @open-task-drawer="openTaskDrawer"
+      @open-task-drawer="(status: any) => openTaskDrawer(status)"
       @open-session-detail="openSessionDetail"
     />
 
