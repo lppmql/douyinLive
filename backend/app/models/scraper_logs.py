@@ -1,5 +1,5 @@
 """采集日志表"""
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, JSON, Index
+from sqlalchemy import Column, BigInteger, String, Text, ForeignKey, JSON, Index
 from app.models.base import Base, TimestampMixin
 
 

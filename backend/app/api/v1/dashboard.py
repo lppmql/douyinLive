@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.models.comments import Comment
 from app.models.live_sessions import LiveSession
 from app.models.review import ReviewActionItem
-from app.schemas.dashboard import AnchorSummaryItem, AnchorSummaryResponse, DashboardSummaryResponse
+from app.schemas.dashboard import AnchorSummaryResponse, DashboardSummaryResponse
 
 
 router = APIRouter(prefix="/dashboard", tags=["仪表盘"])

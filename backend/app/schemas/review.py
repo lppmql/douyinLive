@@ -50,7 +50,6 @@ class ScriptAssetUpdate(BaseModel):
 
 # ── 响应模型 ──
 
-from typing import Any
 
 class ReviewWorkbenchResponse(BaseModel):
     """GET /reviews/{session_id}/workbench — 复盘工作台"""

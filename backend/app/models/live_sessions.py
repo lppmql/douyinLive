@@ -1,5 +1,5 @@
 """直播场次表 - 核心表"""
-from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, Text, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from app.models.base import Base, TimestampMixin
 

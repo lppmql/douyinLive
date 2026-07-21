@@ -36,7 +36,6 @@ def get_monitor_status():
 @router.post("/start", response_model=MonitorActionResponse)
 async def start_monitor(db: Session = Depends(get_db)):
     """启动监控"""
-    import asyncio
     running_collect = db.query(ScraperTask).filter(
         ScraperTask.task_type == "collect_all",
         ScraperTask.status == TaskStatus.RUNNING,

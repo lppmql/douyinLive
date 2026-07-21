@@ -63,7 +63,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"🔴 Redis: {settings.redacted_redis_url}")
 
     try:
-        with engine.connect() as conn:
+        with engine.connect():
             logger.info("✅ 数据库连接成功")
     except Exception as e:
         logger.warning(f"⚠️  数据库连接失败: {e}")

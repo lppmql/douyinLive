@@ -5,7 +5,6 @@ ffmpeg pipe 管理器 — 将 m3u8 直播流转为 16kHz PCM 流
 按帧（60ms = 960 samples = 1920 bytes）切分 yield 给调用方。
 """
 import asyncio
-import json
 from typing import AsyncGenerator, Optional
 
 from app.core.config import settings
@@ -66,7 +65,7 @@ class M3u8Pipe:
             "-vn",                     # 不要视频
             "-threads", "1",           # 限制解码线程，避免与 FunASR 抢占全部 CPU
             "-ac", "1",                # 单声道
-            "-ar", str(ASR_SAMPLE_RATE := settings.ASR_SAMPLE_RATE or 16000),  # 16kHz
+            "-ar", str(settings.ASR_SAMPLE_RATE or 16000),  # 16kHz
             "-acodec", "pcm_s16le",    # PCM s16le 编码
             "-f", "s16le",             # 输出格式
             "-loglevel", "error",      # 只显示错误

@@ -32,7 +32,7 @@ async def main():
 
     # 检查数据库连接
     try:
-        with engine.connect() as conn:
+        with engine.connect():
             logger.info("✅ 数据库连接成功")
     except Exception as e:
         logger.error(f"❌ 数据库连接失败: {e}")

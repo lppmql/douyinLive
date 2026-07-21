@@ -112,9 +112,6 @@ def _sync_pending_dataease(limit: Optional[int]) -> dict:
 # ==================== 向后兼容重导出 ====================
 
 # 以下函数从子模块重导出，保持 scheduler.py 和 collector.py 的导入不变
-from app.services.collector.enterprise import discover_enterprise_live_sessions  # noqa: E402, F811
-from app.services.collector.history import collect_live_session_snapshot  # noqa: E402, F811
-from app.core.status import TaskStatus
 
 
 # ==================== 房间采集编排 ====================
@@ -392,7 +389,7 @@ async def collect_all(
     # 2. 获取所有配置了 room_id 的房间
     rooms = (
         db.query(LiveRoom)
-        .filter(LiveRoom.status == True, LiveRoom.room_id_str.isnot(None))
+        .filter(LiveRoom.status.is_(True), LiveRoom.room_id_str.isnot(None))
         .all()
     )
     report("prepare", 8, 0, len(rooms), f"已加载 {len(rooms)} 个采集房间")

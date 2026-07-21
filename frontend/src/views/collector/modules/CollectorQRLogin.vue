@@ -11,7 +11,7 @@ defineOptions({ name: 'CollectorQRLogin' });
 /** 登录流程状态：idle=空闲 / pending=等待二维码 / scanning=等待扫码 / success=成功 / failed=失败 / timeout=超时 */
 type LoginState = 'idle' | 'pending' | 'scanning' | 'success' | 'failed' | 'timeout' | 'not_found';
 
-const props = defineProps<{
+defineProps<{
   /** 弹窗是否可见 */
   visible: boolean;
   /** Base64 编码的二维码图片 */

@@ -1,5 +1,4 @@
 """话术评分服务 — 调 DeepSeek 对话术进行多维度评分"""
-import json
 import logging
 from decimal import Decimal
 from typing import Any

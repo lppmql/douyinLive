@@ -1,6 +1,4 @@
-<!--
-  采集日志表格 — 从 collector/index.vue 拆分
--->
+<!-- 采集日志表格 — 从 collector/index.vue 拆分 -->
 <script setup lang="ts">
 import { NButton, NCard, NDataTable, NTag, NRadioGroup, NRadioButton, NSpace } from 'naive-ui';
 import { $t } from '@/locales';

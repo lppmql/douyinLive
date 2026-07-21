@@ -81,7 +81,6 @@ const activeTasks = computed(() => tasks.value.filter(item => ['pending', 'runni
 const currentCollectTask = computed(() => tasks.value.find(item => item.task_type === 'collect_all'));
 
 const getAccountRowKey = (row: Api.Douyin.CollectorAccount) => row.id;
-const getLogRowKey = (row: Api.Douyin.CollectorLog) => row.id;
 const getCollectResultRowKey = (row: Api.Douyin.CollectRoomResult) => row.room_id;
 const getTaskRowKey = (row: Api.Douyin.CollectorTask) => row.id;
 

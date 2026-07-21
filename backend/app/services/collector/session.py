@@ -3,20 +3,17 @@
 
 负责：场次创建/更新、重复场次合并修复、主播资料写入、补齐判断
 """
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from app.core.logger import logger
 from app.core.status import TaskStatus
 from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
-from app.models.scraper_logs import ScraperLog
 from app.models.stream_sources import StreamSource
 from app.services.collector.utils import (
     _comment_belongs_to_session,

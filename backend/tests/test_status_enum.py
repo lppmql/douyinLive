@@ -4,7 +4,6 @@
 核心验证：枚举继承了 str，可以直接和数据库中取出的字符串做 == 比较。
 """
 
-import pytest
 from app.core.status import (
     TaskStatus,
     ReviewFindingStatus,

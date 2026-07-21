@@ -15,7 +15,6 @@ from app.services.ai.high_intent_service import identify_high_intent, list_high_
 from app.services.ai.kb_service import qa_search, sync_session_to_kb
 from app.services.ai.post_collection import process_session_post_collection
 from app.models.analysis_reports import AnalysisReport
-from app.models.high_intent_users import HighIntentUser
 from app.models.live_sessions import LiveSession
 from app.models.comments import Comment
 from app.models.transcript_segments import TranscriptSegment

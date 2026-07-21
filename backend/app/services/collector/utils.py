@@ -4,7 +4,6 @@
 包含：数值解析、时间解析、URL 解析、Cookie 读取、去重标识、评论时间校验
 """
 import json
-import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional

@@ -5,7 +5,7 @@
 """
 import asyncio
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 from playwright.async_api import BrowserContext

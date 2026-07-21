@@ -14,7 +14,6 @@ ASR Worker 进程 — 独立运行的话术转写服务
 import asyncio
 import hashlib
 import signal
-import sys
 from time import monotonic
 from datetime import datetime, timedelta
 
@@ -22,7 +21,7 @@ from sqlalchemy.exc import DataError
 
 from app.core.config import settings
 from app.core.logger import logger
-from app.core.database import SessionLocal, engine
+from app.core.database import SessionLocal
 from app.models.asr_tasks import AsrTask
 from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.transcript_segments import TranscriptSegment

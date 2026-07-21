@@ -28,26 +28,26 @@ def list_leads(
 
 @router.get("/{lead_id}", response_model=LeadResponse)
 def get_lead(lead_id: int, db: Session = Depends(get_db)):
-    l = db.query(Lead).get(lead_id)
-    if not l:
+    lead = db.query(Lead).get(lead_id)
+    if not lead:
         raise HTTPException(404, "留资不存在")
-    return l
+    return lead
 
 
 @router.post("/", response_model=LeadResponse)
 def create_lead(data: LeadCreate, db: Session = Depends(get_db)):
-    l = Lead(**data.model_dump())
-    db.add(l)
+    lead = Lead(**data.model_dump())
+    db.add(lead)
     db.commit()
-    db.refresh(l)
-    return l
+    db.refresh(lead)
+    return lead
 
 
 @router.delete("/{lead_id}", response_model=MessageResponse)
 def delete_lead(lead_id: int, db: Session = Depends(get_db)):
-    l = db.query(Lead).get(lead_id)
-    if not l:
+    lead = db.query(Lead).get(lead_id)
+    if not lead:
         raise HTTPException(404, "留资不存在")
-    db.delete(l)
+    db.delete(lead)
     db.commit()
     return {"message": "删除成功"}

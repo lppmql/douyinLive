@@ -35,7 +35,6 @@ const optimizeResult = ref<Api.Douyin.AiOptimizationResult | null>(null);
 const loading = ref(true);
 const loadError = ref('');
 const contextLoading = ref(false);
-const refreshing = ref(false);
 const actionStage = ref<ActionStage>('');
 const activeTab = ref<'overview' | 'evidence' | 'history'>('overview');
 let contextRequestId = 0;
@@ -331,19 +330,6 @@ async function changeSession(value: number | null) {
   if (value) await loadSessionContext(value);
 }
 
-async function refreshPage() {
-  if (!selectedSessionId.value) return;
-  refreshing.value = true;
-  try {
-    const response = await fetchLiveSessions();
-    sessions.value = sortSessionsByLatest(unwrapServiceData(response, '直播场次刷新失败'));
-    await loadSessionContext(selectedSessionId.value, true);
-    message.success('已刷新真实场次和分析报告');
-  } finally {
-    refreshing.value = false;
-  }
-}
-
 async function runFullReview() {
   const sessionId = selectedSessionId.value;
   if (!sessionId) return message.warning('请先选择直播场次');
@@ -397,11 +383,6 @@ async function runOptimize() {
   } finally {
     actionStage.value = '';
   }
-}
-
-function openSessionDetail() {
-  if (!selectedSessionId.value) return;
-  router.push({ name: 'live-session-detail', params: { id: String(selectedSessionId.value) } });
 }
 
 function openTranscripts() {

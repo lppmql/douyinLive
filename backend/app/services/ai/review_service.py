@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from datetime import datetime
 from decimal import Decimal

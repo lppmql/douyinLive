@@ -1,5 +1,5 @@
 """直播指标时间序列表 - 每30-60秒采一条"""
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, DECIMAL, ForeignKey, Index
+from sqlalchemy import Column, Integer, BigInteger, DateTime, DECIMAL, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 

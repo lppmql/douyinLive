@@ -3,10 +3,8 @@
 
 每个测试验证一种数据库操作场景，不依赖 Playwright 或真实浏览器。
 """
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.services.collector.account_repo import (

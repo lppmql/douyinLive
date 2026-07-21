@@ -8,7 +8,6 @@
 4. 登录态检测 — 每次采集前验证 Cookie 是否仍然有效
 """
 import asyncio
-import base64
 import json
 from datetime import datetime
 from pathlib import Path

@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.live_sessions import LiveSession
 from app.models.analysis_reports import AnalysisReport
-from app.models.de_tables import DeAnchorConversionFunnel
 from app.services.ai.deepseek_client import chat_json
 from app.services.ai.prompt_service import get_prompt_template
 

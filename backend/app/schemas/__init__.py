@@ -1,6 +1,6 @@
 """Pydantic 数据模型 - 请求/响应"""
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
 from pydantic import BaseModel, ConfigDict
 from app.core.status import TaskStatus
 

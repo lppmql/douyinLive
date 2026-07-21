@@ -12,7 +12,6 @@ from app.models.live_rooms import LiveRoom
 from app.models.leads import Lead
 from app.models.live_metrics import LiveMetric
 from app.models.de_tables import (
-    DeLiveSessionAnchorSummary,
     DeAnchorRealtimeMetrics,
     DeAnchorConversionFunnel,
 )
@@ -216,7 +215,6 @@ def sync_conversion_funnel(db, session_id: int):
         ("留资", session.leads_count or 0),
     ]
 
-    now = datetime.utcnow()
     prev_count = 0
     for i, (step_name, count) in enumerate(steps):
         rate = (count / prev_count) if prev_count > 0 and i > 0 else 0

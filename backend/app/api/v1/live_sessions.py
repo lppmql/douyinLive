@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.live_sessions import LiveSession
-from app.models.live_rooms import LiveRoom
 from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource

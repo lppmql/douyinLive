@@ -11,7 +11,6 @@ from redis import Redis
 from app.core.config import settings
 from app.core.observability import TASK_EVENTS_TOTAL
 from app.core.logger import logger
-from app.core.status import TaskStatus
 
 
 def current_worker_id(prefix: str) -> str:

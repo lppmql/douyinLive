@@ -1,7 +1,7 @@
 """SQLAlchemy 基础配置"""
 from datetime import datetime
-from sqlalchemy import Column, DateTime, func
-from sqlalchemy.orm import declarative_base, declared_attr
+from sqlalchemy import Column, DateTime
+from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 

@@ -5,7 +5,6 @@
 """
 import asyncio
 import json
-from datetime import datetime
 from typing import Callable, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen

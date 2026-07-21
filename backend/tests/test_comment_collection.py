@@ -1,6 +1,5 @@
 import unittest
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from app.services.collector.room import _fetch_all_session_comments

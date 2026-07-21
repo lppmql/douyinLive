@@ -25,7 +25,8 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-from app.models import Base
+# 必须在 sys.path 配置之后导入，否则 alembic 找不到 app 模块
+from app.models import Base  # noqa: E402
 
 # Alembic 只有在模型模块被导入后，才能看到对应的表。业务接口可能会延迟
 # 导入这些模型，因此这里显式加载，避免 autogenerate 误判现有表需要删除。

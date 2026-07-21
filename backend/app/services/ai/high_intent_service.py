@@ -1,5 +1,4 @@
 """高意向用户识别服务 — AI 从评论中识别高意向用户"""
-import json
 import logging
 from typing import Any
 

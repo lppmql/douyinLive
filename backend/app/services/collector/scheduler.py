@@ -212,7 +212,7 @@ class SchedulerManager:
             self._paused_for_collection = False
             self._active_browser_jobs += 1
             monitor_browser_started = True
-            rooms = db.query(LiveRoom).filter(LiveRoom.status == True).all()
+            rooms = db.query(LiveRoom).filter(LiveRoom.status.is_(True)).all()
             self._last_error = None
             for room in rooms:
                 if not settings.monitor_mock_enabled:
@@ -522,5 +522,5 @@ async def _save_collected_data(db: Session, session_id: int, job_type: str, resu
 scheduler_manager = SchedulerManager()
 
 # 在模块末尾导入，避免循环引用
-from app.services.collector.monitor import LiveStatusResult as _LSR  # noqa: F401
-from app.core.status import TaskStatus
+from app.services.collector.monitor import LiveStatusResult as _LSR  # noqa: E402, F401
+from app.core.status import TaskStatus  # noqa: E402

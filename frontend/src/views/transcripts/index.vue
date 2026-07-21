@@ -275,21 +275,6 @@ async function initializePage() {
   }
 }
 
-async function refreshPage() {
-  refreshing.value = true;
-  try {
-    await Promise.all([loadSessions(), loadTaskData()]);
-    if (selectedSessionId.value) await loadTranscript(selectedSessionId.value, true);
-    loadError.value = '';
-    message.success('话术任务与内容已刷新');
-  } catch (error) {
-    loadError.value = error instanceof Error ? error.message : '刷新失败，请检查后端服务';
-    message.error(loadError.value);
-  } finally {
-    refreshing.value = false;
-  }
-}
-
 async function startTranscription() {
   if (!selectedSessionId.value) return;
   queueLoading.value = true;

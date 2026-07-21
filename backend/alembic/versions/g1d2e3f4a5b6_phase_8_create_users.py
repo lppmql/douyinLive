@@ -9,7 +9,6 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import mysql
 
 # 使用 bcrypt 直接生成密码哈希（避免 passlib 与 bcrypt 5.x 兼容问题）
 import bcrypt as _bcrypt

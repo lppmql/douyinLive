@@ -11,11 +11,10 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional
 
 from app.core.logger import logger
 from app.services.collector.browser import BrowserManager, browser_manager
-from app.services.collector.collector_framework import AdaptiveCollector
 
 
 @dataclass

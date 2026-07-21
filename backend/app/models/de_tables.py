@@ -8,8 +8,7 @@ DataEase 通过 JDBC 数据源直连业务 MySQL，只读 de_ 表，不碰业务
 - 比率字段 DECIMAL(10,4) 存小数，如 0.1427 = 14.27%
 - 金额字段 DECIMAL(10,2)，计数 INT，时长 DECIMAL(10,1)
 """
-from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, BigInteger, Date, Text, Index
+from sqlalchemy import Column, Integer, String, DateTime, DECIMAL, BigInteger, Date, Index
 from app.models.base import Base, TimestampMixin
 
 

@@ -8,10 +8,8 @@ from datetime import datetime
 from typing import Optional
 
 from playwright.async_api import BrowserContext
-from sqlalchemy.orm import Session
 
 from app.core.logger import logger
-from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
@@ -20,7 +18,6 @@ from app.services.collector.metrics import _parse_watch_profiles
 from app.services.collector.utils import (
     _is_context_closed_message,
     _parse_comment_time,
-    _safe_float,
     _safe_int,
 )
 
