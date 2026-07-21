@@ -66,3 +66,21 @@ function getLogRowKey(row: Api.Douyin.CollectorLog) {
     </div>
   </NCard>
 </template>
+
+<!--
+  样式说明：NDataTable 使用 flex-height 模式，高度由容器决定。
+  这个 scoped CSS 必须写在子组件自己这里，不能依赖父组件 index.vue 的 scoped 样式，
+  因为 Vue 3 的 scoped CSS 不会穿透到子组件内部元素。
+  （父组件的 data-v-xxx 属性只加到子组件根元素 NCard 上）
+-->
+<style scoped>
+.collector-log-table {
+  height: 420px;
+}
+
+@media (max-width: 640px) {
+  .collector-log-table {
+    height: 360px;
+  }
+}
+</style>

@@ -250,7 +250,7 @@ class SchedulerManager:
     async def _monitor_enterprise_room(self, db: Session, room):
         """按企业账号下的全部主播同步当前开播场次。"""
         from app.models.live_sessions import LiveSession
-        from app.services.collector.manual_collect import discover_enterprise_live_sessions
+        from app.services.collector.enterprise import discover_enterprise_live_sessions
 
         context, is_valid, message = await browser_manager.get_logged_in_context()
         if not is_valid or not context:
@@ -387,7 +387,7 @@ class SchedulerManager:
                         db.commit()
             elif job_type == "live_detail":
                 from app.models.live_sessions import LiveSession
-                from app.services.collector.manual_collect import collect_live_session_snapshot
+                from app.services.collector.history import collect_live_session_snapshot
 
                 session = db.get(LiveSession, session_id)
                 if not session:

@@ -1431,13 +1431,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.collector-log-table {
-  height: 420px;
-}
-
-@media (max-width: 640px) {
-  .collector-log-table {
-    height: 360px;
-  }
-}
+/*
+ * .collector-log-table 的样式已移到 CollectorLogTable.vue 子组件中，
+ * 因为 Vue 3 scoped CSS 不会穿透到子组件内部元素。
+ */
 </style>
