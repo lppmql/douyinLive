@@ -28,6 +28,10 @@
   - 新增 `docs/部署.md` 部署指南（含首次部署、发布流程、回滚方案、备份策略）
   - 新增 `docs/故障排查.md` 故障排查手册（按症状→诊断→解决的结构）
   - 新增 `docs/adr/0006-项目维护标准与红线.md`
+- **docs 英文文件名改为中文**：
+  - `deployment.md` → `部署.md`、`development.md` → `开发.md`、`troubleshooting.md` → `故障排查.md`
+  - `acceptance/` → `验收测试/`、`architecture/` → `架构/`、`audits/` → `审计/`
+  - 同步更新 README / CHANGELOG / 架构 README 中的引用路径
 - **Makefile 扩展**：
   - 新增 `check` 目标：一键运行测试 + lint + 构建 + 数据库迁移检查
   - 新增 `lint-backend`（ruff）、`db-check`（alembic check）、`docker-check`（docker compose config）
