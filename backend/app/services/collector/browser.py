@@ -31,6 +31,7 @@ from app.services.collector.account_repo import (
     update_account_state,
 )
 from app.services.collector.constants import LEADS_BASE, DEFAULT_FINGERPRINT
+from app.services.tasks.runtime import touch_task, publish_task_event
 
 # 浏览器状态存储目录
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "storage_state"
@@ -621,13 +622,13 @@ class BrowserManager:
             if saved_id:
                 db_task = db.query(ScraperTask).get(task_id)
                 if db_task:
-                    db_task.status = TaskStatus.COMPLETED.value
+                    db_task.status = TaskStatus.COMPLETED
                     db_task.completed_at = datetime.utcnow()
                     db_task.error_message = None
                     touch_task(db_task)
                     db.commit()
                     publish_task_event(
-                        "scraper", db_task, TaskStatus.COMPLETED.value,
+                        "scraper", db_task, TaskStatus.COMPLETED,
                         {"task_type": "login", "account_id": saved_id},
                     )
             return saved_id
