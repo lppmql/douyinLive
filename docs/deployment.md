@@ -1,0 +1,292 @@
+# 部署指南
+
+> 将项目从本机部署到服务器。本指南假设你有一台运行 Linux（Ubuntu 22.04+）的服务器，已安装 Docker。
+
+## 部署前检查
+
+在服务器上执行：
+
+```bash
+docker --version     # 需要 24+
+docker compose version
+```
+
+## 首次部署（8 步）
+
+### 1. 拉取代码
+
+```bash
+git clone <你的仓库地址> /opt/douyinLive
+cd /opt/douyinLive
+git checkout v0.9.0    # 使用最新的稳定版本标签
+```
+
+### 2. 创建生产配置
+
+```bash
+cp .env.example .env
+```
+
+编辑 `.env`，**必须修改**以下所有默认值：
+
+```env
+# 必须改的：
+DEBUG=false                    # 关闭调试模式
+DB_PASSWORD=<强密码>            # 数据库 root 密码
+JWT_SECRET_KEY=<32位随机字符串>  # openssl rand -hex 32
+DEEPSEEK_API_KEY=<你的密钥>
+GRAFANA_ADMIN_PASSWORD=<强密码>
+DATAEASE_READER_PASSWORD=<强密码>
+
+# 按需改的：
+CORS_ORIGINS=https://你的域名    # 前端访问地址
+DB_HOST=mysql                  # Docker 内部用服务名
+REDIS_URL=redis://:<密码>@redis:6379
+```
+
+### 3. 启动基础服务
+
+```bash
+docker compose up -d mysql redis
+```
+
+等待 MySQL 就绪（约 30 秒）：
+
+```bash
+docker compose exec mysql mysqladmin ping -h localhost
+```
+
+### 4. 安装后端依赖
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+playwright install-deps chromium   # Linux 需要系统依赖
+```
+
+### 5. 运行数据库迁移
+
+```bash
+source .venv/bin/activate
+alembic upgrade head
+```
+
+### 6. 启动后端
+
+```bash
+# 使用生产级 ASGI 服务器
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+```
+
+生产环境建议使用 systemd 或 Supervisor 管理后端进程。示例 systemd 配置：
+
+```ini
+# /etc/systemd/system/douyin-live-backend.service
+[Unit]
+Description=抖音直播复盘系统后端
+After=docker.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/douyinLive/backend
+EnvironmentFile=/opt/douyinLive/.env
+ExecStart=/opt/douyinLive/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now douyin-live-backend
+```
+
+### 7. 构建并部署前端
+
+```bash
+cd frontend
+pnpm install
+pnpm build
+```
+
+`dist/` 目录就是静态文件。使用 Nginx 托管：
+
+```nginx
+server {
+    listen 80;
+    server_name 你的域名;
+
+    # 前端静态文件
+    root /opt/douyinLive/frontend/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 后端 API 代理
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # WebSocket
+    location /ws/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+```
+
+### 8. 验证部署
+
+```bash
+curl http://localhost:8000/health     # 应返回 {"status":"ok"}
+curl http://localhost/                 # 应返回前端 HTML
+```
+
+## 可选服务
+
+### FunASR（语音转写）
+
+```bash
+docker compose --profile funasr up -d funasr
+# 首次启动需下载模型，等待 5-10 分钟
+```
+
+### DataEase（数据大屏）
+
+```bash
+docker compose --profile dataease up -d dataease
+# 首次初始化需 3-10 分钟
+```
+
+### Prometheus + Grafana（监控）
+
+```bash
+docker compose --profile observability up -d prometheus grafana
+# Grafana: http://服务器IP:3000，账号 admin
+```
+
+## 发布新版本
+
+每次发布按同一流程执行：
+
+```text
+1. 本地确认所有检查通过
+   make test && make lint && make build
+
+2. 更新 CHANGELOG.md
+
+3. 提交并打标签
+   git add -A
+   git commit -m "release: v0.9.1 描述"
+   git tag -a v0.9.1 -m "v0.9.1: 描述"
+   git push origin main --tags
+
+4. 服务器拉取
+   ssh 你的服务器
+   cd /opt/douyinLive
+   git pull origin main
+   git checkout v0.9.1
+
+5. 数据库迁移（如果有）
+   cd backend
+   source .venv/bin/activate
+   alembic upgrade head
+
+6. 重启后端
+   sudo systemctl restart douyin-live-backend
+
+7. 重新构建前端
+   cd frontend
+   pnpm install
+   pnpm build
+
+8. 验证
+   curl http://localhost:8000/health
+```
+
+## 回滚
+
+如果新版本有问题：
+
+```bash
+# 1. 代码回滚到上一个稳定标签
+git checkout v0.9.0
+
+# 2. 数据库降级（如果新版本有迁移）
+cd backend && source .venv/bin/activate
+alembic downgrade -1
+
+# 3. 重启后端
+sudo systemctl restart douyin-live-backend
+
+# 4. 重新构建前端
+cd frontend && pnpm build
+```
+
+## 备份
+
+### 数据库
+
+```bash
+# 导出
+docker compose exec mysql mysqldump -u root -p douyin_live > backup_$(date +%Y%m%d).sql
+
+# 恢复
+docker compose exec -T mysql mysql -u root -p douyin_live < backup_20260721.sql
+```
+
+### 关键文件
+
+这些文件必须备份，不在 Git 中：
+
+```text
+.env                          # 生产配置
+backend/storage_state/*.json  # 采集账号 Cookie 和指纹
+data/mysql/                   # 数据库文件
+data/redis/                   # Redis 持久化
+```
+
+### 建议备份频率
+
+```text
+数据库         → 每天（自动）
+.env + Cookie → 每次修改后手动备份
+DataEase 配置  → 每次修改大屏后
+Grafana 配置   → 每次修改面板后
+```
+
+### 恢复验证
+
+备份能恢复比备份本身更重要。每月至少一次：
+
+```bash
+# 在测试环境恢复最新备份
+docker compose exec -T mysql mysql -u root -p douyin_live_test < backup_20260721.sql
+# 启动后端连接测试库，验证核心页面能正常打开
+```
+
+## 安全检查清单
+
+部署到生产前确认：
+
+- [ ] `DEBUG=false`
+- [ ] `DB_PASSWORD` 不是默认值
+- [ ] `JWT_SECRET_KEY` 是随机字符串且长度 ≥ 32
+- [ ] `GRAFANA_ADMIN_PASSWORD` 不是默认值
+- [ ] `DATAEASE_READER_PASSWORD` 不是默认值
+- [ ] `CORS_ORIGINS` 只包含实际使用的域名
+- [ ] MySQL/Redis 端口不暴露到公网（只绑 127.0.0.1 或 Docker 内网）
+- [ ] 前端 Nginx 配置了 HTTPS
+- [ ] `.env` 未提交到 Git

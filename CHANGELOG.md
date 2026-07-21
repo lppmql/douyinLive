@@ -4,6 +4,22 @@
 
 ---
 
+## [2026-07-21]
+
+### Added
+- **项目维护体系建立**：
+  - 打首个版本标签 `v0.9.0`
+  - 新增 `docs/development.md` 开发指南（含目录结构、开发流程、代码红线、职责分层）
+  - 新增 `docs/deployment.md` 部署指南（含首次部署、发布流程、回滚方案、备份策略）
+  - 新增 `docs/troubleshooting.md` 故障排查手册（按症状→诊断→解决的结构）
+  - 新增 `docs/adr/0006-项目维护标准与红线.md`
+- **Makefile 扩展**：
+  - 新增 `check` 目标：一键运行测试 + lint + 构建 + 数据库迁移检查
+  - 新增 `lint-backend`（ruff）、`db-check`（alembic check）、`docker-check`（docker compose config）
+  - 新增 `lint` 目标现在同时检查前后端
+
+---
+
 ## [2026-07-20]
 
 ### Added
