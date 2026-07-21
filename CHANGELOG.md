@@ -16,6 +16,10 @@
   - 新增 [ADR 0008](docs/adr/0008-引入Matt-Pocock工程技能体系.md)
 
 ### Fixed
+- **采集日志不显示**：
+  - 根因：`CollectorLogTable.vue` 子组件中的 `NDataTable` 使用 `flex-height` 模式，需要 CSS 设定高度才能可见。父组件 `index.vue` 的 scoped CSS 无法穿透 Vue 3 的 scoped 边界（`data-v-xxx` 只加到子组件根元素 `NCard`，不加到内部 `NDataTable`），子组件自身又没有 `<style>` 块 → 表格高度为 0 → 不可见
+  - 修复：`CollectorLogTable.vue` 新增 `<style scoped>`，设置 `height: 420px`（移动端 `360px`），同时清理父组件中已失效的同名 CSS
+- **scheduler.py 遗漏 import**：M5 拆分 `manual_collect.py` 时 `discover_enterprise_live_sessions` 和 `collect_live_session_snapshot` 的 import 路径未更新，导致监控器运行时 ImportError
 - **M1 Schema 字段修复**：
   - `KnowledgeTimeSliceStatusResponse`：5 个错误字段 → 11 个真实字段（修复 response_model 过滤导致全零数据）
   - `DataEaseSyncResponse`：新增 `selected_count`/`errors`/`removed_stale_row_count`，移除不存在的 `skipped_count`
