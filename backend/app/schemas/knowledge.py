@@ -73,10 +73,20 @@ class AnchorScheduleCompletion(BaseModel):
 
 
 class AnchorScheduleDashboardResponse(BaseModel):
-    """GET /anchor-schedules/dashboard"""
+    """GET /anchor-schedules/dashboard
+
+    直接映射 build_schedule_dashboard / build_schedule_range_dashboard
+    返回的字典结构。字段用宽松类型避免 Pydantic 过滤掉 Service 返回的
+    嵌套数据（actual_session 可能为 None、extra 标记等条件字段）。
+    """
     schedule_date: str = ""
-    anchor_count: int = 0
-    planned_count: int = 0
-    actual_count: int = 0
-    completions: list[dict] = Field(default_factory=list)
-    details: list[dict] = Field(default_factory=list)
+    start_date: str = ""
+    end_date: str = ""
+    day_count: int = 0
+    generated_at: str = ""
+    source_name: str = ""
+    rule: dict = Field(default_factory=dict)
+    summary: dict = Field(default_factory=dict)
+    anchors: list[dict] = Field(default_factory=list)
+    rows: list[dict] = Field(default_factory=list)
+    reminders: list[dict] = Field(default_factory=list)
