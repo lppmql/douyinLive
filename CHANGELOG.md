@@ -16,6 +16,9 @@
   - 新增 `backend/app/services/collector/constants.py`：`LEADS_BASE`/`LIVE_SCREEN_URL`/`COMMENT_URL`/`DEFAULT_FINGERPRINT`
   - 8 个文件改为从 constants 导入，URL 修改只需改 1 处
   - 修复 5 个 E402/unused-import lint 问题
+- **M7 .env.example 补齐 5 个缺项**：
+  - 补齐 `FUNASR_HOST` / `FUNASR_PORT` / `ASR_SAMPLE_RATE` / `ASR_WORKER_MODE`（ASR 段）
+  - 补齐 `JWT_ALGORITHM`（JWT 段）
 - **M6 Docker Redis 硬编码密码修复**：
   - `docker-compose.yml`：Redis `--requirepass` 从硬编码密码改为 `${REDIS_PASSWORD:?...}` 环境变量
   - `.env`：新增 `REDIS_PASSWORD` 独立变量（与 `REDIS_URL` 中的密码保持同步）
