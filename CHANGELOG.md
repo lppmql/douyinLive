@@ -16,6 +16,13 @@
   - 新增 `backend/app/services/collector/constants.py`：`LEADS_BASE`/`LIVE_SCREEN_URL`/`COMMENT_URL`/`DEFAULT_FINGERPRINT`
   - 8 个文件改为从 constants 导入，URL 修改只需改 1 处
   - 修复 5 个 E402/unused-import lint 问题
+- **M8 核心链路集成测试**：
+  - 新增 `backend/tests/conftest.py`：SQLite 内存数据库 + FastAPI TestClient + 自动建表/删表
+  - 新增 `test_integration_auth.py`（9 个测试）：登录/获取用户信息/刷新 Token 全场景覆盖
+  - 新增 `test_integration_collector.py`（11 个测试）：采集状态/账号 CRUD/日志/任务
+  - 新增 `test_integration_dashboard.py`（8 个测试）：汇总/日期筛选/按主播分组
+  - 28 个集成测试全部通过，补充项目首个端到端 API 测试覆盖
+  - LONGTEXT→TEXT SQLite 兼容适配（保存/恢复原始类型，不影响其他测试）
 - **M7 .env.example 补齐 5 个缺项**：
   - 补齐 `FUNASR_HOST` / `FUNASR_PORT` / `ASR_SAMPLE_RATE` / `ASR_WORKER_MODE`（ASR 段）
   - 补齐 `JWT_ALGORITHM`（JWT 段）
