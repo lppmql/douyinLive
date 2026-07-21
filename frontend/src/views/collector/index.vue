@@ -3,6 +3,8 @@ import { computed, h, onActivated, onDeactivated, onMounted, onUnmounted, ref } 
 import { NButton, NSpace, NTag, useDialog, useMessage } from 'naive-ui';
 import { $t } from '@/locales';
 
+import CollectorQRLogin from './modules/CollectorQRLogin.vue';
+import CollectorLogTable from './modules/CollectorLogTable.vue';
 import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
 import {
   fetchCollectorStatus,
@@ -1359,42 +1361,19 @@ onUnmounted(() => {
           class="scroll-mt-16px rounded-8px transition-shadow duration-300"
           :class="{ 'ring-2 ring-primary ring-offset-2': logHighlight }"
         >
-          <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.logTitle')">
-            <template #header-extra>
-              <NSpace wrap>
-                <NTag v-if="logTaskId" type="primary" closable @close="clearTaskLogFilter">
-                  仅任务 #{{ logTaskId }}
-                </NTag>
-                <NRadioGroup v-model:value="logLevel" size="small" @update:value="filterLogs">
-                  <NRadioButton value="all">全部</NRadioButton>
-                  <NRadioButton value="info">信息</NRadioButton>
-                  <NRadioButton value="warn">警告</NRadioButton>
-                  <NRadioButton value="error">异常</NRadioButton>
-                </NRadioGroup>
-                <NButton size="small" :loading="loading || silentRefreshing" @click="() => loadData()">
-                  <template #icon><SvgIcon icon="mdi:refresh" /></template>
-                  {{ $t('common.refresh') }}
-                </NButton>
-                <NButton size="small" type="error" secondary :loading="clearLogsLoading" @click="handleClearLogs">
-                  <template #icon><SvgIcon icon="mdi:delete-sweep-outline" /></template>
-                  清空日志
-                </NButton>
-              </NSpace>
-            </template>
-            <div class="business-table-shell">
-              <NDataTable
-                class="collector-log-table"
-                :loading="loading"
-                :columns="logColumns"
-                :data="logs"
-                :row-key="getLogRowKey"
-                :scroll-x="1260"
-                flex-height
-                :bordered="false"
-                size="small"
-              />
-            </div>
-          </NCard>
+          <CollectorLogTable
+            :loading="loading"
+            :silent-refreshing="silentRefreshing"
+            :clear-logs-loading="clearLogsLoading"
+            :logs="logs"
+            :log-columns="logColumns"
+            :log-level="logLevel"
+            :log-task-id="logTaskId"
+            @refresh="() => loadData()"
+            @clear="handleClearLogs"
+            @filter="filterLogs"
+            @clear-task-filter="clearTaskLogFilter"
+          />
         </div>
       </NSpace>
     </NSpin>
@@ -1441,54 +1420,14 @@ onUnmounted(() => {
     </NModal>
 
     <!-- 扫码登录弹窗 -->
-    <NModal
-      v-model:show="showQRModal"
-      :mask-closable="false"
-      preset="card"
-      class="w-420px max-w-[calc(100vw-32px)]"
-      @after-leave="closeQRModal"
-    >
-      <template #header>
-        {{ $t('page.collector.scanLogin') }}
-      </template>
-
-      <div class="flex flex-col items-center py-12px">
-        <NSteps class="mb-20px" size="small" :current="loginStatus === 'pending' ? 1 : 2" status="process">
-          <NStep title="生成二维码" />
-          <NStep title="抖音扫码确认" />
-          <NStep title="保存登录状态" />
-        </NSteps>
-        <div v-if="qrImage" class="mb-16px size-240px rounded-12px bg-white p-10px shadow-sm ring-1 ring-gray-200">
-          <img :src="`data:image/png;base64,${qrImage}`" class="size-full" alt="抖音扫码登录二维码" />
-        </div>
-        <div v-else class="mb-16px size-240px flex-center rounded-12px bg-gray-100 dark:bg-white/5">
-          <NSpin :size="24" />
-        </div>
-        <NAlert
-          class="w-full"
-          :type="loginStatus === 'failed' || loginStatus === 'timeout' ? 'error' : 'info'"
-          :show-icon="true"
-        >
-          {{ loginMessage || $t('page.collector.scanQrCode') }}
-        </NAlert>
-        <div class="mt-10px text-center text-11px text-gray-400">
-          按 <kbd class="rounded-4px border border-gray-300 bg-gray-100 px-4px py-1px text-11px dark:border-white/15 dark:bg-white/8">Esc</kbd> 或点击「取消」关闭此窗口
-        </div>
-      </div>
-
-      <template #footer>
-        <NSpace justify="end">
-          <NButton @click="closeQRModal">{{ $t('common.cancel') }}</NButton>
-          <NButton
-            v-if="loginStatus === 'failed' || loginStatus === 'timeout'"
-            type="primary"
-            @click="handleStartLogin"
-          >
-            重新生成二维码
-          </NButton>
-        </NSpace>
-      </template>
-    </NModal>
+    <CollectorQRLogin
+      :visible="showQRModal"
+      :qr-image="qrImage"
+      :status="loginStatus"
+      :message="loginMessage"
+      @close="closeQRModal"
+      @retry="handleStartLogin"
+    />
   </div>
 </template>
 
