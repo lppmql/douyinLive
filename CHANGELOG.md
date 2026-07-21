@@ -23,6 +23,10 @@
   - 新增 `test_integration_dashboard.py`（8 个测试）：汇总/日期筛选/按主播分组
   - 28 个集成测试全部通过，补充项目首个端到端 API 测试覆盖
   - LONGTEXT→TEXT SQLite 兼容适配（保存/恢复原始类型，不影响其他测试）
+- **M10 全项目 Lint 清零**：
+  - 后端 ruff：`--fix` 自动修复 48 个 + 手动修复 13 个（含 `l`→`lead` 变量名、`== True`→`.is_(True)`、未使用变量删除等）
+  - 前端 ESLint：修复 6 个未使用变量/函数/import（analysis/transcripts/collector/knowledge 页面）
+  - 47 个文件净删 73 行无用代码，ruff 0 错误 / ESLint 0 错误
 - **M9 Alembic 列注释迁移**：
   - `alembic check` 检测到 45 个列注释缺失（模型已定义但数据库未同步），涉及 6 张表：`ai_call_traces`/`anchor_schedules`/`compliance_rules`/`review_action_items`/`review_findings`/`script_assets`
   - 新增迁移 `27d9dc5d2b31_phase_31_fix_missing_column_comments.py`：45 条 `ALTER TABLE ... MODIFY COLUMN ... COMMENT` + 完整 downgrade
