@@ -6,6 +6,15 @@
 
 ## [2026-07-21]
 
+### Added
+- **Matt Pocock 工程技能体系配置**：
+  - 新增 `docs/agents/issue-tracker.md`：GitHub Issues 作为问题追踪器，含 `gh` CLI 常用操作手册
+  - 新增 `docs/agents/triage-labels.md`：5 标签分类体系（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）
+  - 新增 `docs/agents/domain.md`：单上下文领域文档消费者规则（先读 CONTEXT.md + ADR，再探索代码）
+  - 新增 `docs/agents/skill技能使用示例.md`：~25 个技能的详细中文使用示例 + 3 套组合拳场景
+  - CLAUDE.md 新增 `## Agent skills` 块，注册三个配置入口
+  - 新增 [ADR 0008](docs/adr/0008-引入Matt-Pocock工程技能体系.md)
+
 ### Fixed
 - **M1 Schema 字段修复**：
   - `KnowledgeTimeSliceStatusResponse`：5 个错误字段 → 11 个真实字段（修复 response_model 过滤导致全零数据）
