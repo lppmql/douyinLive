@@ -23,8 +23,16 @@
   - 新增 7 个子组件：`CollectorStatCards`（统计卡片）、`CollectorRefreshCard`（刷新采集）、`CollectorMonitorCard`（监控）、`CollectorDataEaseCard`（DataEase）、`CollectorAccountTable`（账号表格）、`CollectorTaskDrawer`（任务抽屉）、`CollectorLogDetailModal`（日志详情）
   - `index.vue` 精简为编排器：只保留状态管理 + 数据加载 + 扫码登录流程，UI 全部委托子组件
   - 后端无改动，纯前端重构
+- **AI 复盘页方案 A 重构**（`index.vue` 1000 行 → 187 行，-81%）：
+  - 新增 `utils/analysisHelpers.ts`：14 个纯工具函数（日期格式化、分数判定、报告元数据、数据安全工具）
+  - 新增 `adapters/review-report-adapter.ts`：报告解析适配器（原始 JSON → 类型安全 AiScoreResult/AiOptimizationResult）
+  - 新增 `views/analysis/composables/useReviewWorkbench.ts`：复盘工作台状态管理（所有 ref + computed + 异步操作集中管理）
+  - 新增 5 个子组件：`AnalysisSessionControl`（场次选择+启动面板）、`AnalysisStatCards`（4 张统计卡片）、`AnalysisScoreOverview`（复盘总览 Tab）、`AnalysisEvidence`（证据与发现 Tab）、`AnalysisReportHistory`（历史报告 Tab）
+  - `index.vue` 精简为编排器：只负责布局 + 传递 props，所有业务逻辑交给 composable
+  - 后端无改动，纯前端重构
 
 ### Added
+- **前端组件开发规范**：新增 `docs/前端组件开发规范.md`，定义 SoybeanAdmin + Naive UI 组件复用优先顺序、页面结构原则、禁止事项
 - **Matt Pocock 工程技能体系配置**：
   - 新增 `docs/agents/issue-tracker.md`：GitHub Issues 作为问题追踪器，含 `gh` CLI 常用操作手册
   - 新增 `docs/agents/triage-labels.md`：5 标签分类体系（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）
