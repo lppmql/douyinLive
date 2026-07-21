@@ -17,6 +17,14 @@
   - **过期文档更新**：`开发.md` 更新文件行数/任务状态/断链；`ADR 0006` 更新待办状态/文件名/行数；`验收测试/README.md` 修复 6 个英文断链
 
 ### Changed
+- **主播话术页方案 A 重构**（`index.vue` 796 行 → 154 行，-81%）：
+  - 新增 `utils/transcriptHelpers.ts`：7 个纯工具函数（时间格式化、状态文案/类型映射）
+  - 新增 `adapters/transcript-adapter.ts`：数据适配器（分类统计、任务卡片配置、场次下拉选项构建）
+  - 新增 `views/transcripts/composables/useTranscriptWorkbench.ts`：话术工作台状态管理（全部 ref + computed + 异步操作）
+  - 新增 `views/transcripts/composables/useTranscriptRealtime.ts`：WebSocket 实时话术连接管理
+  - 新增 5 个子组件：`TranscriptTaskCards`（任务状态卡片）、`TranscriptSessionControl`（场次选择+工具栏）、`TranscriptStatCards`（统计卡片）、`TranscriptContentPanel`（话术内容+侧边栏）、`TranscriptTaskDrawer`（任务抽屉）
+  - `index.vue` 精简为纯编排器：只负责组合子组件，所有逻辑委托 composable
+  - 后端无改动，纯前端重构
 - **采集页方案 A 重构**（`index.vue` 1438 行 → 752 行，模板 547 行 → 128 行）：
   - 新增 `utils/collectorHelpers.ts`：6 个纯工具函数（时间解析/格式化、日志摘要拼接）
   - 新增 `composables/useCollectorPolling.ts`：轮询 + 时钟逻辑抽离
@@ -32,7 +40,6 @@
   - 后端无改动，纯前端重构
 
 ### Added
-- **前端组件开发规范**：新增 `docs/前端组件开发规范.md`，定义 SoybeanAdmin + Naive UI 组件复用优先顺序、页面结构原则、禁止事项
 - **Matt Pocock 工程技能体系配置**：
   - 新增 `docs/agents/issue-tracker.md`：GitHub Issues 作为问题追踪器，含 `gh` CLI 常用操作手册
   - 新增 `docs/agents/triage-labels.md`：5 标签分类体系（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）
