@@ -1,6 +1,6 @@
 import unittest
 
-from app.services.collector.manual_collect import (
+from app.services.collector.enterprise import (
     _fetch_enterprise_rows,
     _is_enterprise_live_status,
 )

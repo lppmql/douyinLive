@@ -7,7 +7,8 @@ from unittest.mock import patch
 
 from app.services.collector.browser import BROWSER_ARGS, BROWSER_CHANNEL, BrowserManager
 from app.services.collector.monitor import CluerichLiveDetector, LiveStatusResult
-from app.services.collector.manual_collect import _is_context_closed_message, _sanitize_collector_error
+from app.services.collector.manual_collect import _sanitize_collector_error
+from app.services.collector.utils import _is_context_closed_message
 
 
 class FakePage:

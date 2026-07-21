@@ -2,12 +2,12 @@ import unittest
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-from app.services.collector.manual_collect import (
-    _needs_history_enrichment,
+from app.services.collector.history import _order_history_enrichment_targets
+from app.services.collector.metrics import (
     _apply_overview_to_session,
-    _order_history_enrichment_targets,
     _parse_watch_profiles,
 )
+from app.services.collector.session import _needs_history_enrichment
 
 
 class LiveSnapshotMappingTest(unittest.TestCase):

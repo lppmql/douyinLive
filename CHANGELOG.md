@@ -6,6 +6,21 @@
 
 ## [2026-07-21]
 
+### Changed
+- **`manual_collect.py` 模块化拆分**（2,827 行 → 8 个模块，最大 674 行）：
+  - 新增 `utils.py`（231 行）— 通用工具：数值/时间解析、去重标识、Cookie 读取
+  - 新增 `session.py`（225 行）— 场次 CRUD、重复场次合并修复、主播资料写入
+  - 新增 `comments.py`（210 行）— 评论页抓取、增量/全量入库、DOM 兜底解析
+  - 新增 `metrics.py`（226 行）— 实时/趋势指标入库、画像解析、摘要映射
+  - 新增 `room.py`（674 行）— 大屏页数据捕获、主页直播卡片、流地址抓取
+  - 新增 `enterprise.py`（370 行）— 企业员工接口、主播场次映射、直播发现
+  - 新增 `history.py`（427 行）— 历史场次同步、详情补齐、实时快照
+  - `manual_collect.py`（667 行）— 精简为编排器 + 进度报告 + 错误处理
+  - 4 个测试文件导入路径同步更新
+  - 消除未使用函数 `_is_context_closed_error`（与 `_is_context_closed_message` 重复）
+  - 消除 `_comment_belongs_to_session` 对 LiveSession 模型的冗余依赖
+  - `_fetch_enterprise_post` 从 manual_collect 分离到 room，enterprise 反向导入
+
 ### Added
 - **项目维护体系建立**：
   - 打首个版本标签 `v0.9.0`

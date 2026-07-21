@@ -1,0 +1,210 @@
+"""
+评论采集和持久化 — 从 manual_collect.py 提取
+
+负责：评论页抓取、评论入库（增量/全量替换）、DOM 文本兜底解析
+"""
+import asyncio
+import re
+from datetime import datetime, timedelta
+from typing import Optional
+
+from playwright.async_api import BrowserContext
+from sqlalchemy.orm import Session
+
+from app.core.logger import logger
+from app.models.comments import Comment
+from app.models.live_sessions import LiveSession
+from app.services.collector.utils import (
+    _comment_belongs_to_session,
+    _comment_identity,
+    _parse_comment_time,
+)
+
+# 企业后台评论页地址
+COMMENT_URL = "https://leads.cluerich.com/pc/analysis/live-comment"
+
+
+async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
+    """访问评论页，采集评论数据"""
+    url = f"{COMMENT_URL}?roomId={room_id}&fullscreen=0"
+    page = await context.new_page()
+    captured_api = []
+    response_tasks = []
+
+    async def on_response(resp):
+        try:
+            ct = resp.headers.get("content-type", "")
+            if "json" in ct:
+                d = await asyncio.wait_for(resp.json(), timeout=3)
+                captured_api.append(d)
+        except Exception:
+            pass
+
+    page.on("response", lambda r: response_tasks.append(asyncio.create_task(on_response(r))))
+
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await asyncio.sleep(6)
+        # response 回调是异步任务，关闭页面前留出时间让评论 JSON 完整落入缓存。
+        await asyncio.sleep(1)
+        if response_tasks:
+            await asyncio.gather(*response_tasks, return_exceptions=True)
+    except Exception:
+        pass
+    finally:
+        await page.close()
+
+    comments = []
+    for data in captured_api:
+        if not isinstance(data, dict):
+            continue
+        inner = data.get("data", {}) or {}
+        if isinstance(inner, dict) and isinstance(inner.get("data"), dict):
+            inner = inner["data"]
+
+        comment_list = None
+        if isinstance(inner, list):
+            comment_list = inner
+        elif isinstance(inner, dict):
+            comment_list = inner.get("list") or inner.get("comments") or inner.get("rows")
+
+        if comment_list and isinstance(comment_list, list):
+            for c in comment_list:
+                if not isinstance(c, dict):
+                    continue
+                nickname = c.get("user_nickname") or c.get("nickname") or c.get("nickName") or ""
+                content = c.get("comment_content") or c.get("content") or ""
+                if not content:
+                    continue
+                comments.append({
+                    "user_nickname": nickname,
+                    "comment_content": content,
+                    "comment_time": _parse_comment_time(c.get("comment_time") or c.get("createTime")),
+                })
+
+    return comments
+
+
+def _save_comments(db: Session, session_id: int, comments: list) -> int:
+    """保存评论数据（增量模式，按标识去重）。"""
+    session = db.get(LiveSession, session_id)
+    existing_pairs = {
+        _comment_identity(row.user_nickname, row.comment_content or "", row.comment_time, row.user_sec_uid)
+        for row in db.query(Comment).filter(Comment.session_id == session_id).all()
+    }
+    seen_pairs = set()
+    count = 0
+    for c in comments:
+        content = c.get("comment_content", "").strip()
+        comment_time = c.get("comment_time")
+        if not content:
+            continue
+        if session and not _comment_belongs_to_session(
+            comment_time, session.live_start_time, session.live_end_time
+        ):
+            logger.warning(
+                "拒绝串场评论: session_id=%s comment_time=%s live_range=%s~%s",
+                session_id,
+                comment_time,
+                session.live_start_time,
+                session.live_end_time,
+            )
+            continue
+
+        nickname = c.get("user_nickname", "未知")
+        pair = _comment_identity(nickname, content, comment_time, c.get("user_sec_uid"))
+        if pair in existing_pairs or pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+
+        if content:
+            comment = Comment(
+                session_id=session_id,
+                user_nickname=nickname,
+                user_sec_uid=c.get("user_sec_uid"),
+                webcast_uid=c.get("webcast_uid"),
+                comment_content=content,
+                comment_time=comment_time or datetime.utcnow(),
+            )
+            db.add(comment)
+            count += 1
+    if count:
+        db.commit()
+    return count
+
+
+def _replace_session_comments(db: Session, session_id: int, comments: list) -> int:
+    """用平台完整评论快照替换旧的 DOM 残缺结果，并继承人工分析字段。"""
+    old_rows = db.query(Comment).filter(Comment.session_id == session_id).all()
+    session = db.get(LiveSession, session_id)
+    annotations = {}
+    for row in old_rows:
+        key = ((row.user_nickname or "").strip(), (row.comment_content or "").strip())
+        annotations.setdefault(key, (row.is_high_intent, row.sentiment, row.keywords))
+
+    db.query(Comment).filter(Comment.session_id == session_id).delete(synchronize_session=False)
+    seen = set()
+    for item in comments:
+        nickname = str(item.get("user_nickname") or "未知").strip()
+        content = str(item.get("comment_content") or "").strip()
+        comment_time = item.get("comment_time")
+        if session and not _comment_belongs_to_session(
+            comment_time, session.live_start_time, session.live_end_time
+        ):
+            continue
+        identity = _comment_identity(nickname, content, comment_time, item.get("user_sec_uid"))
+        if not content or identity in seen:
+            continue
+        seen.add(identity)
+        annotation = annotations.get((nickname, content), (0, None, None))
+        db.add(Comment(
+            session_id=session_id,
+            user_nickname=nickname,
+            user_sec_uid=item.get("user_sec_uid"),
+            webcast_uid=item.get("webcast_uid"),
+            comment_content=content,
+            comment_time=comment_time or datetime.utcnow(),
+            is_high_intent=annotation[0] or 0,
+            sentiment=annotation[1],
+            keywords=annotation[2],
+        ))
+    db.commit()
+    return len(seen)
+
+
+def _parse_comments_from_live_screen_text(
+    body_text: str, live_start_time: Optional[datetime]
+) -> list[dict]:
+    """从大屏页 DOM 文本中降级解析评论（接口不可用时的兜底）。"""
+    lines = [line.strip() for line in body_text.split("\n") if line.strip()]
+    comments = []
+    i = 0
+    pattern = re.compile(r"^\((\d+)\)(\d{2}:\d{2})\s+(.+?)：$")
+    while i < len(lines):
+        match = pattern.match(lines[i])
+        if not match:
+            i += 1
+            continue
+
+        hhmm = match.group(2)
+        nickname = match.group(3).strip()
+        content = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if content and not content.startswith("想更方便") and "滑到顶了" not in content:
+            comment_time = None
+            if live_start_time:
+                try:
+                    comment_time = live_start_time.replace(
+                        hour=int(hhmm.split(":")[0]),
+                        minute=int(hhmm.split(":")[1]),
+                        second=0,
+                        microsecond=0,
+                    )
+                except Exception:
+                    comment_time = None
+            comments.append({
+                "user_nickname": nickname,
+                "comment_content": content,
+                "comment_time": comment_time,
+            })
+        i += 2
+    return comments
