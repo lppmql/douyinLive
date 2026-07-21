@@ -6,6 +6,23 @@
 
 ## [2026-07-21]
 
+### Fixed
+- **M1 Schema 字段修复**：
+  - `KnowledgeTimeSliceStatusResponse`：5 个错误字段 → 11 个真实字段（修复 response_model 过滤导致全零数据）
+  - `DataEaseSyncResponse`：新增 `selected_count`/`errors`/`removed_stale_row_count`，移除不存在的 `skipped_count`
+  - `AiKbSaveResponse`/`AiKbSyncRecentResponse`/`AiPipelineResponse`：新增 `review_saved` 字段
+  - 重新生成前端类型 `generated.d.ts`
+- **M3 URL 常量统一**：
+  - 新增 `backend/app/services/collector/constants.py`：`LEADS_BASE`/`LIVE_SCREEN_URL`/`COMMENT_URL`/`DEFAULT_FINGERPRINT`
+  - 8 个文件改为从 constants 导入，URL 修改只需改 1 处
+  - 修复 5 个 E402/unused-import lint 问题
+- **M4 response_model 补齐（11 个端点）**：
+  - 新增通用 `MessageResponse`（8 个 DELETE 端点复用）
+  - 新增 `AccountDeleteResponse`/`LogsClearResponse`（collector 专用）
+  - 复用已有 `LoginQRResponse`（登录二维码端点）
+  - 3 个二进制流端点（avatar/video/playback）跳过，加 response_model 会导致 JSON 序列化崩溃
+  - 前端类型从 `unknown` 变为具体类型
+
 ### Changed
 - **统一任务状态枚举**（零数据库迁移）：
   - 新增 `core/status.py`：`TaskStatus` / `ReviewFindingStatus` / `ReviewActionStatus` / `ScriptAssetStatus`（str+Enum 双重继承）
