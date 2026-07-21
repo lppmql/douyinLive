@@ -883,7 +883,6 @@ onUnmounted(() => {
 
 <template>
   <div class="business-page min-h-full">
-
     <NAlert v-if="dataLoadFailedCount" type="warning" :bordered="false" show-icon>
       有 {{ dataLoadFailedCount }} 项采集状态暂时未更新，页面已保留其余真实结果。
       <span v-if="lastDataUpdatedAt" class="ml-6px text-12px text-gray-500">

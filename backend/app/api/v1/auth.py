@@ -14,12 +14,12 @@ from app.core.security import (
     get_current_user,
 )
 from app.models.user import User
-from app.schemas.auth import LoginRequest, TokenData, UserInfoData
+from app.schemas.auth import LoginRequest, SoybeanResponse, TokenData, UserInfoData
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 
-@router.post("/login")
+@router.post("/login", response_model=SoybeanResponse[TokenData])
 def login(req: LoginRequest, db: Session = Depends(get_db)):
     """用户登录 → 返回 JWT Token"""
     user = db.query(User).filter(User.username == req.username).first()
@@ -47,7 +47,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/refreshToken")
+@router.post("/refreshToken", response_model=SoybeanResponse[TokenData])
 def refresh_token(req: dict, db: Session = Depends(get_db)):
     """刷新 Token"""
     refresh_token_str = req.get("refreshToken", "")
@@ -81,7 +81,7 @@ def refresh_token(req: dict, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/getUserInfo")
+@router.get("/getUserInfo", response_model=SoybeanResponse[UserInfoData])
 def get_user_info(current_user: User = Depends(get_current_user)):
     """获取当前登录用户信息（Soybean Admin 兼容格式）"""
     return ok_response(

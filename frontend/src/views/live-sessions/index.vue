@@ -252,7 +252,6 @@ async function handleReset() {
 
 <template>
   <NSpace vertical :size="16" class="business-page">
-
     <NCard :bordered="false" class="card-wrapper">
       <template #header>
         <div class="flex flex-wrap items-center justify-between gap-12px">

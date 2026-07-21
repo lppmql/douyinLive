@@ -431,7 +431,6 @@ onUnmounted(() => {
 
 <template>
   <NSpace vertical :size="16" class="business-page">
-
     <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
       主播话术数据未能完整更新：{{ loadError }}
       <NButton size="small" secondary :loading="loading || refreshing" @click="initializePage">重新加载</NButton>

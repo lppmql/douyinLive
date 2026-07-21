@@ -7,6 +7,12 @@
 ## [2026-07-21]
 
 ### Changed
+- **统一任务状态枚举**（零数据库迁移）：
+  - 新增 `core/status.py`：`TaskStatus` / `ReviewFindingStatus` / `ReviewActionStatus` / `ScriptAssetStatus`（str+Enum 双重继承）
+  - 新增 `core/response.py`：`ok_response()` 消除 auth/user_mgmt 重复的 `_ok()` 函数
+  - 66 处硬编码状态字符串（`"running"`, `"pending"`, `"failed"` 等）替换为枚举值
+  - 15 个 API/Service/Schema 文件引入统一枚举
+  - 新增 22 个枚举+响应包装单元测试
 - **README.md 重构**（433 行 → 120 行）：
   - 精简为项目门面：项目简介 / 技术栈 / 快速开始 / 核心功能要点 / 文档导航 / 安全问题
   - 详细功能说明、UI/UX 优化记录、ASR 说明、知识库详情等分流到 `docs/开发.md`、`docs/部署.md`、`docs/故障排查.md`

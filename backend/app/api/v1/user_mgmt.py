@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.response import ok_response
 from app.core.security import get_password_hash, get_current_user
 from app.models.user import User
-from app.schemas.auth import UserResponse, UserCreate, UserUpdate
+from app.schemas.auth import PageResult, SoybeanResponse, UserResponse, UserCreate, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
 
@@ -21,7 +21,7 @@ def _require_admin(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@router.get("/")
+@router.get("/", response_model=SoybeanResponse[PageResult[UserResponse]])
 def list_users(
     current: int = Query(1, ge=1, description="页码"),
     size: int = Query(20, ge=1, le=100, description="每页条数"),
@@ -51,7 +51,7 @@ def list_users(
     })
 
 
-@router.get("/{user_id}")
+@router.get("/{user_id}", response_model=SoybeanResponse[UserResponse])
 def get_user(
     user_id: int,
     db: Session = Depends(get_db),
@@ -64,7 +64,7 @@ def get_user(
     return ok_response(UserResponse.model_validate(user).model_dump())
 
 
-@router.post("/", status_code=201)
+@router.post("/", status_code=201, response_model=SoybeanResponse[UserResponse])
 def create_user(
     data: UserCreate,
     db: Session = Depends(get_db),
@@ -89,7 +89,7 @@ def create_user(
     return ok_response(UserResponse.model_validate(user).model_dump(), msg="创建成功")
 
 
-@router.put("/{user_id}")
+@router.put("/{user_id}", response_model=SoybeanResponse[UserResponse])
 def update_user(
     user_id: int,
     data: UserUpdate,
@@ -112,7 +112,7 @@ def update_user(
     return ok_response(UserResponse.model_validate(user).model_dump(), msg="更新成功")
 
 
-@router.delete("/{user_id}")
+@router.delete("/{user_id}", response_model=SoybeanResponse[None])
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),

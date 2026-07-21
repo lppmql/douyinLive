@@ -413,7 +413,6 @@ onMounted(initializePage);
 
 <template>
   <NSpace vertical :size="16" class="analysis-page business-page" :aria-busy="loading">
-
     <NResult
       v-if="loadError && !sessions.length"
       status="error"
