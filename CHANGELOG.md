@@ -23,6 +23,11 @@
   - 新增 `test_integration_dashboard.py`（8 个测试）：汇总/日期筛选/按主播分组
   - 28 个集成测试全部通过，补充项目首个端到端 API 测试覆盖
   - LONGTEXT→TEXT SQLite 兼容适配（保存/恢复原始类型，不影响其他测试）
+- **M9 Alembic 列注释迁移**：
+  - `alembic check` 检测到 45 个列注释缺失（模型已定义但数据库未同步），涉及 6 张表：`ai_call_traces`/`anchor_schedules`/`compliance_rules`/`review_action_items`/`review_findings`/`script_assets`
+  - 新增迁移 `27d9dc5d2b31_phase_31_fix_missing_column_comments.py`：45 条 `ALTER TABLE ... MODIFY COLUMN ... COMMENT` + 完整 downgrade
+  - 根因：3 个历史迁移（phase_23/phase_28/phase_30）创建表时漏写 `comment=` 参数
+  - 修复后 `alembic check` 通过，185 测试全量通过，覆盖率 51% 不变
 - **M7 .env.example 补齐 5 个缺项**：
   - 补齐 `FUNASR_HOST` / `FUNASR_PORT` / `ASR_SAMPLE_RATE` / `ASR_WORKER_MODE`（ASR 段）
   - 补齐 `JWT_ALGORITHM`（JWT 段）
