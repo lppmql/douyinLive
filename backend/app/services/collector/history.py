@@ -14,6 +14,7 @@ from playwright.async_api import BrowserContext
 from sqlalchemy.orm import Session
 
 from app.core.logger import logger
+from app.core.status import TaskStatus
 from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
@@ -152,7 +153,7 @@ def _order_history_enrichment_targets(pending_sessions: list[LiveSession]) -> li
     return sorted(
         pending_sessions,
         key=lambda session: (
-            session.detail_collection_status == "retryable",
+            session.detail_collection_status == TaskStatus.RETRYABLE,
             not bool(session.anchor_name),
             -(session.live_start_time.timestamp() if session.live_start_time else 0),
         ),
@@ -193,7 +194,7 @@ async def _enrich_history_sessions(
     repaired_false_complete = 0
     for session in pending_sessions:
         if session.detail_collection_status == "complete":
-            session.detail_collection_status = "retryable"
+            session.detail_collection_status = TaskStatus.RETRYABLE
             session.detail_collection_error = "此前未采到有效详情数据，已重新加入补齐队列"
             repaired_false_complete += 1
     if repaired_false_complete:
@@ -248,7 +249,7 @@ async def _enrich_history_sessions(
         checked += 1
         if error:
             failed += 1
-            session.detail_collection_status = "retryable"
+            session.detail_collection_status = TaskStatus.RETRYABLE
             session.detail_collection_error = error
             db.commit()
             logger.warning("历史场次详情采集失败: session_id=%s error=%s", session.id, error)
@@ -284,7 +285,7 @@ async def _enrich_history_sessions(
                 session.detail_collection_status = "unavailable"
                 session.detail_collection_error = "平台未提供主播映射且详情接口为空，无法安全补齐"
             else:
-                session.detail_collection_status = "retryable"
+                session.detail_collection_status = TaskStatus.RETRYABLE
                 session.detail_collection_error = "平台详情接口本次返回空数据，将在下次刷新时重试"
             db.commit()
             failed += 1
@@ -335,7 +336,7 @@ async def _enrich_history_sessions(
         )
 
     remaining = sum(
-        session.detail_collection_status in (None, "", "pending", "retryable")
+        session.detail_collection_status in (None, "", "pending", TaskStatus.RETRYABLE)
         for session in target_sessions
     )
     progress = {

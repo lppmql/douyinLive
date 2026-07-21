@@ -5,15 +5,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.response import ok_response
 from app.core.security import get_password_hash, get_current_user
 from app.models.user import User
 from app.schemas.auth import UserResponse, UserCreate, UserUpdate
 
 router = APIRouter(prefix="/users", tags=["用户管理"])
-
-
-def _ok(data, msg: str = "success") -> dict:
-    return {"code": "0000", "data": data, "msg": msg}
 
 
 def _require_admin(current_user: User = Depends(get_current_user)):
@@ -46,7 +43,7 @@ def list_users(
         .limit(size)
         .all()
     )
-    return _ok({
+    return ok_response({
         "records": [UserResponse.model_validate(u).model_dump() for u in users],
         "total": total,
         "current": current,
@@ -64,7 +61,7 @@ def get_user(
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    return _ok(UserResponse.model_validate(user).model_dump())
+    return ok_response(UserResponse.model_validate(user).model_dump())
 
 
 @router.post("/", status_code=201)
@@ -89,7 +86,7 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
-    return _ok(UserResponse.model_validate(user).model_dump(), msg="创建成功")
+    return ok_response(UserResponse.model_validate(user).model_dump(), msg="创建成功")
 
 
 @router.put("/{user_id}")
@@ -112,7 +109,7 @@ def update_user(
         setattr(user, key, value)
     db.commit()
     db.refresh(user)
-    return _ok(UserResponse.model_validate(user).model_dump(), msg="更新成功")
+    return ok_response(UserResponse.model_validate(user).model_dump(), msg="更新成功")
 
 
 @router.delete("/{user_id}")
@@ -129,4 +126,4 @@ def delete_user(
         raise HTTPException(status_code=404, detail="用户不存在")
     db.delete(user)
     db.commit()
-    return _ok(None, msg="删除成功")
+    return ok_response(None, msg="删除成功")

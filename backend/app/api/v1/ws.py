@@ -8,6 +8,7 @@ from app.models.transcript_segments import TranscriptSegment
 from app.models.transcript_full_texts import TranscriptFullText
 from app.models.live_sessions import LiveSession
 from app.models.stream_sources import StreamSource
+from app.core.status import TaskStatus
 from app.models.asr_tasks import AsrTask
 from app.services.asr.queue import queue_session_transcription
 from app.services.asr.websocket_manager import ws_manager
@@ -46,7 +47,7 @@ def serialize_transcription_task(task: AsrTask, session: LiveSession, segment_co
         "live_duration_seconds": session.live_duration_seconds or 0,
         "segment_count": int(segment_count or 0),
         "error_message": task.error_message,
-        "postprocess_status": getattr(task, "postprocess_status", None) or "pending",
+        "postprocess_status": getattr(task, "postprocess_status", None) or TaskStatus.PENDING,
         "postprocess_error": getattr(task, "postprocess_error", None),
         "postprocess_result": getattr(task, "postprocess_result", None),
         "postprocess_attempt_count": getattr(task, "postprocess_attempt_count", 0) or 0,
@@ -145,7 +146,7 @@ def queue_transcription_by_anchor(
 @rest_router.get("/tasks/status", response_model=TranscriptTaskStatusResponse)
 def get_transcription_task_status(db: Session = Depends(get_db)):
     """返回话术任务汇总，供页面显示真实排队进度。"""
-    counts = {"queued": 0, "processing": 0, "completed": 0, "failed": 0}
+    counts = {TaskStatus.QUEUED: 0, "processing": 0, "completed": 0, "failed": 0}
     for status, count in db.query(AsrTask.status, func.count(AsrTask.id)).group_by(AsrTask.status):
         counts[status or "failed"] = count
     return counts
@@ -211,7 +212,7 @@ def list_transcript_segments(
             "segment_end": float(s.segment_end) if s.segment_end else 0,
             "text_content": s.text_content or "",
             "segment_type": s.segment_type or "",
-            "asr_status": s.asr_status or "pending",
+            "asr_status": s.asr_status or TaskStatus.PENDING,
             "ai_score": float(s.ai_score) if s.ai_score else None,
         }
         for s in segments

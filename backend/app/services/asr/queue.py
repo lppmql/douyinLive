@@ -10,25 +10,26 @@ from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.live_sessions import LiveSession
 from app.models.stream_sources import StreamSource
 from app.services.tasks.runtime import ensure_task_identity
+from app.core.status import TaskStatus
 
 
 def reset_failed_task_for_retry(task: AsrTask, failed_chunks: list[AsrAudioChunk], stream_id: int) -> None:
     """手动重试失败任务，保留完成分片，只重置失败部分。"""
     for chunk in failed_chunks:
-        chunk.status = "pending"
+        chunk.status = TaskStatus.PENDING
         chunk.retry_count = 0
         chunk.error_message = None
         chunk.completed_at = None
         chunk.worker_id = None
     task.stream_id = stream_id
-    task.status = "queued"
+    task.status = TaskStatus.QUEUED
     task.retry_count = 0
     task.error_message = None
     task.started_at = None
     task.completed_at = None
     task.worker_id = None
     task.heartbeat_at = None
-    task.postprocess_status = "pending"
+    task.postprocess_status = TaskStatus.PENDING
     task.postprocess_started_at = None
     task.postprocess_completed_at = None
     task.postprocess_error = None
@@ -75,7 +76,7 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
             return existing, True
         return existing, False
 
-    task = AsrTask(session_id=session.id, stream_id=stream.id, status="queued", task_type="offline")
+    task = AsrTask(session_id=session.id, stream_id=stream.id, status=TaskStatus.QUEUED, task_type="offline")
     ensure_task_identity(task, "asr", f"asr:session:{session.id}")
     db.add(task)
     db.flush()
@@ -89,7 +90,7 @@ def list_queued_task_ids_latest_first(db: Session, limit: int) -> list[int]:
         for row in (
             db.query(AsrTask)
             .join(LiveSession, LiveSession.id == AsrTask.session_id)
-            .filter(AsrTask.status == "queued")
+            .filter(AsrTask.status == TaskStatus.QUEUED)
             .with_entities(AsrTask.id)
             .order_by(
                 AsrTask.priority.asc(),
@@ -110,7 +111,7 @@ def queue_auto_transcriptions(
 ) -> dict:
     """在全局容量内为可安全离线处理的真实场次自动排队。"""
     capacity = max(1, settings.ASR_MAX_QUEUED)
-    active_count = db.query(AsrTask).filter(AsrTask.status.in_(["queued", "processing"])).count()
+    active_count = db.query(AsrTask).filter(AsrTask.status.in_([TaskStatus.QUEUED, "processing"])).count()
     available = max(0, capacity - active_count)
     if limit is not None:
         available = min(available, max(0, limit))

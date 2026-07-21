@@ -12,6 +12,7 @@ from prometheus_client import Counter, Gauge, Histogram
 from sqlalchemy import func, or_
 
 from app.core.config import settings
+from app.core.status import TaskStatus
 
 trace_id_var: contextvars.ContextVar[str] = contextvars.ContextVar("trace_id", default="-")
 
@@ -140,7 +141,7 @@ def refresh_runtime_metrics(db, monitor_running: bool) -> None:
     from app.models.scraper_tasks import ScraperTask
     from app.services.sync.de_sync import source_data_outdated_condition
 
-    ASR_QUEUE_SIZE.set(db.query(func.count(AsrTask.id)).filter(AsrTask.status == "queued").scalar() or 0)
+    ASR_QUEUE_SIZE.set(db.query(func.count(AsrTask.id)).filter(AsrTask.status == TaskStatus.QUEUED).scalar() or 0)
     ASR_PROCESSING_COUNT.set(db.query(func.count(AsrTask.id)).filter(AsrTask.status == "processing").scalar() or 0)
     chunk_counts = dict(db.query(AsrAudioChunk.status, func.count(AsrAudioChunk.id)).group_by(AsrAudioChunk.status).all())
     for status in ("pending", "processing", "completed", "failed"):

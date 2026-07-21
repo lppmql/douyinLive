@@ -14,6 +14,7 @@ from app.schemas.monitor import (
 from app.services.collector.scheduler import scheduler_manager
 from app.services.collector.monitor import MockLiveDetector
 from app.services.collector.browser import browser_manager
+from app.core.status import TaskStatus
 
 router = APIRouter(prefix="/monitor", tags=["直播监控"])
 
@@ -38,7 +39,7 @@ async def start_monitor(db: Session = Depends(get_db)):
     import asyncio
     running_collect = db.query(ScraperTask).filter(
         ScraperTask.task_type == "collect_all",
-        ScraperTask.status == "running",
+        ScraperTask.status == TaskStatus.RUNNING,
     ).first()
     if not settings.monitor_mock_enabled and not running_collect:
         context, is_valid, message = await browser_manager.get_logged_in_context()

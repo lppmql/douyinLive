@@ -115,6 +115,7 @@ def _sync_pending_dataease(limit: Optional[int]) -> dict:
 # 以下函数从子模块重导出，保持 scheduler.py 和 collector.py 的导入不变
 from app.services.collector.enterprise import discover_enterprise_live_sessions  # noqa: E402, F811
 from app.services.collector.history import collect_live_session_snapshot  # noqa: E402, F811
+from app.core.status import TaskStatus
 
 
 # ==================== 房间采集编排 ====================

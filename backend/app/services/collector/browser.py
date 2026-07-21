@@ -21,6 +21,7 @@ from app.core.database import SessionLocal
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_tasks import ScraperTask
 from app.services.tasks.runtime import publish_task_event, touch_task
+from app.core.status import TaskStatus
 
 # 浏览器状态存储目录
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "storage_state"
@@ -430,7 +431,7 @@ class BrowserManager:
             if not douyin_btn:
                 logger.error("未找到抖音登录按钮")
                 self.login_sessions[task_id]["message"] = "未找到抖音登录入口"
-                self.login_sessions[task_id]["status"] = "failed"
+                self.login_sessions[task_id]["status"] = TaskStatus.FAILED
                 return
 
             # 3. 准备监听弹窗
@@ -556,7 +557,7 @@ class BrowserManager:
                 self.login_sessions[task_id]["status"] = "timeout"
                 self.login_sessions[task_id]["message"] = "登录超时，请重新扫码"
                 logger.warning(f"扫码登录超时: {e}")
-                self._finish_login_task(task_id, "failed", "扫码登录超时，请重新扫码")
+                self._finish_login_task(task_id, TaskStatus.FAILED, "扫码登录超时，请重新扫码")
                 # 即使超时也保存上下文（可能部分登录成功）
                 try:
                     await self.set_logged_in_context(context,
@@ -568,9 +569,9 @@ class BrowserManager:
 
         except Exception as e:
             logger.error(f"扫码登录失败: {e}")
-            self.login_sessions[task_id]["status"] = "failed"
+            self.login_sessions[task_id]["status"] = TaskStatus.FAILED
             self.login_sessions[task_id]["message"] = f"登录失败: {str(e)}"
-            self._finish_login_task(task_id, "failed", f"扫码登录失败: {str(e)}")
+            self._finish_login_task(task_id, TaskStatus.FAILED, f"扫码登录失败: {str(e)}")
         finally:
             # 注意：不关闭 browser 和 playwright！
             # 上下文被保持为持久化上下文，浏览器需要继续运行
@@ -733,7 +734,7 @@ class BrowserManager:
             publish_task_event(
                 "scraper",
                 task,
-                "failed" if status == "failed" else status,
+                TaskStatus.FAILED if status == TaskStatus.FAILED else status,
                 {"task_type": "login", "error": task.error_message or ""},
             )
         except Exception as exc:

@@ -25,15 +25,16 @@ from app.core.observability import (
     trace_id_var,
 )
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from app.core.status import TaskStatus
 
 
 def recover_interrupted_collector_tasks() -> int:
     """进程重启后关闭无法继续执行的遗留采集任务。"""
     db = SessionLocal()
     try:
-        tasks = db.query(ScraperTask).filter(ScraperTask.status == "running").all()
+        tasks = db.query(ScraperTask).filter(ScraperTask.status == TaskStatus.RUNNING).all()
         for task in tasks:
-            task.status = "failed"
+            task.status = TaskStatus.FAILED
             task.completed_at = datetime.utcnow()
             task.error_message = "后端服务重启，任务已中断，请重新执行"
             task.progress_stage = "interrupted"
@@ -144,7 +145,7 @@ def root():
     return {
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "status": "running",
+        "status": TaskStatus.RUNNING,
     }
 
 
@@ -176,7 +177,7 @@ def health():
         "status": "ok" if healthy else "degraded",
         "database": "ok" if database_ok else "error",
         "redis": "ok" if redis_ok else "error",
-        "monitor": "running" if scheduler_manager.running else "stopped",
+        "monitor": TaskStatus.RUNNING if scheduler_manager.running else "stopped",
         "configuration": "error" if configuration_errors else "warning" if configuration_warnings else "ok",
         "configuration_issues": configuration_errors + configuration_warnings,
     }

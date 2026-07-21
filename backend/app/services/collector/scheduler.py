@@ -185,7 +185,7 @@ class SchedulerManager:
     def _has_running_full_collection(db: Session) -> bool:
         return db.query(ScraperTask.id).filter(
             ScraperTask.task_type == "collect_all",
-            ScraperTask.status == "running",
+            ScraperTask.status == TaskStatus.RUNNING,
         ).first() is not None
 
     async def _monitor_check(self):
@@ -350,7 +350,7 @@ class SchedulerManager:
             task = ScraperTask(
                 session_id=session_id,
                 task_type=job_type,
-                status="running",
+                status=TaskStatus.RUNNING,
                 started_at=datetime.utcnow(),
             )
             ensure_task_identity(task, f"scraper-{job_type}")
@@ -426,7 +426,7 @@ class SchedulerManager:
         except Exception as e:
             logger.error(f"采集失败 [{job_type}/{session_id}]: {e}")
             if task:
-                task.status = "failed"
+                task.status = TaskStatus.FAILED
                 task.error_message = str(e)[:200]
                 task.completed_at = datetime.utcnow()
                 touch_task(task)
@@ -434,7 +434,7 @@ class SchedulerManager:
                 publish_task_event(
                     "scraper",
                     task,
-                    "failed",
+                    TaskStatus.FAILED,
                     {"session_id": session_id, "task_type": job_type, "error": task.error_message},
                 )
         finally:
@@ -523,3 +523,4 @@ scheduler_manager = SchedulerManager()
 
 # 在模块末尾导入，避免循环引用
 from app.services.collector.monitor import LiveStatusResult as _LSR  # noqa: F401
+from app.core.status import TaskStatus

@@ -37,6 +37,7 @@ from app.services.tasks.runtime import (
     touch_task,
 )
 from app.models.asr_tasks import AsrTask
+from app.core.status import TaskStatus
 
 router = APIRouter(prefix="/collector", tags=["数据采集"])
 
@@ -48,7 +49,7 @@ def _collector_heartbeat_loop(task_id: int, stop_event: threading.Event) -> None
         try:
             heartbeat_db.query(ScraperTask).filter(
                 ScraperTask.id == task_id,
-                ScraperTask.status == "running",
+                ScraperTask.status == TaskStatus.RUNNING,
             ).update({ScraperTask.heartbeat_at: datetime.utcnow()}, synchronize_session=False)
             heartbeat_db.commit()
         except Exception:
@@ -74,7 +75,7 @@ def _collection_succeeded(result: dict) -> bool:
 @router.get("/status", response_model=CollectorStatusResponse)
 def get_collector_status(db: Session = Depends(get_db)):
     """获取采集器整体状态"""
-    active_count = db.query(ScraperTask).filter(ScraperTask.status == "running").count()
+    active_count = db.query(ScraperTask).filter(ScraperTask.status == TaskStatus.RUNNING).count()
     default_account = db.query(ScraperAccount).order_by(ScraperAccount.last_login_at.desc()).first()
     return CollectorStatusResponse(
         connected=default_account is not None,
@@ -131,7 +132,7 @@ async def delete_account(account_id: int, db: Session = Depends(get_db)):
 
     running_task_count = db.query(ScraperTask).filter(
         ScraperTask.account_id == account_id,
-        ScraperTask.status == "running",
+        ScraperTask.status == TaskStatus.RUNNING,
     ).count()
     if running_task_count:
         raise HTTPException(409, "该账号仍有采集任务在运行，请等待任务结束后再删除")
@@ -170,7 +171,7 @@ async def check_account_health(account_id: int, db: Session = Depends(get_db)):
     if not account:
         raise HTTPException(404, "账号不存在")
     if db.query(ScraperTask).filter(
-        ScraperTask.status == "running",
+        ScraperTask.status == TaskStatus.RUNNING,
         ScraperTask.task_type.in_(("collect_all", "login")),
     ).count():
         raise HTTPException(409, "当前有刷新采集或扫码登录任务运行，请等待任务结束后再检查账号")
@@ -190,14 +191,14 @@ async def check_account_health(account_id: int, db: Session = Depends(get_db)):
 
 
 def _asr_control_response(db: Session, runtime: dict, message: str = "") -> AsrControlResponse:
-    queued_count = db.query(AsrTask).filter(AsrTask.status == "queued").count()
+    queued_count = db.query(AsrTask).filter(AsrTask.status == TaskStatus.QUEUED).count()
     processing_count = db.query(AsrTask).filter(AsrTask.status == "processing").count()
     postprocess_counts = {
         status: db.query(AsrTask).filter(
-            AsrTask.status == "completed",
+            AsrTask.status == TaskStatus.COMPLETED,
             AsrTask.postprocess_status == status,
         ).count()
-        for status in ("pending", "processing", "completed", "failed")
+        for status in (TaskStatus.PENDING, "processing", TaskStatus.COMPLETED, TaskStatus.FAILED)
     }
     return AsrControlResponse(
         enabled=runtime["enabled"],
@@ -205,10 +206,10 @@ def _asr_control_response(db: Session, runtime: dict, message: str = "") -> AsrC
         worker_running=runtime["worker_running"],
         queued_count=queued_count,
         processing_count=processing_count,
-        postprocess_pending_count=postprocess_counts["pending"],
+        postprocess_pending_count=postprocess_counts[TaskStatus.PENDING],
         postprocess_processing_count=postprocess_counts["processing"],
-        postprocess_completed_count=postprocess_counts["completed"],
-        postprocess_failed_count=postprocess_counts["failed"],
+        postprocess_completed_count=postprocess_counts[TaskStatus.COMPLETED],
+        postprocess_failed_count=postprocess_counts[TaskStatus.FAILED],
         message=message,
     )
 
@@ -231,7 +232,7 @@ async def set_asr_control(enabled: bool, db: Session = Depends(get_db)):
     if not enabled and processing_count:
         tasks = db.query(AsrTask).filter(AsrTask.status == "processing").all()
         for task in tasks:
-            task.status = "failed"
+            task.status = TaskStatus.FAILED
             task.error_message = "用户关闭 ASR，任务已安全中断，可手动重新排队"
             task.completed_at = datetime.utcnow()
         db.commit()
@@ -249,7 +250,7 @@ async def set_asr_control(enabled: bool, db: Session = Depends(get_db)):
 @router.post("/accounts/login", response_model=LoginStartResponse)
 async def start_login(db: Session = Depends(get_db)):
     """启动扫码登录（后台打开有头浏览器）"""
-    task = ScraperTask(task_type="login", status="running", started_at=datetime.utcnow())
+    task = ScraperTask(task_type="login", status=TaskStatus.RUNNING, started_at=datetime.utcnow())
     ensure_task_identity(task, "scraper-login")
     task.retry_count = 1
     touch_task(task, current_worker_id("collector-api"))
@@ -317,7 +318,7 @@ async def re_login(account_id: int, db: Session = Depends(get_db)):
     if not account:
         raise HTTPException(404, "账号不存在")
 
-    task = ScraperTask(task_type="login", status="running")
+    task = ScraperTask(task_type="login", status=TaskStatus.RUNNING)
     ensure_task_identity(task, "scraper-relogin")
     task.retry_count = 1
     task.started_at = datetime.utcnow()
@@ -387,7 +388,7 @@ async def manual_collect_all(db: Session = Depends(get_db)):
     """刷新全部主播、直播场次及场次详情数据。"""
     existing = db.query(ScraperTask).filter(
         ScraperTask.task_type == "collect_all",
-        ScraperTask.status == "running",
+        ScraperTask.status == TaskStatus.RUNNING,
     ).first()
     if existing:
         raise HTTPException(409, f"刷新数据采集任务 #{existing.id} 正在运行，请勿重复提交")
@@ -398,7 +399,7 @@ async def manual_collect_all(db: Session = Depends(get_db)):
     task = ScraperTask(
         account_id=account.id if account else None,
         task_type="collect_all",
-        status="running",
+        status=TaskStatus.RUNNING,
         started_at=datetime.utcnow(),
     )
     ensure_task_identity(task, "scraper-collect-all")
@@ -486,8 +487,8 @@ async def manual_collect_all(db: Session = Depends(get_db)):
     try:
         await scheduler_manager.wait_for_collection_slot()
         result = await collect_all(db, task_id=task.id, progress_callback=update_progress)
-        task.status = "completed" if _collection_succeeded(result) else "failed"
-        if task.status == "failed":
+        task.status = TaskStatus.COMPLETED if _collection_succeeded(result) else TaskStatus.FAILED
+        if task.status == TaskStatus.FAILED:
             task.error_message = result.get("message") or "未采集到房间数据"
             task.progress_message = task.error_message
         return result
@@ -495,9 +496,9 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         from app.services.collector.manual_collect import _sanitize_collector_error
 
         compact_error = _sanitize_collector_error(exc)
-        task.status = "failed"
+        task.status = TaskStatus.FAILED
         task.error_message = compact_error
-        task.progress_stage = "failed"
+        task.progress_stage = TaskStatus.FAILED
         task.progress_message = "采集任务执行失败"
         db.add(
             ScraperLog(
@@ -505,7 +506,7 @@ async def manual_collect_all(db: Session = Depends(get_db)):
                 level="error",
                 message=f"刷新数据采集任务失败: {compact_error}",
                 raw_json={
-                    "stage": "failed",
+                    "stage": TaskStatus.FAILED,
                     "event": "task_failed",
                     "error_type": type(exc).__name__,
                     "error": compact_error,
@@ -518,13 +519,13 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         await asyncio.to_thread(heartbeat_thread.join, 5)
         task.completed_at = datetime.utcnow()
         touch_task(task)
-        if task.status == "completed":
+        if task.status == TaskStatus.COMPLETED:
             task.progress_percent = 100
         db.commit()
         publish_task_event(
             "scraper",
             task,
-            "completed" if task.status == "completed" else "failed",
+            TaskStatus.COMPLETED if task.status == TaskStatus.COMPLETED else TaskStatus.FAILED,
             {
                 "stage": task.progress_stage,
                 "message": task.progress_message or task.error_message or "",

@@ -10,6 +10,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.logger import logger
+from app.core.status import TaskStatus
 from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
@@ -123,7 +124,7 @@ def _apply_session_anchor_profile(session: LiveSession, profile: dict) -> bool:
 
 def _needs_history_enrichment(session: LiveSession, has_related_assets: bool = False) -> bool:
     """判断历史场次是否还需要继续补齐详情。"""
-    if session.detail_collection_status in (None, "", "pending", "retryable"):
+    if session.detail_collection_status in (None, "", TaskStatus.PENDING, TaskStatus.RETRYABLE):
         return True
     if session.detail_collection_status != "complete":
         return False

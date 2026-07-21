@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 from pydantic import BaseModel, Field
+from app.core.status import TaskStatus
 
 
 # ── 排队 ──
@@ -46,7 +47,7 @@ class TranscriptTaskOut(BaseModel):
     """GET /transcripts/tasks 单条任务"""
     id: int
     session_id: int | None = None
-    status: str = "failed"
+    status: str = TaskStatus.FAILED
     task_type: str = "offline"
     anchor_name: str = "未知主播"
     session_title: str = "未命名直播场次"
@@ -54,7 +55,7 @@ class TranscriptTaskOut(BaseModel):
     live_duration_seconds: int = 0
     segment_count: int = 0
     error_message: str | None = None
-    postprocess_status: str = "pending"
+    postprocess_status: str = TaskStatus.PENDING
     postprocess_error: str | None = None
     postprocess_result: Any | None = None
     postprocess_attempt_count: int = 0
@@ -78,7 +79,7 @@ class TranscriptSegmentOut(BaseModel):
     segment_end: float = 0
     text_content: str = ""
     segment_type: str = ""
-    asr_status: str = "pending"
+    asr_status: str = TaskStatus.PENDING
     ai_score: float | None = None
 
 

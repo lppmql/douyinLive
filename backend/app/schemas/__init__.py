@@ -2,6 +2,7 @@
 from datetime import datetime
 from typing import Optional, Any
 from pydantic import BaseModel, ConfigDict
+from app.core.status import TaskStatus
 
 
 # ===== 直播间 =====
@@ -74,7 +75,7 @@ class LiveSessionListItemResponse(BaseModel):
     anchor_avatar_url: Optional[str] = None
     douyin_id: Optional[str] = None
     session_title: Optional[str] = None
-    detail_collection_status: str = "pending"
+    detail_collection_status: str = TaskStatus.PENDING
     detail_collection_error: Optional[str] = None
     live_start_time: Optional[datetime] = None
     live_end_time: Optional[datetime] = None
@@ -102,7 +103,7 @@ class LiveSessionResponse(LiveSessionBase):
     anchor_avatar_url: Optional[str] = None
     douyin_id: Optional[str] = None
     douyin_uid: Optional[str] = None
-    detail_collection_status: str = "pending"
+    detail_collection_status: str = TaskStatus.PENDING
     detail_collection_error: Optional[str] = None
     live_duration_seconds: int = 0
     total_viewers: int = 0
@@ -229,7 +230,7 @@ class TranscriptSegmentBase(BaseModel):
     segment_end: Optional[float] = None
     text_content: Optional[str] = None
     segment_type: Optional[str] = None
-    asr_status: str = "pending"
+    asr_status: str = TaskStatus.PENDING
 
 
 class TranscriptSegmentCreate(TranscriptSegmentBase):

@@ -2,6 +2,7 @@
 from datetime import datetime
 from typing import Optional, Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from app.core.status import TaskStatus
 
 
 # ===== 采集账号 =====
@@ -40,7 +41,7 @@ class ScraperTaskBase(BaseModel):
     account_id: Optional[int] = None
     session_id: Optional[int] = None
     task_type: str
-    status: str = "pending"
+    status: str = TaskStatus.PENDING
 
 
 class ScraperTaskCreate(ScraperTaskBase):

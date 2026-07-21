@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.response import ok_response
 from app.core.security import (
     verify_password,
     create_access_token,
@@ -16,11 +17,6 @@ from app.models.user import User
 from app.schemas.auth import LoginRequest, TokenData, UserInfoData
 
 router = APIRouter(prefix="/auth", tags=["认证"])
-
-
-def _ok(data, msg: str = "success") -> dict:
-    """包装 Soybean Admin 兼容的成功响应"""
-    return {"code": "0000", "data": data, "msg": msg}
 
 
 @router.post("/login")
@@ -43,7 +39,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     db.commit()
 
     token_data = {"sub": str(user.id)}
-    return _ok(
+    return ok_response(
         TokenData(
             token=create_access_token(token_data),
             refreshToken=create_refresh_token(token_data),
@@ -77,7 +73,7 @@ def refresh_token(req: dict, db: Session = Depends(get_db)):
         )
 
     token_data = {"sub": str(user.id)}
-    return _ok(
+    return ok_response(
         TokenData(
             token=create_access_token(token_data),
             refreshToken=create_refresh_token(token_data),
@@ -88,7 +84,7 @@ def refresh_token(req: dict, db: Session = Depends(get_db)):
 @router.get("/getUserInfo")
 def get_user_info(current_user: User = Depends(get_current_user)):
     """获取当前登录用户信息（Soybean Admin 兼容格式）"""
-    return _ok(
+    return ok_response(
         UserInfoData(
             userId=str(current_user.id),
             userName=current_user.username,
