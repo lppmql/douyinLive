@@ -31,7 +31,7 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - ./data/redis:/data
-    command: redis-server --appendonly yes --requirepass 8519dc5ce07f2b54ab1595da1194ce81
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?请在 .env 设置 REDIS_PASSWORD}
 
   funasr:
     image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.13

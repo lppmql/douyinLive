@@ -16,6 +16,10 @@
   - 新增 `backend/app/services/collector/constants.py`：`LEADS_BASE`/`LIVE_SCREEN_URL`/`COMMENT_URL`/`DEFAULT_FINGERPRINT`
   - 8 个文件改为从 constants 导入，URL 修改只需改 1 处
   - 修复 5 个 E402/unused-import lint 问题
+- **M6 Docker Redis 硬编码密码修复**：
+  - `docker-compose.yml`：Redis `--requirepass` 从硬编码密码改为 `${REDIS_PASSWORD:?...}` 环境变量
+  - `.env`：新增 `REDIS_PASSWORD` 独立变量（与 `REDIS_URL` 中的密码保持同步）
+  - `.env.example`：补齐 `REDIS_PASSWORD` 和带密码的 `REDIS_URL` 模板
 - **M5 browser.py 冗余 .value 移除 + 缺失 import 补充**：
   - 移除 2 处 `TaskStatus.COMPLETED.value` 的冗余 `.value`（TaskStatus 继承 str，直接用即可）
   - 补充缺失的 `touch_task` / `publish_task_event` import（此前扫码登录成功后调用会 NameError）
