@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.transcript_segments import TranscriptSegment
-from app.schemas import TranscriptSegmentCreate, TranscriptSegmentResponse
+from app.schemas import TranscriptSegmentCreate, TranscriptSegmentResponse, MessageResponse
 
 router = APIRouter(prefix="/transcript-segments", tags=["话术分段"])
 
@@ -43,7 +43,7 @@ def create_segment(data: TranscriptSegmentCreate, db: Session = Depends(get_db))
     return s
 
 
-@router.delete("/{seg_id}")
+@router.delete("/{seg_id}", response_model=MessageResponse)
 def delete_segment(seg_id: int, db: Session = Depends(get_db)):
     s = db.query(TranscriptSegment).get(seg_id)
     if not s:

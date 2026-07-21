@@ -1553,9 +1553,29 @@ export interface paths {
         };
         /**
          * Get Dashboard Summary
-         * @description 返回基于真实直播场次的核心经营数据。
+         * @description 返回基于真实直播场次的核心经营数据，支持日期范围筛选。
          */
         get: operations["get_dashboard_summary_api_v1_dashboard_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/dashboard/summary/by-anchor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dashboard Summary By Anchor
+         * @description 按主播（douyin_id）分组汇总经营指标，用于首页主播明细表。
+         */
+        get: operations["get_dashboard_summary_by_anchor_api_v1_dashboard_summary_by_anchor_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1801,6 +1821,19 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AccountDeleteResponse
+         * @description 删除采集账号的响应
+         */
+        AccountDeleteResponse: {
+            /** Message */
+            message: string;
+            /**
+             * Detached Task Count
+             * @default 0
+             */
+            detached_task_count: number;
+        };
         /** AccountHealthResponse */
         AccountHealthResponse: {
             /** Account Id */
@@ -1886,6 +1919,11 @@ export interface components {
              */
             analysis_saved: number;
             /**
+             * Review Saved
+             * @default 0
+             */
+            review_saved: number;
+            /**
              * Time Slices Created
              * @default 0
              */
@@ -1943,6 +1981,11 @@ export interface components {
              * @default 0
              */
             analysis_saved: number;
+            /**
+             * Review Saved
+             * @default 0
+             */
+            review_saved: number;
             /**
              * Time Slices Created
              * @default 0
@@ -2012,6 +2055,11 @@ export interface components {
              * @default 0
              */
             analysis_saved: number;
+            /**
+             * Review Saved
+             * @default 0
+             */
+            review_saved: number;
             /**
              * Time Slices Created
              * @default 0
@@ -2164,6 +2212,79 @@ export interface components {
             details?: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * AnchorSummaryItem
+         * @description 按主播分组的经营指标
+         */
+        AnchorSummaryItem: {
+            /**
+             * Douyin Id
+             * @default
+             */
+            douyin_id: string;
+            /**
+             * Anchor Name
+             * @default
+             */
+            anchor_name: string;
+            /**
+             * Anchor Avatar Url
+             * @default
+             */
+            anchor_avatar_url: string;
+            /**
+             * Session Count
+             * @default 0
+             */
+            session_count: number;
+            /**
+             * Total Viewers
+             * @default 0
+             */
+            total_viewers: number;
+            /**
+             * Total Comments
+             * @default 0
+             */
+            total_comments: number;
+            /**
+             * Total Private Messages
+             * @default 0
+             */
+            total_private_messages: number;
+            /**
+             * Total Leads
+             * @default 0
+             */
+            total_leads: number;
+            /**
+             * Total Ad Cost
+             * @default 0
+             */
+            total_ad_cost: number;
+            /**
+             * Total Interactions
+             * @default 0
+             */
+            total_interactions: number;
+            /**
+             * Total New Followers
+             * @default 0
+             */
+            total_new_followers: number;
+        };
+        /**
+         * AnchorSummaryResponse
+         * @description GET /dashboard/summary/by-anchor
+         */
+        AnchorSummaryResponse: {
+            /** Anchors */
+            anchors?: components["schemas"]["AnchorSummaryItem"][];
+            /** Total */
+            total?: {
+                [key: string]: unknown;
+            };
         };
         /** AsrControlResponse */
         AsrControlResponse: {
@@ -2659,6 +2780,11 @@ export interface components {
              */
             status: string;
             /**
+             * Selected Count
+             * @default 0
+             */
+            selected_count: number;
+            /**
              * Synced Count
              * @default 0
              */
@@ -2668,11 +2794,13 @@ export interface components {
              * @default 0
              */
             failed_count: number;
+            /** Errors */
+            errors?: string[];
             /**
-             * Skipped Count
+             * Removed Stale Row Count
              * @default 0
              */
-            skipped_count: number;
+            removed_stale_row_count: number;
             dataease?: components["schemas"]["DataEaseStatusResponse"] | null;
         };
         /** FindingStatusUpdate */
@@ -2802,30 +2930,57 @@ export interface components {
          */
         KnowledgeTimeSliceStatusResponse: {
             /**
-             * Total Sessions
+             * Slice Count
              * @default 0
              */
-            total_sessions: number;
+            slice_count: number;
             /**
-             * Synced Sessions
+             * Session Count
              * @default 0
              */
-            synced_sessions: number;
+            session_count: number;
             /**
-             * Pending Sessions
+             * Transcript Slice Count
              * @default 0
              */
-            pending_sessions: number;
+            transcript_slice_count: number;
             /**
-             * Total Slices
+             * Comment Slice Count
              * @default 0
              */
-            total_slices: number;
+            comment_slice_count: number;
             /**
-             * Unmapped Comments
+             * Metric Slice Count
              * @default 0
              */
-            unmapped_comments: number;
+            metric_slice_count: number;
+            /**
+             * High Intent Slice Count
+             * @default 0
+             */
+            high_intent_slice_count: number;
+            /**
+             * Unmapped Comment Count
+             * @default 0
+             */
+            unmapped_comment_count: number;
+            /**
+             * Knowledge Item Count
+             * @default 0
+             */
+            knowledge_item_count: number;
+            /** Latest Updated At */
+            latest_updated_at?: string | null;
+            /**
+             * Slice Seconds
+             * @default 60
+             */
+            slice_seconds: number;
+            /**
+             * Parser Version
+             * @default time-slice-v1
+             */
+            parser_version: string;
         };
         /**
          * KnowledgeTimeSliceSyncResponse
@@ -3509,6 +3664,11 @@ export interface components {
             /** Leads Count */
             leads_count?: number | null;
         };
+        /** LoginQRResponse */
+        LoginQRResponse: {
+            /** Qr Code Base64 */
+            qr_code_base64: string;
+        };
         /**
          * LoginRequest
          * @description 登录请求
@@ -3534,6 +3694,30 @@ export interface components {
             /**
              * Message
              * @default
+             */
+            message: string;
+        };
+        /**
+         * LogsClearResponse
+         * @description 清空采集日志的响应
+         */
+        LogsClearResponse: {
+            /** Message */
+            message: string;
+            /**
+             * Deleted Count
+             * @default 0
+             */
+            deleted_count: number;
+        };
+        /**
+         * MessageResponse
+         * @description 通用消息响应，用于 DELETE 等简单操作
+         */
+        MessageResponse: {
+            /**
+             * Message
+             * @default 操作成功
              */
             message: string;
         };
@@ -3686,6 +3870,17 @@ export interface components {
             /** Last Error */
             last_error?: string | null;
         };
+        /** PageResult[UserResponse] */
+        PageResult_UserResponse_: {
+            /** Records */
+            records: components["schemas"]["UserResponse"][];
+            /** Total */
+            total: number;
+            /** Current */
+            current: number;
+            /** Size */
+            size: number;
+        };
         /** PromptCreate */
         PromptCreate: {
             /** Type */
@@ -3805,17 +4000,34 @@ export interface components {
         };
         /**
          * ReviewComparisonResponse
-         * @description GET /reviews/{session_id}/comparison
+         * @description GET /reviews/{session_id}/comparison — 跨场对比
          */
         ReviewComparisonResponse: {
-            /** Primary */
-            primary?: {
+            /** Current */
+            current?: {
                 [key: string]: unknown;
             };
             /** Baseline */
             baseline?: {
                 [key: string]: unknown;
             };
+            /** Dimensions */
+            dimensions?: {
+                [key: string]: unknown;
+            }[];
+            /** Current Series */
+            current_series?: {
+                [key: string]: unknown;
+            }[];
+            /** Baseline Series */
+            baseline_series?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Comparison Note
+             * @default
+             */
+            comparison_note: string;
         };
         /**
          * ReviewFindingOut
@@ -3905,10 +4117,20 @@ export interface components {
             anchor_name?: string | null;
             /** Session Title */
             session_title?: string | null;
+            /** Business Context */
+            business_context?: string | null;
             /** Completeness */
             completeness?: {
                 [key: string]: unknown;
             };
+            /** Transcript Segments */
+            transcript_segments?: {
+                [key: string]: unknown;
+            }[];
+            /** Domain Coverage */
+            domain_coverage?: {
+                [key: string]: unknown;
+            }[];
             /** Timeline */
             timeline?: {
                 [key: string]: unknown;
@@ -3927,6 +4149,18 @@ export interface components {
             }[];
             /** Assets */
             assets?: {
+                [key: string]: unknown;
+            }[];
+            /** Script Assets */
+            script_assets?: {
+                [key: string]: unknown;
+            }[];
+            /** Live Alerts */
+            live_alerts?: {
+                [key: string]: unknown;
+            }[];
+            /** Latest Reports */
+            latest_reports?: {
                 [key: string]: unknown;
             }[];
         };
@@ -4158,6 +4392,87 @@ export interface components {
             performance_note?: string | null;
             /** Status */
             status?: ("candidate" | "approved" | "archived") | null;
+        };
+        /** SoybeanResponse[NoneType] */
+        SoybeanResponse_NoneType_: {
+            /**
+             * Code
+             * @default 0000
+             */
+            code: string;
+            /** Data */
+            data?: null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** SoybeanResponse[PageResult[UserResponse]] */
+        SoybeanResponse_PageResult_UserResponse__: {
+            /**
+             * Code
+             * @default 0000
+             */
+            code: string;
+            data?: components["schemas"]["PageResult_UserResponse_"] | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** SoybeanResponse[TokenData] */
+        SoybeanResponse_TokenData_: {
+            /**
+             * Code
+             * @default 0000
+             */
+            code: string;
+            data?: components["schemas"]["TokenData"] | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** SoybeanResponse[UserInfoData] */
+        SoybeanResponse_UserInfoData_: {
+            /**
+             * Code
+             * @default 0000
+             */
+            code: string;
+            data?: components["schemas"]["UserInfoData"] | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /** SoybeanResponse[UserResponse] */
+        SoybeanResponse_UserResponse_: {
+            /**
+             * Code
+             * @default 0000
+             */
+            code: string;
+            data?: components["schemas"]["UserResponse"] | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
+        /**
+         * TokenData
+         * @description Token 数据
+         */
+        TokenData: {
+            /** Token */
+            token: string;
+            /** Refreshtoken */
+            refreshToken: string;
         };
         /**
          * TranscriptBatchResponse
@@ -4447,6 +4762,54 @@ export interface components {
             status: string;
         };
         /**
+         * UserInfoData
+         * @description 用户信息（Soybean Admin 兼容格式）
+         */
+        UserInfoData: {
+            /** Userid */
+            userId: string;
+            /** Username */
+            userName: string;
+            /** Roles */
+            roles: string[];
+            /** Buttons */
+            buttons: string[];
+        };
+        /**
+         * UserResponse
+         * @description 用户信息响应
+         */
+        UserResponse: {
+            /** Id */
+            id: number;
+            /** Username */
+            username: string;
+            /** Nickname */
+            nickname?: string | null;
+            /** Email */
+            email?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Avatar */
+            avatar?: string | null;
+            /** Roles */
+            roles: string[];
+            /** Status */
+            status: string;
+            /** Last Login At */
+            last_login_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
          * UserUpdate
          * @description 更新用户请求（所有字段可选）
          */
@@ -4660,7 +5023,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -4987,7 +5350,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5084,7 +5447,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5213,7 +5576,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5342,7 +5705,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5471,7 +5834,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5600,7 +5963,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6087,7 +6450,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["AccountDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6220,7 +6583,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LoginQRResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6344,7 +6707,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["LogsClearResponse"];
                 };
             };
         };
@@ -6814,7 +7177,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["MessageResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7247,7 +7610,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SoybeanResponse_TokenData_"];
                 };
             };
             /** @description Validation Error */
@@ -7282,7 +7645,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SoybeanResponse_TokenData_"];
                 };
             };
             /** @description Validation Error */
@@ -7311,7 +7674,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SoybeanResponse_UserInfoData_"];
                 };
             };
         };
@@ -7340,7 +7703,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SoybeanResponse_PageResult_UserResponse__"];
                 };
             };
             /** @description Validation Error */
@@ -7373,7 +7736,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SoybeanResponse_UserResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -7404,7 +7767,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SoybeanResponse_UserResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -7439,7 +7802,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SoybeanResponse_UserResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -7470,7 +7833,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SoybeanResponse_NoneType_"];
                 };
             };
             /** @description Validation Error */
@@ -7486,7 +7849,12 @@ export interface operations {
     };
     get_dashboard_summary_api_v1_dashboard_summary_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 开始日期（含），如 2026-07-20 */
+                start_date?: string | null;
+                /** @description 结束日期（含），如 2026-07-20 */
+                end_date?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7500,6 +7868,49 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dashboard_summary_by_anchor_api_v1_dashboard_summary_by_anchor_get: {
+        parameters: {
+            query?: {
+                /** @description 开始日期（含） */
+                start_date?: string | null;
+                /** @description 结束日期（含） */
+                end_date?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnchorSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

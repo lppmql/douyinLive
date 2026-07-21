@@ -26,7 +26,7 @@ from app.services.collector.utils import (
 )
 
 # 大屏页地址（与 manual_collect 共享常量）
-LIVE_SCREEN_URL = "https://leads.cluerich.com/pc/analysis/live-screen"
+from app.services.collector.constants import LIVE_SCREEN_URL
 
 
 def _get_or_create_session(

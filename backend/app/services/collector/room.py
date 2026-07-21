@@ -25,8 +25,7 @@ from app.services.collector.utils import (
 )
 
 # 大屏页 + 主页地址
-LIVE_SCREEN_URL = "https://leads.cluerich.com/pc/analysis/live-screen"
-COMMENT_URL = "https://leads.cluerich.com/pc/analysis/live-comment"
+from app.services.collector.constants import LIVE_SCREEN_URL
 HOME_URL = "https://leads.cluerich.com/pc/growth/home"
 
 

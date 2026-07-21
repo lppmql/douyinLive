@@ -10,10 +10,7 @@ from playwright.async_api import BrowserContext
 from app.services.collector.collector_framework import AdaptiveCollector
 from app.models.scraper_tasks import ScraperTask
 
-# 抖音企业号后台基础地址
-LEADS_BASE = "https://leads.cluerich.com"
-LIVE_SCREEN_URL = f"{LEADS_BASE}/pc/analysis/live-screen"
-COMMENT_URL = f"{LEADS_BASE}/pc/analysis/live-comment"
+from app.services.collector.constants import COMMENT_URL
 
 
 class CluerichMetricsCollector(AdaptiveCollector):

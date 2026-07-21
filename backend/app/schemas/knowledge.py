@@ -16,11 +16,17 @@ class KnowledgePageResponse(BaseModel):
 
 class KnowledgeTimeSliceStatusResponse(BaseModel):
     """GET /knowledge-base/time-slices/status"""
-    total_sessions: int = 0
-    synced_sessions: int = 0
-    pending_sessions: int = 0
-    total_slices: int = 0
-    unmapped_comments: int = 0
+    slice_count: int = 0
+    session_count: int = 0
+    transcript_slice_count: int = 0
+    comment_slice_count: int = 0
+    metric_slice_count: int = 0
+    high_intent_slice_count: int = 0
+    unmapped_comment_count: int = 0
+    knowledge_item_count: int = 0
+    latest_updated_at: datetime | None = None
+    slice_seconds: int = 60
+    parser_version: str = "time-slice-v1"
 
 
 class KnowledgeTimeSliceSearchResponse(BaseModel):

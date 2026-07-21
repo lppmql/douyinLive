@@ -40,6 +40,7 @@ class AiPipelineResponse(BaseModel):
     comments_saved: int = 0
     transcript_saved: int = 0
     analysis_saved: int = 0
+    review_saved: int = 0
     time_slices_created: int = 0
     time_slices_updated: int = 0
     time_slices_unchanged: int = 0
@@ -111,6 +112,7 @@ class AiKbSaveResponse(BaseModel):
     comments_saved: int = 0
     transcript_saved: int = 0
     analysis_saved: int = 0
+    review_saved: int = 0
     time_slices_created: int = 0
     time_slices_updated: int = 0
     time_slices_unchanged: int = 0
@@ -126,6 +128,7 @@ class AiKbSyncRecentResponse(BaseModel):
     comments_saved: int = 0
     transcript_saved: int = 0
     analysis_saved: int = 0
+    review_saved: int = 0
     time_slices_created: int = 0
     time_slices_updated: int = 0
     time_slices_unchanged: int = 0

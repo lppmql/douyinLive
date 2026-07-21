@@ -20,10 +20,13 @@ from app.schemas.scraper import (
     ScraperLogResponse,
     CollectorStatusResponse,
     LoginStartResponse,
+    LoginQRResponse,
     LoginStatusResponse,
     AccountHealthResponse,
     AsrControlResponse,
     CollectAllResponse,
+    AccountDeleteResponse,
+    LogsClearResponse,
 )
 from app.services.collector.browser import browser_manager
 from app.services.collector.browser import STORAGE_DIR
@@ -123,7 +126,7 @@ def update_account(account_id: int, data: ScraperAccountUpdate, db: Session = De
     return account
 
 
-@router.delete("/accounts/{account_id}")
+@router.delete("/accounts/{account_id}", response_model=AccountDeleteResponse)
 async def delete_account(account_id: int, db: Session = Depends(get_db)):
     """删除采集账号，并保留历史采集任务与业务数据。"""
     account = db.query(ScraperAccount).get(account_id)
@@ -266,7 +269,7 @@ async def start_login(db: Session = Depends(get_db)):
     return LoginStartResponse(task_id=task.id, message="请使用抖音扫描二维码")
 
 
-@router.get("/login-tasks/{task_id}/qr")
+@router.get("/login-tasks/{task_id}/qr", response_model=LoginQRResponse)
 async def get_login_qr(task_id: int):
     """获取登录二维码 base64"""
     qr = await browser_manager.get_login_qr(task_id)
@@ -354,7 +357,7 @@ def list_logs(
     return q.order_by(ScraperLog.id.desc()).limit(limit).all()
 
 
-@router.delete("/logs")
+@router.delete("/logs", response_model=LogsClearResponse)
 def clear_logs(db: Session = Depends(get_db)):
     """清空现有采集日志，不删除采集任务和业务数据。"""
     try:

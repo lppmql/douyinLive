@@ -35,10 +35,10 @@ from app.services.collector.utils import (
     _parse_dt,
     _safe_int,
 )
+from app.services.collector.constants import LIVE_SCREEN_URL
 
 # 历史场次接口地址
 HISTORY_API_URL = "https://leads.cluerich.com/live_console/history"
-LIVE_SCREEN_URL = "https://leads.cluerich.com/pc/analysis/live-screen"
 HISTORY_DETAIL_TIMEOUT_SECONDS = 45
 HISTORY_DETAIL_CONCURRENCY = 1
 CONTEXT_RECOVERY_ATTEMPTS = 2

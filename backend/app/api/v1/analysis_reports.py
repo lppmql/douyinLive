@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.analysis_reports import AnalysisReport
-from app.schemas import AnalysisReportCreate, AnalysisReportResponse
+from app.schemas import AnalysisReportCreate, AnalysisReportResponse, MessageResponse
 
 router = APIRouter(prefix="/analysis-reports", tags=["AI 分析报告"])
 
@@ -43,7 +43,7 @@ def create_report(data: AnalysisReportCreate, db: Session = Depends(get_db)):
     return r
 
 
-@router.delete("/{report_id}")
+@router.delete("/{report_id}", response_model=MessageResponse)
 def delete_report(report_id: int, db: Session = Depends(get_db)):
     r = db.query(AnalysisReport).get(report_id)
     if not r:

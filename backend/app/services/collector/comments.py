@@ -21,7 +21,7 @@ from app.services.collector.utils import (
 )
 
 # 企业后台评论页地址
-COMMENT_URL = "https://leads.cluerich.com/pc/analysis/live-comment"
+from app.services.collector.constants import COMMENT_URL
 
 
 async def _scrape_comments(context: BrowserContext, room_id: str) -> list:

@@ -5,6 +5,12 @@ from pydantic import BaseModel, ConfigDict
 from app.core.status import TaskStatus
 
 
+# ===== 通用响应 =====
+class MessageResponse(BaseModel):
+    """通用消息响应，用于 DELETE 等简单操作"""
+    message: str = "操作成功"
+
+
 # ===== 直播间 =====
 class LiveRoomBase(BaseModel):
     account_name: str

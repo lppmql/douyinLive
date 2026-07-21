@@ -181,3 +181,15 @@ class CollectAllResponse(BaseModel):
     postprocess_failed_count: int = 0
     results: list[CollectRoomResult] = Field(default_factory=list)
     message: Optional[str] = None
+
+
+class AccountDeleteResponse(BaseModel):
+    """删除采集账号的响应"""
+    message: str
+    detached_task_count: int = 0
+
+
+class LogsClearResponse(BaseModel):
+    """清空采集日志的响应"""
+    message: str
+    deleted_count: int = 0

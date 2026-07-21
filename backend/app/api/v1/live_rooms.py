@@ -8,6 +8,7 @@ from app.schemas import (
     LiveRoomCreate,
     LiveRoomUpdate,
     LiveRoomResponse,
+    MessageResponse,
 )
 
 router = APIRouter(prefix="/live-rooms", tags=["直播间"])
@@ -51,7 +52,7 @@ def update_room(room_id: int, data: LiveRoomUpdate, db: Session = Depends(get_db
     return room
 
 
-@router.delete("/{room_id}")
+@router.delete("/{room_id}", response_model=MessageResponse)
 def delete_room(room_id: int, db: Session = Depends(get_db)):
     """删除直播间"""
     room = db.query(LiveRoom).get(room_id)

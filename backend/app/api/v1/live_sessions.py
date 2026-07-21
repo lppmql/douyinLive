@@ -28,6 +28,7 @@ from app.schemas import (
     LiveSessionPageResponse,
     LiveSessionResponse,
     LiveSessionUpdate,
+    MessageResponse,
 )
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
@@ -309,7 +310,7 @@ def update_session(session_id: int, data: LiveSessionUpdate, db: Session = Depen
     return s
 
 
-@router.delete("/{session_id}")
+@router.delete("/{session_id}", response_model=MessageResponse)
 def delete_session(session_id: int, db: Session = Depends(get_db)):
     """删除直播场次"""
     s = db.get(LiveSession, session_id)

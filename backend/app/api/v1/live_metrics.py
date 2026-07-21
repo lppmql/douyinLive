@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.live_metrics import LiveMetric
+from app.schemas import MessageResponse
 from pydantic import BaseModel, ConfigDict
 from datetime import datetime
 from typing import Optional
@@ -52,7 +53,7 @@ def create_metric(data: MetricCreate, db: Session = Depends(get_db)):
     return m
 
 
-@router.delete("/{metric_id}")
+@router.delete("/{metric_id}", response_model=MessageResponse)
 def delete_metric(metric_id: int, db: Session = Depends(get_db)):
     m = db.query(LiveMetric).get(metric_id)
     if not m:

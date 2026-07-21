@@ -24,8 +24,7 @@ from app.services.collector.utils import (
 )
 
 # 企业后台地址
-LIVE_SCREEN_URL = "https://leads.cluerich.com/pc/analysis/live-screen"
-COMMENT_URL = "https://leads.cluerich.com/pc/analysis/live-comment"
+from app.services.collector.constants import LIVE_SCREEN_URL, COMMENT_URL
 ENTERPRISE_PAGE_SIZE = 100
 ENTERPRISE_MAX_PAGES = 200
 

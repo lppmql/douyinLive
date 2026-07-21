@@ -30,24 +30,13 @@ from app.services.collector.account_repo import (
     save_account_to_db,
     update_account_state,
 )
+from app.services.collector.constants import LEADS_BASE, DEFAULT_FINGERPRINT
 
 # 浏览器状态存储目录
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "storage_state"
 STORAGE_DIR.mkdir(exist_ok=True)
 
-# 抖音企业号后台地址
-LEADS_BASE = "https://leads.cluerich.com"
 LOGIN_URL = f"{LEADS_BASE}/pc/auth/login"
-
-# 统一指纹参数（登录 + 采集用同一套）
-DEFAULT_FINGERPRINT = {
-    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "viewport": {"width": 1920, "height": 1080},
-    "locale": "zh-CN",
-    "timezone_id": "Asia/Shanghai",
-    "device_scale_factor": 1,
-    "color_scheme": "light",
-}
 
 # 浏览器启动参数
 BROWSER_CHANNEL = "chromium"

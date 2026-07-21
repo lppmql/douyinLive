@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.core.database import get_db
 from app.models.prompt_templates import PromptTemplate
+from app.schemas import MessageResponse
 from app.services.ai.prompt_service import get_prompt, create_prompt, list_prompts, delete_prompt
 
 router = APIRouter(prefix="/ai/prompts", tags=["AI-提示词管理"])
@@ -57,7 +58,7 @@ def create_prompt_template(data: PromptCreate, db: Session = Depends(get_db)):
                           name=data.name, description=data.description)
 
 
-@router.delete("/{prompt_id}")
+@router.delete("/{prompt_id}", response_model=MessageResponse)
 def delete_prompt_template(prompt_id: int, db: Session = Depends(get_db)):
     """删除提示词模板"""
     if not delete_prompt(db, prompt_id):

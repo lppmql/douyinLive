@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.leads import Lead
-from app.schemas import LeadCreate, LeadResponse
+from app.schemas import LeadCreate, LeadResponse, MessageResponse
 
 router = APIRouter(prefix="/leads", tags=["留资"])
 
@@ -43,7 +43,7 @@ def create_lead(data: LeadCreate, db: Session = Depends(get_db)):
     return l
 
 
-@router.delete("/{lead_id}")
+@router.delete("/{lead_id}", response_model=MessageResponse)
 def delete_lead(lead_id: int, db: Session = Depends(get_db)):
     l = db.query(Lead).get(lead_id)
     if not l:

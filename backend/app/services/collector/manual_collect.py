@@ -52,8 +52,7 @@ from app.services.sync import sync_pending_complete_sessions
 
 # ==================== 公共常量（本模块专用） ====================
 
-LEADS_BASE = "https://leads.cluerich.com"
-LIVE_SCREEN_URL = f"{LEADS_BASE}/pc/analysis/live-screen"
+from app.services.collector.constants import LIVE_SCREEN_URL
 CONTEXT_RECOVERY_ATTEMPTS = 2
 COLLECTOR_ERROR_MAX_LENGTH = 500
 

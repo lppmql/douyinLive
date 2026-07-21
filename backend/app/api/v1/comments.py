@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.comments import Comment
-from app.schemas import CommentCreate, CommentResponse
+from app.schemas import CommentCreate, CommentResponse, MessageResponse
 
 router = APIRouter(prefix="/comments", tags=["评论"])
 
@@ -43,7 +43,7 @@ def create_comment(data: CommentCreate, db: Session = Depends(get_db)):
     return c
 
 
-@router.delete("/{comment_id}")
+@router.delete("/{comment_id}", response_model=MessageResponse)
 def delete_comment(comment_id: int, db: Session = Depends(get_db)):
     c = db.query(Comment).get(comment_id)
     if not c:

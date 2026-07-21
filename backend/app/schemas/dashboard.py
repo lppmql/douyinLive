@@ -71,7 +71,9 @@ class DataEaseSemanticResponse(BaseModel):
 class DataEaseSyncResponse(BaseModel):
     """POST /dataease/sync"""
     status: str = "ok"
+    selected_count: int = 0
     synced_count: int = 0
     failed_count: int = 0
-    skipped_count: int = 0
+    errors: list[str] = Field(default_factory=list)
+    removed_stale_row_count: int = 0
     dataease: DataEaseStatusResponse | None = None
