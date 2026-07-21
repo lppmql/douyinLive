@@ -6,6 +6,14 @@
 
 ## [2026-07-21]
 
+### Changed
+- **采集页方案 A 重构**（`index.vue` 1438 行 → 752 行，模板 547 行 → 128 行）：
+  - 新增 `utils/collectorHelpers.ts`：6 个纯工具函数（时间解析/格式化、日志摘要拼接）
+  - 新增 `composables/useCollectorPolling.ts`：轮询 + 时钟逻辑抽离
+  - 新增 7 个子组件：`CollectorStatCards`（统计卡片）、`CollectorRefreshCard`（刷新采集）、`CollectorMonitorCard`（监控）、`CollectorDataEaseCard`（DataEase）、`CollectorAccountTable`（账号表格）、`CollectorTaskDrawer`（任务抽屉）、`CollectorLogDetailModal`（日志详情）
+  - `index.vue` 精简为编排器：只保留状态管理 + 数据加载 + 扫码登录流程，UI 全部委托子组件
+  - 后端无改动，纯前端重构
+
 ### Added
 - **Matt Pocock 工程技能体系配置**：
   - 新增 `docs/agents/issue-tracker.md`：GitHub Issues 作为问题追踪器，含 `gh` CLI 常用操作手册
