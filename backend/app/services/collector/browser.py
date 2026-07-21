@@ -18,10 +18,18 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from app.core.logger import logger
 from app.core.database import SessionLocal
+from app.core.status import TaskStatus
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_tasks import ScraperTask
-from app.services.tasks.runtime import publish_task_event, touch_task
-from app.core.status import TaskStatus
+from app.services.collector.account_repo import (
+    find_account_by_id,
+    find_account_by_storage_path,
+    find_latest_logged_in_account,
+    finish_login_task,
+    load_account_fingerprint as _load_fingerprint,
+    save_account_to_db,
+    update_account_state,
+)
 
 # 浏览器状态存储目录
 STORAGE_DIR = Path(__file__).resolve().parent.parent.parent.parent / "storage_state"
@@ -144,43 +152,16 @@ class BrowserManager:
         return opts
 
     def _load_account_fingerprint(self, account: Optional[ScraperAccount]) -> dict[str, Any]:
-        """从账号记录中解析浏览器指纹。"""
-        if not account:
-            return {}
-
-        raw = account.browser_fingerprint_json
-        if raw:
-            try:
-                parsed = json.loads(raw)
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                logger.warning("browser_fingerprint_json 解析失败，回退到基础指纹字段")
-
-        if account.user_agent or account.viewport_width or account.viewport_height:
-            return {
-                "user_agent": account.user_agent,
-                "viewport": {
-                    "width": account.viewport_width or DEFAULT_FINGERPRINT["viewport"]["width"],
-                    "height": account.viewport_height or DEFAULT_FINGERPRINT["viewport"]["height"],
-                },
-                "locale": DEFAULT_FINGERPRINT["locale"],
-                "timezone_id": DEFAULT_FINGERPRINT["timezone_id"],
-                "device_scale_factor": DEFAULT_FINGERPRINT["device_scale_factor"],
-                "color_scheme": DEFAULT_FINGERPRINT["color_scheme"],
-            }
-        return {}
+        """从账号记录中解析浏览器指纹（委托给 account_repo）。"""
+        return _load_fingerprint(account)
 
     def _find_account_by_storage_path(self, storage_state_path: Optional[str]) -> Optional[ScraperAccount]:
         """通过 storage_state_path 查找账号。"""
         if not storage_state_path:
             return None
-
         db = SessionLocal()
         try:
-            return db.query(ScraperAccount).filter(
-                ScraperAccount.storage_state_path == storage_state_path
-            ).order_by(ScraperAccount.id.desc()).first()
+            return find_account_by_storage_path(db, storage_state_path)
         finally:
             db.close()
 
@@ -188,29 +169,21 @@ class BrowserManager:
         """通过账号 ID 查找账号。"""
         if not account_id:
             return None
-
         db = SessionLocal()
         try:
-            return db.get(ScraperAccount, account_id)
+            return find_account_by_id(db, account_id)
         finally:
             db.close()
 
     def _find_latest_logged_in_account(self) -> Optional[ScraperAccount]:
-        """查找最近登录且登录状态文件仍存在的采集账号。"""
+        """查找最近登录且 storage_state 文件仍存在的采集账号。"""
         db = SessionLocal()
         try:
-            accounts = db.query(ScraperAccount).filter(
-                ScraperAccount.login_status == "logged_in",
-                ScraperAccount.storage_state_path.isnot(None),
-            ).order_by(ScraperAccount.last_login_at.desc(), ScraperAccount.id.desc()).all()
-            return next(
-                (
-                    account
-                    for account in accounts
-                    if account.storage_state_path and Path(account.storage_state_path).is_file()
-                ),
-                None,
-            )
+            account = find_latest_logged_in_account(db)
+            # 额外验证 storage_state 文件确实存在（磁盘检查，非 DB 问题）
+            if account and account.storage_state_path and Path(account.storage_state_path).is_file():
+                return account
+            return None
         finally:
             db.close()
 
@@ -619,20 +592,12 @@ class BrowserManager:
         storage_path: Optional[str] = None,
         cookies_json: Optional[str] = None
     ) -> None:
-        """刷新账号表里的 storage_state / cookies。"""
+        """刷新账号表里的 storage_state / cookies（委托给 account_repo）。"""
         if not account_id:
             return
-
         db = SessionLocal()
         try:
-            account = db.query(ScraperAccount).get(account_id)
-            if not account:
-                return
-            if storage_path:
-                account.storage_state_path = storage_path
-            if cookies_json:
-                account.cookies_json = cookies_json
-            account.updated_at = datetime.utcnow()
+            update_account_state(db, account_id, storage_path, cookies_json)
             db.commit()
         except Exception as e:
             logger.warning(f"刷新账号登录态失败: {e}")
@@ -652,66 +617,31 @@ class BrowserManager:
         vp_height: int | None,
         account_id: Optional[int] = None
     ) -> Optional[int]:
-        """登录成功后写入 ScraperAccount 表，并返回最终账号 ID。"""
+        """登录成功后写入 ScraperAccount 表，并返回最终账号 ID。
+
+        委托 account_repo.save_account_to_db 处理数据持久化。
+        """
         db = SessionLocal()
         try:
-            existing = None
-            if account_id:
-                existing = db.query(ScraperAccount).get(account_id)
-            if existing is None:
-                existing = db.query(ScraperAccount).filter(
-                    ScraperAccount.account_name == account_name
-                ).order_by(ScraperAccount.id.desc()).first()
-
-            if existing:
-                existing.storage_state_path = storage_path
-                existing.user_agent = ua
-                existing.viewport_width = vp_width
-                existing.viewport_height = vp_height
-                existing.login_status = "logged_in"
-                existing.last_login_at = datetime.utcnow()
-                existing.cookies_json = cookies_json
-                existing.browser_fingerprint_json = browser_fingerprint_json
-                logger.info(f"更新已有账号记录: id={existing.id}, name={account_name}")
-                saved_account = existing
-            else:
-                saved_account = ScraperAccount(
-                    account_name=account_name,
-                    login_status="logged_in",
-                    storage_state_path=storage_path,
-                    user_agent=ua,
-                    viewport_width=vp_width,
-                    viewport_height=vp_height,
-                    last_login_at=datetime.utcnow(),
-                    cookies_json=cookies_json,
-                    browser_fingerprint_json=browser_fingerprint_json,
-                )
-                db.add(saved_account)
-                logger.info(f"创建新账号记录: name={account_name}")
-
-            # 更新任务状态
-            db_task = db.query(ScraperTask).get(task_id)
-            if db_task:
-                db_task.status = "completed"
-                db_task.completed_at = datetime.utcnow()
-                db_task.error_message = None
-                touch_task(db_task)
-                if existing:
-                    db_task.account_id = existing.id
-
-            db.commit()
-            db.refresh(saved_account)
-            if db_task and saved_account:
-                db_task.account_id = saved_account.id
-                db.commit()
-                publish_task_event(
-                    "scraper",
-                    db_task,
-                    "completed",
-                    {"task_type": "login", "account_id": saved_account.id},
-                )
-
-            return saved_account.id
+            saved_id = save_account_to_db(
+                db, task_id, account_name, storage_path,
+                cookies_json, browser_fingerprint_json,
+                ua, vp_width, vp_height, account_id,
+            )
+            # 登录成功后同时将关联任务标记为完成
+            if saved_id:
+                db_task = db.query(ScraperTask).get(task_id)
+                if db_task:
+                    db_task.status = TaskStatus.COMPLETED.value
+                    db_task.completed_at = datetime.utcnow()
+                    db_task.error_message = None
+                    touch_task(db_task)
+                    db.commit()
+                    publish_task_event(
+                        "scraper", db_task, TaskStatus.COMPLETED.value,
+                        {"task_type": "login", "account_id": saved_id},
+                    )
+            return saved_id
         except Exception as e:
             logger.error(f"保存账号记录失败: {e}")
             db.rollback()
@@ -720,23 +650,10 @@ class BrowserManager:
             db.close()
 
     def _finish_login_task(self, task_id: int, status: str, error_message: str | None = None) -> None:
-        """可靠结束扫码任务，防止异常后任务永久停留在 running。"""
+        """可靠结束扫码任务（委托给 account_repo）。"""
         db = SessionLocal()
         try:
-            task = db.get(ScraperTask, task_id)
-            if not task or task.status == "completed":
-                return
-            task.status = status
-            task.completed_at = datetime.utcnow()
-            task.error_message = error_message[:500] if error_message else None
-            touch_task(task)
-            db.commit()
-            publish_task_event(
-                "scraper",
-                task,
-                TaskStatus.FAILED if status == TaskStatus.FAILED else status,
-                {"task_type": "login", "error": task.error_message or ""},
-            )
+            finish_login_task(db, task_id, status, error_message)
         except Exception as exc:
             db.rollback()
             logger.warning("扫码任务状态更新失败 task_id=%s: %s", task_id, exc)
