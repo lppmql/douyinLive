@@ -7,6 +7,7 @@
 ## [2026-07-21]
 
 ### Fixed
+- **主播排班页空白修复**：后端 `AnchorScheduleDashboardResponse` Schema 只定义了 6 个旧字段（`completions`/`details`），但 `build_schedule_dashboard()` 实际返回 `summary`/`anchors`/`rows`/`reminders`/`rule` 等完整字段，被 Pydantic `response_model` 全部过滤掉，导致前端拿到的数据全是 `undefined`、页面显示空白。修复：Schema 新增 10 个字段对齐 Service 返回结构。
 - **P0 生产就绪修复**（7 项）：
   - **部署文档 Worker 数量**：`docs/部署.md` 中 uvicorn `--workers 4` → `--workers 1`，加注释说明原因（BrowserManager/SchedulerManager/登录会话在进程内存中，多 Worker 会状态不一致）
   - **部署文档数据库地址**：宿主机部署时 `DB_HOST=mysql` → `127.0.0.1`、`REDIS_URL` 中 `redis` → `127.0.0.1`，加注释区分 Docker 内/外两种场景
