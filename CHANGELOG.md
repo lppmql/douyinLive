@@ -24,9 +24,9 @@
 ### Added
 - **项目维护体系建立**：
   - 打首个版本标签 `v0.9.0`
-  - 新增 `docs/development.md` 开发指南（含目录结构、开发流程、代码红线、职责分层）
-  - 新增 `docs/deployment.md` 部署指南（含首次部署、发布流程、回滚方案、备份策略）
-  - 新增 `docs/troubleshooting.md` 故障排查手册（按症状→诊断→解决的结构）
+  - 新增 `docs/开发.md` 开发指南（含目录结构、开发流程、代码红线、职责分层）
+  - 新增 `docs/部署.md` 部署指南（含首次部署、发布流程、回滚方案、备份策略）
+  - 新增 `docs/故障排查.md` 故障排查手册（按症状→诊断→解决的结构）
   - 新增 `docs/adr/0006-项目维护标准与红线.md`
 - **Makefile 扩展**：
   - 新增 `check` 目标：一键运行测试 + lint + 构建 + 数据库迁移检查
@@ -83,7 +83,7 @@
 - Dependabot groups：npm/pip 的 patch 和 minor 各合并为一个 PR（不再 10 个分散 PR）
 - pytest-cov + CI 覆盖率红线（初始阈值 50%）
 - `docs/adr/` 目录：5 个架构决策记录（只增不改）
-- `docs/architecture/README.md`：架构文档导航
+- `docs/架构/README.md`：架构文档导航
 - `docs/adr/0002-*`：绞杀者迁移模板（7 步标准流程）
 - `CHANGELOG.md`：按时间倒序的版本变更记录
 
@@ -92,7 +92,7 @@
 - docker-compose `DATAEASE_ORIGIN_LIST` 改为 `${CORS_ORIGINS:-...}`
 - 前后端 `.env` 分离：根 `.env` 纯后端变量，`frontend/.env` 纯 VITE_* 变量
 - `.gitignore`: `.env` → `/.env`（只忽略根目录含密钥的 .env）
-- 部分架构文档从 `docs/architecture/` 迁移为 ADR 格式
+- 部分架构文档从 `docs/架构/` 迁移为 ADR 格式
 
 ### Removed
 - `packages/alova/` — 未使用的 HTTP 客户端包（项目用 `@sa/axios`）
