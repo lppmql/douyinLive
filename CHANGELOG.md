@@ -17,6 +17,13 @@
   - **过期文档更新**：`开发.md` 更新文件行数/任务状态/断链；`ADR 0006` 更新待办状态/文件名/行数；`验收测试/README.md` 修复 6 个英文断链
 
 ### Changed
+- **主播排班页方案 A 重构**（`index.vue` 646 行 → 147 行，-77%）：
+  - 新增 `utils/anchorScheduleHelpers.ts`：10 个纯工具函数（状态映射表、时间格式化、缺场/无效/加场摘要格式化）
+  - 新增 `adapters/anchor-schedule-adapter.ts`：表格列定义适配器（用 h() 渲染复杂列内容）
+  - 新增 `views/anchor-schedule/composables/useAnchorSchedule.ts`：排班状态管理（全部 ref + computed + 异步操作 + 生命周期）
+  - 新增 4 个子组件：`AnchorScheduleStatCards`（KPI 统计卡片）、`AnchorScheduleAnchorCards`（主播完成度卡片网格）、`AnchorScheduleTable`（班次明细表格）、`AnchorScheduleReminderDrawer`（提醒抽屉）
+  - `index.vue` 精简为纯编排器：只负责日期控件 + 错误提示 + 组合子组件
+  - 后端无改动，纯前端重构
 - **主播话术页方案 A 重构**（`index.vue` 796 行 → 154 行，-81%）：
   - 新增 `utils/transcriptHelpers.ts`：7 个纯工具函数（时间格式化、状态文案/类型映射）
   - 新增 `adapters/transcript-adapter.ts`：数据适配器（分类统计、任务卡片配置、场次下拉选项构建）
