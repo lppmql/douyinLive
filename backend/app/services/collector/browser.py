@@ -15,6 +15,7 @@ from typing import Optional, Any
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
+from app.core.config import settings
 from app.core.logger import logger
 from app.core.database import SessionLocal
 from app.core.status import TaskStatus
@@ -110,7 +111,7 @@ class BrowserManager:
                         pass
                 self._playwright = await async_playwright().start()
                 self._browser = await self._playwright.chromium.launch(
-                    headless=True,
+                    headless=settings.PLAYWRIGHT_HEADLESS,
                     channel=BROWSER_CHANNEL,
                     args=BROWSER_ARGS,
                 )
@@ -355,7 +356,7 @@ class BrowserManager:
 
             playwright = await async_playwright().start()
             browser = await playwright.chromium.launch(
-                headless=True,
+                headless=settings.PLAYWRIGHT_HEADLESS,
                 channel=BROWSER_CHANNEL,
                 args=BROWSER_ARGS,
             )

@@ -4,12 +4,12 @@
 
 ## 文档导航
 
-- [数据采集验收](collector-acceptance.md)
-- [ASR 话术验收](asr-acceptance.md)
-- [场次复盘验收](review-acceptance.md)
-- [知识库验收](knowledge-acceptance.md)
-- [主播排班验收](schedule-acceptance.md)
-- [可观测性验收](observability-acceptance.md)
+- [数据采集验收](采集器验收.md)
+- [ASR 话术验收](语音识别验收.md)
+- [场次复盘验收](复盘验收.md)
+- [知识库验收](知识库验收.md)
+- [主播排班验收](定时任务验收.md)
+- [可观测性验收](可观测性验收.md)
 
 历史验收结论已归档至 [ADR 目录](../adr/) 和 [CHANGELOG.md](../../CHANGELOG.md)。
 

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # 应用
     APP_NAME: str = "零食店避坑直播运营复盘系统"
-    APP_VERSION: str = "0.1.0"
+    APP_VERSION: str = "0.9.0"
     DEBUG: bool = False
     ALLOW_SYNTHETIC_DATA: bool = False
     LOG_FORMAT: str = "json"

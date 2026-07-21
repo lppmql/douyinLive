@@ -56,6 +56,8 @@ jobs:
           cache-dependency-path: backend/requirements.txt
       - run: pip install -r requirements.txt
       - run: alembic upgrade head
+      - run: ruff check app/
+      - run: alembic check
       - run: pytest -q
 
   frontend-check:
@@ -117,3 +119,11 @@ jobs:
             exit 1
           }
           echo "✅ API 类型与后端 schema 一致"
+
+  # 检查 docker-compose.yml 配置是否有效
+  docker-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate docker-compose configuration
+        run: docker compose config -q

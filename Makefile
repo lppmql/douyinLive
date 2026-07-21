@@ -9,7 +9,7 @@ start:
 	./start.sh
 
 # ── 完整检查（提交前必跑）──
-check: test lint build db-check
+check: test lint build db-check docker-check
 	@echo "✅ 全部检查通过"
 
 # ── 测试 ──

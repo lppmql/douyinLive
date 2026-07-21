@@ -6,6 +6,16 @@
 
 ## [2026-07-21]
 
+### Fixed
+- **P0 生产就绪修复**（7 项）：
+  - **部署文档 Worker 数量**：`docs/部署.md` 中 uvicorn `--workers 4` → `--workers 1`，加注释说明原因（BrowserManager/SchedulerManager/登录会话在进程内存中，多 Worker 会状态不一致）
+  - **部署文档数据库地址**：宿主机部署时 `DB_HOST=mysql` → `127.0.0.1`、`REDIS_URL` 中 `redis` → `127.0.0.1`，加注释区分 Docker 内/外两种场景
+  - **Grafana 访问方式**：从 `http://服务器IP:3000` 改为 SSH 隧道 + Nginx 反向代理两种安全方式（Compose 绑定 127.0.0.1）
+  - **统一 APP_VERSION**：`config.py` 中 `0.1.0` → `0.9.0`，与版本标签一致
+  - **PLAYWRIGHT_HEADLESS 生效**：`browser.py` 2 处 `headless=True` 硬编码 → `headless=settings.PLAYWRIGHT_HEADLESS`，现在可通过 `.env` 控制
+  - **补齐 CI 检查**：CI 新增 ruff check + alembic check 步骤，新增 docker-check job；Makefile `check` 目标补上 `docker-check` 依赖
+  - **过期文档更新**：`开发.md` 更新文件行数/任务状态/断链；`ADR 0006` 更新待办状态/文件名/行数；`验收测试/README.md` 修复 6 个英文断链
+
 ### Changed
 - **采集页方案 A 重构**（`index.vue` 1438 行 → 752 行，模板 547 行 → 128 行）：
   - 新增 `utils/collectorHelpers.ts`：6 个纯工具函数（时间解析/格式化、日志摘要拼接）
