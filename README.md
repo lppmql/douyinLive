@@ -1,432 +1,129 @@
 # 零食店避坑直播运营复盘系统
 
-面向“开零食店如何避坑”知识科普直播的一体化运营中台：通过选址、预算、品牌、供应链、毛利损耗和证照等内容帮助准备开店的用户，再用选址检查表、预算测算表、品牌尽调清单等真实资料作为钩子，引导用户主动在抖音站内私信。系统使用已扫码登录的采集账号同步主播、直播场次、分钟指标和用户评论；使用受控的 FunASR 队列生成直播话术；最后把回放、数据、评论、话术和复盘证据集中到同一个场次详情中。
+面向「开零食店如何避坑」知识科普直播的运营复盘系统。通过选址、预算、品牌、供应链、毛利损耗等话题吸引目标用户，用资料包引导站内私信留资。系统采集直播数据 → ASR 转写话术 → AI 复盘分析 → 知识库问答，形成完整的运营复盘闭环。
 
-> 本项目仅用于已获授权的数据分析。请遵守平台规则、隐私要求和当地法律，不要采集或传播无权处理的数据。
-
-## 核心能力
-
-- **扫码登录**：保存 Cookie、StorageState 和浏览器指纹，后续采集复用登录环境；连续两次探测失败才判定登录过期，减少平台临时跳转误报。
-- **刷新数据采集**：增量补齐全部主播、历史直播场次、场次指标、评论、观众画像和流地址。
-- **实时直播监控**：定时识别开播状态，直播中持续采集指标和评论，下播后补齐场次详情。
-- **采集日志工作台**：日志列表固定高度并在区域内滚动，横向滚动时保留右侧“查看”操作；支持筛选、静默刷新和二次确认清空，清空只删除现有采集日志，不影响任务、账号、主播或直播场次，运行中任务产生的新日志仍会继续写入。
-- **场次列表性能**：直播场次页使用数据库分页、轻量字段响应和“开播时间 + 场次 ID”联合索引，默认首屏只读取 10 行；主播头像优先显示真实采集图片，仅在图片加载失败时回退为姓名首字，详情、评论、回放和 AI 数据仅在进入详情后读取。
-- **可靠任务**：采集与 ASR 任务保存幂等键、Trace ID、Worker、心跳和重试次数，生命周期事件写入可回放的 Redis Streams。
-- **自动分析流水线**：采集后持续为全部可用真实回放补充队列，默认从开播时间最新的场次开始转写；单场转写完成后依次执行话术评分、结构化 AI 复盘、知识库增量同步和 DataEase 同步；每个阶段幂等并保存结果，Worker 重启后可继续处理历史积压。
-- **长场次可靠性**：完整话术和知识库内容均使用 MySQL `LONGTEXT` 保存；手动重试会保留已完成分片并重置失败部分，Worker 数据库异常会先回滚再记录状态，避免一小时以上直播在合并全文或知识入库时被误判失败。
-- **话术工作台**：默认打开最新真实直播场次，自动队列、各主播增量任务和 Worker 执行也按真实开播时间从新到旧处理（人工设置的高优先级任务仍可插队）；场次选择器展示真实主播头像并支持搜索，集中展示完整分段、全文、时间覆盖、AI 评分、内容分类和时间导航；任务状态卡可穿透查看主播、场次、失败原因、重试次数与已有分段，活跃任务每 5 秒静默刷新；未生成全文的场次使用正常空状态，不再误报 404。
-- **低资源保护**：ASR 同时只转写 1 场，自动回收心跳超时任务并从已完成分片续跑；默认关闭逐条 SQL 回显和 WebSocket 音频帧日志，避免长场次日志占满磁盘；实时监控的浏览器页面任务同样串行，避免多主播同时采集时关闭共享上下文。
-- **无头浏览器稳定性**：Playwright Chromium 使用新版无头模式，关闭硬件 GPU 与 WebGL 但保留软件光栅器作为 macOS 渲染后备；登录上下文保留一个无网络空白页，避免零页面时浏览器退出，异常后仍会从保存的 Cookie、StorageState 和指纹自动恢复。
-- **视频下载**：场次详情显示 m3u8 地址，可选择本地位置并以原码流低开销封装为 MP4。
-- **兼容回放**：抖音回放为 H.265 时，场次详情使用靠左的小尺寸 9:16 竖屏播放器按需转换为浏览器兼容的 H.264；统一复盘分析在播放器右侧，时间轴、分钟曲线和 AI 分析在同一区域切换；macOS 优先使用硬件编码，单路限速运行且离开页面立即释放。
-- **AI 复盘工作台**：默认打开最新真实直播场次，场次选择器展示真实主播头像并支持搜索，统一展示数据可信度、五维话术评分、优势不足、证据发现、下一场动作和历史报告；完整复盘按证据提取、AI 评分、优化建议分阶段执行。
-- **证据化复盘工作台**：回放、分钟趋势、评论、话术和复盘发现使用同一条时间轴，点击证据可跳转到对应回放位置。
-- **场次详情精简**：视频回放和统一复盘分析前置；实时告警、复盘发现、评论、话术和指标按真实时间汇聚，分钟曲线与 AI 分析集成在同一工作区；场次信息与回放下载合并展示，跨场选择只读取最近 100 条轻量场次。
-- **全站一致体验**：首页、采集、场次、话术、AI 复盘、知识库、排班和用户管理统一使用 SoybeanAdmin 页面头、工具栏、数据表格、加载骨架、错误重试和响应式规则；被 KeepAlive 隐藏的页面会停止轮询，避免后台请求拖慢当前操作。
-- **可维护性自检**：GitHub Actions 持续验证后端迁移与测试、前端类型、ESLint、Oxlint 和构建；`make doctor` 检查依赖、容器、Playwright、健康接口、磁盘和弱配置。
-- **可复现构建**：Alembic 迁移复用后端集中配置，仓库不保存数据库密码；前端 CI 使用不含密钥的 `frontend/.env.ci`，不依赖开发机 `.env`。
-- **P1 复盘能力**：同主播跨场对比、实时异常提示、下一场验证、真实话术资产和版本化合规筛查。
-- **零食店领域分析**：识别城市选址、预算面积、租金转让费、品牌加盟、货源供应链、毛利损耗、证照和资料领取问题；禁止把业务误判为零食带货。
-- **知识库自由问答**：话术、评论和分钟指标按 5 分钟形成可追溯时间片；聊天主工作区支持连续追问、分类检索和真实来源展开，追问会继承上一轮引用场次，引用可直接穿透到原直播场次。
-- **主播排班核对**：从真实 `排班.xls` 导入 17 个每日班次，文豪、大全各 4 场，其余排班主播各 3 场；每场按 80 分钟与真实采集场次一对一匹配，已结束且不足 45 分钟标记无效，已到期后提示缺场、时长不足和跨整点开播，未来班次不提前误报。
-- **指标语义层**：统一 16 项核心指标定义，并通过 10 个 `de_v_*` 只读事实/维度视图供 DataEase 使用。
-- **可观测性**：全请求 Trace ID、JSON 结构化日志、Prometheus `/metrics` 和低资源 Grafana 可选监控。
-
-## 数据链路
-
-```mermaid
-flowchart LR
-    A[扫码登录] --> B[Cookie 与浏览器指纹]
-    B --> C[刷新采集 / 实时监控]
-    C --> D[主播与直播场次]
-    C --> E[分钟指标与评论]
-    C --> F[直播流地址]
-    F --> G[FunASR 话术转写]
-    D --> H[DeepSeek AI 分析]
-    E --> H
-    G --> H
-    D --> M[场次复盘工作台]
-    E --> M
-    G --> M
-    M --> N[复盘发现与下一场验证]
-    M --> O[真实话术资产]
-    D --> I[5分钟知识时间片]
-    E --> I
-    G --> I
-    H --> I
-    I --> J[知识库 AI 问答]
-    D --> K[DataEase 语义视图]
-    C --> L[Prometheus 指标]
-```
+> 本项目仅用于已获授权的数据分析。请遵守平台规则与隐私法规。
 
 ## 技术栈
 
-- 前端：Vue 3、TypeScript、Vite、SoybeanAdmin、Naive UI、ECharts
-- 后端：FastAPI、SQLAlchemy、APScheduler、Playwright
-- 数据：MySQL 8、Redis 7
-- AI：DeepSeek API、FunASR、ffmpeg
-- 可视化：DataEase（可选）
-- 可观测性：Prometheus、Grafana（可选 profile）
+| 层 | 技术 |
+|---|------|
+| 前端 | Vue 3、TypeScript、Vite、SoybeanAdmin、Naive UI、ECharts |
+| 后端 | FastAPI、SQLAlchemy、APScheduler、Playwright |
+| 数据 | MySQL 8、Redis 7 |
+| AI | DeepSeek API、FunASR、ffmpeg |
+| 可视化 | DataEase（可选） |
+| 监控 | Prometheus、Grafana（可选） |
 
 ## 环境要求
 
 - macOS 或 Linux
 - Docker Desktop
-- Python 3.10
+- Python 3.10+
 - Node.js 20+ 与 pnpm
 - ffmpeg
 
-macOS 可检查依赖：
-
 ```bash
-docker --version
-python3 --version
-node --version
-pnpm --version
-ffmpeg -version
+docker --version && python3 --version && node --version && pnpm --version && ffmpeg -version
 ```
 
-## 首次安装
-
-1. 创建本地配置，填写自己的 DeepSeek 密钥：
+## 快速开始
 
 ```bash
+# 1. 创建配置（填写 DEEPSEEK_API_KEY）
 cp .env.example .env
-```
 
-2. 安装后端依赖和 Playwright Chromium：
-
-```bash
+# 2. 安装后端依赖 + Playwright 浏览器
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
 cd ..
-```
 
-3. 安装前端依赖：
+# 3. 安装前端依赖
+cd frontend && pnpm install && cd ..
 
-```bash
-cd frontend
-pnpm install
-cd ..
-```
-
-4. 一键启动：
-
-```bash
+# 4. 一键启动
 ./start.sh
 ```
 
 启动后访问：
 
-- 前端：<http://localhost:9527>
-- 后端健康检查：<http://localhost:8000/health>
-- API 文档：<http://localhost:8000/docs>
-- DataEase：<http://localhost:8100>
-- Prometheus：<http://localhost:9090>
-- Grafana：<http://localhost:3000>
-
-`start.sh` 按“基础组件与 DataEase → Prometheus/Grafana → 后端 → ASR → 前端”顺序启动全栈，避免首次拉取监控镜像时与 FunASR 模型争抢内存。脚本会检查 FastAPI、DataEase RSA 公钥及登录密钥自动刷新层、Prometheus 和 Grafana，全部通过后才提示启动完成；DataEase 首次初始化通常需要 3-10 分钟，8GB 电脑同时进行 ASR 时会接近上限。后端默认使用稳定单进程模式，避免开发热更新遗留孤儿进程和重复数据库连接；需要修改后端代码并自动重载时可使用 `BACKEND_RELOAD=true ./start.sh`。采集调度器由后端统一管理，不再额外启动第二个采集 Worker；FunASR 限制 2 核、1.8GB 内存，DataEase 限制 1 核、1.2GB 内存，ffmpeg 单线程，ASR Worker 单任务并发且最多排队 5 场。
-
-DataEase 应使用 `.env` 中的 `DATAEASE_READER_USER` 和 `DATAEASE_READER_PASSWORD` 连接业务 MySQL。该账号只有 `SELECT`、`SHOW VIEW` 权限，不能修改业务数据。现有大屏继续使用 `de_*` 宽表，新数据集优先使用 `de_v_*` 语义视图；统一指标接口为 `GET /api/v1/dataease/semantic-layer`，同步状态接口为 `GET /api/v1/dataease/status`。
-
-### DataEase 数据大屏（2026-07-18）
-
-项目“数据大屏”一级页面不再重复绘制指标卡，按照 DataEase 官方公共链接嵌入方式，通过 `iframe` 直接承载已发布大屏：
-
-- 数据源：`抖音直播运营数据`，使用只读账号连接 `douyin_live_mysql:3306/douyin_live`。
-- 原生数据集：`直播场次总览`，来源为 `de_live_session_anchor_summary`，可继续在 DataEase 中维护图表。
-- DataEase 分享地址：`http://localhost:8100/#/de-link/ioyH1hYC`。
-- 前端配置：默认使用上述地址，也可通过 `VITE_DATAEASE_URL="http://localhost:8100/#/de-link/ioyH1hYC"` 覆盖；包含 `#` 的 URL 必须加引号，iframe 明确设置宽度、高度和无边框。
-- 跨域配置：`dataease.origin-list` 仅允许 `http://localhost:9527` 和 `http://127.0.0.1:9527`，修改后需重启 DataEase。
-
-本机同时启动前端和 DataEase 后，访问 <http://localhost:9527/dashboard> 即可在项目内查看。部署到其他电脑或域名时，必须同步修改 `VITE_DATAEASE_URL` 与 `dataease.origin-list`，两处都要使用用户浏览器能访问的真实地址。DataEase 的画布、数据源和数据集元数据保存在 MySQL 的 `dataease` 库，恢复数据库时应与业务库一并备份；不要把只读账号密码写入 README 或提交到 Git。
-
-复盘新增只读事实视图：
-
-| 视图 | 粒度 | 用途 |
-| --- | --- | --- |
-| `de_v_fact_review_finding` | 每条复盘发现一行 | 风险、机会、证据时间点和处理状态 |
-| `de_v_fact_review_action` | 每个整改任务一行 | 负责人、进度、截止时间和验证场次 |
-| `de_v_fact_script_asset` | 每个真实话术资产一行 | 分类、来源原文、时间点和人工确认状态 |
-
-## 推荐操作顺序
-
-第一次使用建议先阅读图文教程：[新手使用教程](docs/beginner-guide.md)。教程包含当前真实页面截图、每一步成功标准和常见故障处理。
-
-1. 打开“数据采集”页面，扫码登录采集账号。
-2. 确认账号状态为“已登录”，并使用“检查存活”验证 Cookie。
-   实时监控开启时无需停止监控，存活检查会进入同一浏览器串行队列；刷新采集或扫码登录进行中时仍会阻止检查。
-3. 可直接执行“刷新数据采集”；刷新期间实时监控会保持开启但暂缓浏览器任务，刷新完成后自动恢复。
-4. 等待采集进度完成；系统会分页发现平台全部场次，并串行刷新全部待补详情，不再限制每次只处理 20 场。页面持续显示已检查、已补齐、失败和待重试数量；采集日志在固定区域内滚动，“查看”操作始终固定在右侧。清空日志必须二次确认，并且不会删除任务和业务数据。
-5. 在“直播场次”进入详情，先确认复盘数据可信度，再联动查看回放、分钟趋势、按用户归组的评论和话术证据。
-6. ASR 默认自动生成话术；电脑负载较高时，可在采集页关闭 ASR 释放模型内存。
-7. 在“AI 复盘”选择已有真实报告的场次，先检查数据可信度，再生成完整复盘和下一场可验证动作。
-8. 在详情的“跨场对比”选择真实基准场次，核对已确认的复盘发现，并在下一场验证。
-9. 从时间轴收录表现明确的真实话术片段，人工确认后再进入话术资产库。
-10. 在“知识库”点击“同步最近 20 场”，确认话术、评论和指标时间片数量，再使用问答输入业务问题。
-11. 在“主播排班”按日期核对计划与真实场次，点击提醒查看缺场、无效场次、时长不足或跨整点明细，并可穿透到场次详情。
-
-## 主播排班
-
-“主播排班”是知识库下方的一级页面，排班模板保存在 MySQL `anchor_schedules`，DataEase 可通过只读视图 `de_v_fact_anchor_schedule` 使用。当前模板来源为 `排班.xls`：
-
-- 韩龙飞（飞哥）、民哥、丹丹（丹姐）每天各 3 场。
-- 刘文豪（文豪）、王路权（大全）每天各 4 场。
-- 每场标准时长为 80 分钟，计划开播和下播时间保持源表原值。
-- 实际场次按照主播别名和计划时间在两小时窗口内一对一匹配，同一场直播不会重复占用多个班次。
-- 计划时间后的下一个整点已过仍未开播才提示缺场；实际开播须在计划时间所在自然小时内，提前或延后跨出该小时均提示“跨整点开播”。
-- 已结束场次不足 45 分钟标记为“无效场次”；达到 45 分钟但不足 80 分钟标记为“时长不足”；正在直播的场次无论当前时长多少都不会提前判为无效。
-- 页面支持选择起止日期和“近 7 天”快捷查询，单次最多连续 31 天；范围内按日期汇总场次、主播完成度和提醒，未来班次不会提前产生缺场提醒。
-- 主播完成度卡片直接显示缺场和无效场次的日期及当天数量；日期较多时保留摘要，悬停可查看缺少的场次序号，或无效场次的真实开播时间和精确时长。
-- 同一主播当天真实开播数超过规定场次数量时，超出的真实场次标记为“加场”；主播完成度卡片按日期显示加场数，悬停可查看具体开播时间。加场不足 45 分钟时显示为“无效加场”，同时计入加场和无效统计。
-- 查询范围包含当天时每 60 秒静默刷新；纯历史范围按需刷新，避免无意义轮询。
-
-主要接口：
-
-```text
-GET /api/v1/anchor-schedules/dashboard?start_date=2026-07-10&end_date=2026-07-16
-```
-
-原单日参数 `schedule_date=2026-07-16` 继续兼容。
-
-## 场次详情与 AI 复盘
-
-“AI 复盘”负责场次选择、历史报告恢复、评分总览和下一场动作；直播场次详情负责回放、分钟曲线、评论、话术和原始证据，两者通过场次 ID 联动：
-
-- **可信度**：基础信息、分钟指标、评论映射、ASR、回放、画像和 AI 报告分别计算覆盖率；低完整度场次允许回看，但不会伪装成稳定结论。
-- **统一时间轴**：真实指标、评论、话术和复盘发现按开播后的相对秒数对齐；缺少平台时间的评论不会猜测归属。
-- **证据化发现**：在线骤降、开店筹备问题、资料钩子、站内私信承接和合规关键词都保留原始证据、时间点、置信度与处理状态。
-- **跨场对比**：默认对比同主播上一场，也可选择其他真实场次；曲线按开播后分钟对齐，完整度和时长差异会明确提示。
-- **发现状态**：复盘发现可直接标记为已确认、已解决或忽略，详情页不再维护额外的整改任务流程；历史整改记录继续保留在数据库中。
-- **话术资产**：只能从真实 ASR 片段收录，保留来源场次、时间点、原文、效果说明和人工确认状态。
-- **合规筛查**：规则来自公开平台规范，只作为人工复核提醒，不替代平台审核或法律判断；系统禁止生成虚假稀缺、保证收益、夸大食品功效和站外导流建议。
-
-主要接口：
-
-```text
-GET   /api/v1/reviews/{session_id}/workbench
-POST  /api/v1/reviews/{session_id}/generate
-GET   /api/v1/reviews/{session_id}/comparison
-PATCH /api/v1/reviews/{session_id}/findings/{finding_id}
-POST  /api/v1/reviews/{session_id}/script-assets
-PATCH /api/v1/reviews/{session_id}/script-assets/{asset_id}
-GET   /api/v1/reviews/compliance/rules
-```
-
-### 视频回放优化
-
-回放链路：抖音 CDN (H.265) → 后端 ffmpeg 转 H.264 → 浏览器 `<video>`。
-
-使用 M 芯片 macOS 的 VideoToolbox 硬件编码器，**本地分片缓存**避免每次播放都重新下载抖音 CDN 的 ts 片段：
-
-- 首次播放时下载全部 ts 分片到 `/tmp/douyin-live-playback/{session_id}/`
-- 后续播放直接喂本地文件给 ffmpeg，磁盘读取无 CDN 瓶颈
-- seek 和跨场对比同样走缓存
-- 任意分片下载失败自动回退直连 CDN 流，不影响主功能
-
-合规规则参考[抖音电商食品宣传治理](https://school.jinritemai.com/doudian/wap/article/aJkzdMC7vUSV)与[抖音开放平台企业号线索授权说明](https://open.douyin.com/platform/resource/docs/ability/enterprise-account-open-ability/enterprise-user-solution/)。站内私信与线索数据只在账号已授权且页面真实返回时保存。
-
-## 前端交互规范
-
-- 业务页面沿用 SoybeanAdmin 的 Vue 3、TypeScript、Pinia、Naive UI、UnoCSS 与 Elegant Router 结构。
-- 依赖安装和脚本统一使用 `pnpm`，提交前执行类型检查、ESLint 和生产构建。
-- 每个业务页统一展示用途、真实数据状态、前置条件和下一步操作；右上角“新手帮助”会根据当前路由给出操作顺序。
-- 列表页区分真实零值与未采集值，长表格使用固定关键列、内部滚动和响应式分页。
-- 异步操作必须展示加载、成功结果或可恢复的失败原因，危险操作必须二次确认。
-- 数据大屏的主播数量按唯一抖音号去重，避免同一主播修改昵称后被重复计数。
-
-### 2026-07-20 全站 UI/UX 优化
-
-基于 SoybeanAdmin 官方规范，统一 22 个前端文件的无障碍、交互和视觉细节：
-
-- **无障碍**：6 个图标按钮自动派生 aria-label（屏幕阅读器可读）；登录、搜索表单添加 aria-label；所有自定义按钮支持 `:focus-visible` 焦点环。
-- **触控**：图标按钮触控目标从 36px 提升到 44px（符合 Apple HIG）；表格操作按钮 `tiny`→`small`；NBadge 状态指示附文字标签。
-- **间距规范**：全站 gap/margin/padding 统一为 8px 节奏（8、16、24、32），替换非标准值 6/7/9/18px。
-- **暗色模式**：卡片背景对比度 0.035→0.06（WCAG AA）；硬编码颜色替换为语义 CSS 变量（`--primary-color`、`--success-color` 等）。
-- **安全区域**：新增 `safe-area-inset-*` CSS 变量，适配刘海屏和灵动岛。
-- **图标统一**：full-screen/menu-toggler/lang-switch 从 gridicons/line-md/ph/heroicons 统一为 `mdi:`（SoybeanAdmin 默认图标集）。
-- **响应式**：断点对齐 UnoCSS 预设（768px→767px）；面包屑小屏截断；`prefers-reduced-motion` 支持。
-- **清理**：删除未使用的 `packages/alova/` 包（项目零引用，实际使用 `@sa/axios`），工作区从 8 个减为 7 个。
-
-### 2026-07-18 全站前端体验优化
-
-- 页面头采用统一的响应式栅格，标题、状态、日期和操作按钮在桌面与窄屏下都能完整展示。
-- 首页和全部核心业务页补齐真实加载状态、失败原因、重试入口、最近刷新时间与键盘可操作的穿透卡片，不使用伪造占位数据冒充采集结果。
-- 列表筛选、操作栏、表格容器和分页统一响应式规则；直播场次与用户管理固定关键列，长内容在表格内部滚动。
-- 采集、话术和主播排班页仅在当前可见时执行轮询，切换页面或浏览器标签后自动暂停，返回时按业务状态恢复。
-- DataEase 页面继续只嵌入已发布的官方分享地址，不叠加项目侧虚假指标或重复筛选器。
-- 本轮使用真实场次 `13296` 联调，详情接口返回 66 条评论、76 个分钟指标、36 条观众画像和真实回放流地址；前端已通过 `pnpm typecheck`、`pnpm lint` 与 `pnpm build`。
-
-## ASR 安全说明
-
-FunASR 首次启动会下载并加载模型，可能需要数分钟。项目为 8GB 内存电脑设置了容器资源限制、低优先级 Worker、单任务并发和 5 个任务队列上限：
-
-- 自动队列默认按真实开播时间从新到旧处理，人工高优先级任务可插队；正在直播的无限流不会进入离线转写，每完成一场会自动补充下一场，不受最初 5 个队列容量限制。
-- 真实回放默认按 300 秒分片；Worker 重启只重试未完成分片，不删除已经完成的话术。
-- 话术完成后，AI 复盘和知识库后处理保持单并发；失败原因、重试次数和处理结果保存在 `asr_tasks`，并同步显示在采集日志与主播话术任务明细中。
-- 无语音或失效回放失败后不会自动反复重试。
-- 页面显示“处理中 0”后再关闭 ASR，关闭会释放模型内存。
-- “未识别到有效语音”通常表示回放没有人声、流已过期或音频过短，不会写入模拟话术。
-- 缺少真实 m3u8 时任务会明确失败，不会使用模拟流地址兜底。
-
-任务生命周期同时写入 Redis Stream `douyin:task-events`。Redis 短暂不可用不会阻断真实采集，最终任务状态以 MySQL 为准。
-
-手动启停 FunASR（一般直接使用页面开关即可）：
-
-```bash
-docker compose --profile funasr up -d funasr
-docker stop douyin_live_funasr
-```
-
-## 知识库内容
-
-每个场次可幂等同步以下来源：
-
-| 来源 | `source_type` | 内容 |
-| --- | --- | --- |
-| 直播数据 | `live_data` | 汇总指标、转化率、分钟趋势、观众画像 |
-| 互动评论 | `comments` | 评论时间、昵称、内容和高意向标记 |
-| 话术 | `transcript` | FunASR 识别后的完整话术 |
-| AI 分析 | `ai_analysis` | 话术评分，以及包含真实证据、时间点、问题和建议的结构化复盘 |
-
-知识库同步是增量且幂等的：再次同步会更新同一场次内容，不会重复生成直播数据或评论条目。
-
-知识库页面以自由问答为主、证据核验为辅。聊天卡片位于页面首屏，输入框固定在卡片底部，长回答只在消息区域内部滚动；问答接口最多接收最近 8 条历史消息，省略式追问会继承上一轮问题和已引用场次。模型只能依据本次召回的话术、评论、分钟指标和整场知识作答，证据不足时返回无结果，不生成模拟业务数据。
-
-```text
-POST /api/v1/ai/qa
-body: { question, category?, history: [{ role, content }] }
-```
-
-### 5 分钟时间片
-
-`knowledge_time_slices` 使用直播平台时间把以下真实数据绑定到同一区间：
-
-- FunASR 话术使用相对开播秒数归属。
-- 评论必须同时具备评论平台时间和场次开播时间才会归属；无法确定的评论只增加“未映射评论”计数，不猜测时间片。
-- 分钟指标使用 `metric_time` 归属，并保留采样数、平均在线、峰值在线及首末值变化。
-- 重复同步使用源数据哈希更新原时间片，不重复插入。
-
-主要接口：
-
-```text
-GET  /api/v1/knowledge-base/time-slices/status
-GET  /api/v1/knowledge-base/time-slices
-GET  /api/v1/knowledge-base/time-slices/search?query=...
-POST /api/v1/knowledge-base/time-slices/sync/{session_id}
-```
-
-## 可观测性
-
-后端按照 Prometheus Python Client 规范提供 `GET /metrics`，每个 HTTP 响应返回 `X-Trace-ID`，也可通过请求头传入合法 `X-Trace-ID` 串联外部调用。JSON 日志包含时间、级别、模块、函数、行号和 Trace ID。
-
-AI 调用采用轻量 Langfuse 风格追踪：`ai_call_traces` 记录业务类型、关联场次、模型、Prompt 类型与版本、Token、耗时和脱敏错误；不重复保存真实评论、完整话术、知识库正文、Prompt 原文或模型输出。DataEase 可通过 `de_v_fact_ai_call_trace` 只读视图分析成功率和成本，Prometheus/Grafana 展示 AI 成功率、P95 延迟和 Token 速率，并内置 API 不可用、ASR 积压、AI 高失败率和任务集中失败 4 条规则。
-
-一键启动会默认启动 Prometheus 和 Grafana。只需要单独恢复监控组件时执行：
-
-```bash
-docker compose --profile observability up -d prometheus grafana
-```
-
-资源限制为 Prometheus 0.5 核/512MB、Grafana 0.5 核/512MB。Grafana 默认地址为 <http://localhost:3000>，账号为 `admin`，密码必须通过 `.env` 的 `GRAFANA_ADMIN_PASSWORD` 单独设置。配置参考 [Prometheus Python Client 官方文档](https://prometheus.github.io/client_python/exporting/http/asgi/)、[Grafana Docker 官方文档](https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/) 和 [DataEase 数据源文档](https://dataease.io/docs/v2/user_manual/datasource_description/)。
-
-## 常用检查
-
-推荐先使用统一入口：
-
-```bash
-make doctor
-make test
-make lint
-make build
-```
-
-详细验收步骤见[核心链路验收](docs/验收测试/README.md)，本轮真实结果见[2026-07-18 项目自检报告](docs/验收测试/2026-07-18-self-check.md)和[前后端协调验收](docs/验收测试/2026-07-18-frontend-backend-coordination.md)，维护边界和后续改造顺序见[模块化维护路线](docs/架构/maintenance-roadmap.md)，新调研的采用与暂缓决策见[深度调研落地评估](docs/架构/deep-research-assessment-2026-07-18.md)。
-
-后端测试：
-
-```bash
-cd backend
-source .venv/bin/activate
-pytest -q
-```
-
-前端类型和构建检查：
-
-```bash
-cd frontend
-pnpm typecheck
-pnpm lint
-pnpm build
-```
-
-服务状态：
-
-```bash
-curl http://localhost:8000/health
-curl http://localhost:8000/metrics
-curl -I http://localhost:8100/
-docker compose ps
-```
+| 服务 | 地址 |
+|------|------|
+| 前端 | http://localhost:9527 |
+| API 文档 | http://localhost:8000/docs |
+| 健康检查 | http://localhost:8000/health |
+| DataEase | http://localhost:8100（可选） |
+| Prometheus | http://localhost:9090（可选） |
+| Grafana | http://localhost:3000（可选） |
+
+> 首次使用建议先看[新手图文教程](docs/beginner-guide.md)。
+
+## 核心功能
+
+- **扫码登录**：保存 Cookie + 浏览器指纹，登录态自动恢复
+- **数据采集**：增量同步主播、直播场次、分钟指标、评论、观众画像、流地址
+- **实时监控**：自动识别开播状态，直播中持续采集，下播后补齐详情
+- **话术工作台**：FunASR 语音转写 → AI 评分 → 话术资产收录
+- **AI 复盘工作台**：可信度评估、五维话术评分、证据提取、下一场动作建议
+- **跨场对比**：同主播不同场次指标对比，曲线对齐开播后分钟
+- **知识库问答**：基于真实话术/评论/指标的 AI 问答，每次回答可追溯到原场次
+- **经营仪表盘**：日期筛选 + 总体指标 + 主播维度明细
+- **主播排班**：从排班表导入，自动匹配实际场次，提示缺场/无效/加场
+- **DataEase 大屏**：iframe 嵌入已发布大屏，通过只读语义视图保护业务数据
+
+详细功能说明见各页面右上角「新手帮助」按钮，技术实现见[开发指南](docs/开发.md)。
 
 ## 目录结构
 
-```text
-douyinLive/
-├── backend/          FastAPI、采集、ASR、AI 与测试
-├── frontend/         SoybeanAdmin 前端
-├── data/             本地数据库、模型、日志（不提交 Git）
-├── docs/             架构、验收、教程与开发记录
-├── scripts/          环境诊断等统一维护脚本
-├── .github/          CI 与依赖更新配置
-├── observability/    Prometheus 与 Grafana 配置
-├── Makefile          doctor、测试、检查和迁移统一入口
-├── docker-compose.yml
-└── start.sh          本地一键启动脚本
 ```
+douyinLive/
+├── backend/               FastAPI 后端（API、采集、AI、测试）
+├── frontend/              SoybeanAdmin 前端
+├── docs/                  架构、开发、部署、故障排查文档
+├── scripts/               维护脚本
+├── data/                  本地数据（不提交 Git）
+├── observability/         Prometheus + Grafana 配置
+├── .github/               CI/CD 工作流
+├── Makefile               统一命令入口（make doctor/test/lint/build）
+├── docker-compose.yml
+└── start.sh               一键启动脚本
+```
+
+## 文档导航
+
+| 文档 | 内容 |
+|------|------|
+| [开发指南](docs/开发.md) | 环境搭建、项目结构、开发流程、代码规范 |
+| [部署指南](docs/部署.md) | 首次部署、发布流程、回滚、备份 |
+| [故障排查](docs/故障排查.md) | 常见问题按症状→诊断→解决排查 |
+| [架构决策 (ADR)](docs/adr/) | 关键技术方案选型与原因 |
+| [架构文档](docs/架构/README.md) | 架构导航与维护路线 |
+| [验收测试](docs/验收测试/) | 功能验收规程与自检报告 |
+| [新手教程](docs/beginner-guide.md) | 图文操作步骤 |
+| [CHANGELOG](CHANGELOG.md) | 版本变更记录 |
 
 ## 数据安全
 
-- `.env`、`data/`、`backend/storage_state/*.json` 已加入 `.gitignore`。
-- Cookie、Token、浏览器指纹和 AI 密钥只能保存在本机，不得提交远程仓库。
-- 默认 `ALLOW_SYNTHETIC_DATA=false`。模拟监控和模拟 ASR 必须同时开启调试模式、总开关和具体功能开关，防止误写真实数据库。
-- 删除采集账号会清除本地登录环境，需要重新扫码，请确认后操作。
-- 正式部署前必须替换 `JWT_SECRET_KEY` 和数据库默认密码。
-- 首次启动前请修改 `DATAEASE_READER_PASSWORD`，DataEase 数据源不要使用 root 账号。
-- MySQL、Redis、FunASR、DataEase、Prometheus 和 Grafana 端口默认只绑定 `127.0.0.1`；正式部署需要远程访问时应使用受控网络和反向代理，不要直接暴露数据库端口。
-- `DEBUG=false` 时，数据库密码缺失或 JWT 密钥不足 32 位会阻断启动；健康接口只返回问题代码，不返回任何密钥内容。
+- `.env`、`data/`、`backend/storage_state/*.json` 已在 `.gitignore`，不提交 Git
+- `DEBUG=false` 时，密码缺失/JWT 密钥不足 32 位会阻断启动
+- DataEase 使用只读账号（`SELECT`/`SHOW VIEW`），不能修改业务数据
+- MySQL/Redis/FunASR 端口默认只绑定 `127.0.0.1`
+- 部署前必须替换 `JWT_SECRET_KEY`、数据库密码和所有默认密钥
 
 ## 常见问题
 
 ### 页面显示 500
 
-先打开 <http://localhost:8000/health>。如果不是 `status: ok`，检查 Docker Desktop、MySQL 和后端终端日志。
+先访问 http://localhost:8000/health。如果不是 `status: ok`，检查 Docker Desktop 和 MySQL 是否正常运行。
 
-### DataEase 登录出现 `InvocationTargetException`
+### DataEase 登录报错
 
-如果日志底层同时出现 `BadPaddingException`，通常是 DataEase 数据库恢复或重建后，浏览器仍使用旧的 `DataEaseKey` 公钥缓存。项目为 DataEase 登录首页增加了公钥兼容层：页面打开时先淘汰旧值，再读取当前 `/de2api/dekey`，按 DataEase 官方 `web-storage-cache` 格式写入当前公钥后加载官方前端，避免官方预取请求与旧页面缓存竞争。运行 `./start.sh` 应用配置并刷新登录页即可，不需要删除数据库；项目自检不会打印公钥、私钥、密码或登录令牌。
+通常是浏览器缓存了旧的 RSA 公钥。运行 `./start.sh` 会自动处理公钥兼容层，然后刷新登录页即可。
 
-### Prometheus 或 Grafana 未启动
+### 电脑卡顿
 
-`./start.sh` 现在默认启动并等待两个组件。单独恢复时执行 `docker compose --profile observability up -d prometheus grafana`，再用 `curl http://localhost:9090/-/ready` 和 `curl http://localhost:3000/api/health` 检查；`make doctor` 会同时检查容器和接口。
+在采集页面关闭 ASR 开关释放模型内存（~1.8GB），或暂停实时监控。确认没有重复 Worker：`pgrep -af 'asr_worker'`（正常 0-1 个）。
 
-### 浏览器被关闭或 `Target page ... has been closed`
-
-系统允许实时监控与刷新数据采集同时保持开启：刷新任务会暂时接管浏览器，监控不再重复创建页面，刷新结束后自动恢复。如果仍出现该错误，先查看采集日志中的 Trace ID 和任务心跳；系统会自动重建失效上下文并重试一次。
-
-### 电脑明显卡顿
-
-先在采集页面关闭 ASR，并停止实时监控。确认没有重复 Worker：
-
-```bash
-pgrep -af 'workers.scraper_worker|workers.asr_worker'
-```
-
-正常情况下，默认一键启动不会出现独立 `scraper_worker`，但会有且仅有 1 个 `asr_worker`；在页面关闭 ASR 后不应存在 `asr_worker`。
-
-### 评论对应错场次
-
-评论以平台真实 `roomId` 绑定场次，并受直播起止时间保护。不要用主播昵称推断归属；如发现旧数据异常，重新执行刷新采集以补齐映射。
+更多问题见[故障排查手册](docs/故障排查.md)。
