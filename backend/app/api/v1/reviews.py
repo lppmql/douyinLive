@@ -33,6 +33,11 @@ def _row_dict(row) -> dict:
     for key in ("start_seconds", "end_seconds", "confidence", "metric_before", "metric_after"):
         if key in data and data[key] is not None:
             data[key] = float(data[key])
+    # datetime → ISO 字符串（Pydantic Schema 用 str 类型）
+    from datetime import datetime as dt
+    for key in ("created_at", "updated_at"):
+        if key in data and isinstance(data[key], dt):
+            data[key] = data[key].isoformat()
     return data
 
 

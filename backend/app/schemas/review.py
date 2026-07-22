@@ -88,17 +88,26 @@ class ReviewComparisonResponse(BaseModel):
 
 
 class ReviewFindingOut(BaseModel):
-    """PATCH /reviews/{session_id}/findings/{finding_id}"""
+    """PATCH /reviews/{session_id}/findings/{finding_id} — 和 ReviewFinding 模型字段对齐"""
     id: int | None = None
     session_id: int | None = None
-    status: str | None = None
+    report_id: int | None = None
+    evidence_key: str | None = None
+    finding_type: str | None = None
     category: str | None = None
     title: str | None = None
-    confidence: float | None = None
+    description: str | None = None
+    severity: str | None = None
     start_seconds: float | None = None
     end_seconds: float | None = None
-    evidence_summary: str | None = None
-    recommendation: str | None = None
+    evidence_type: str | None = None
+    evidence_text: str | None = None
+    metric_name: str | None = None
+    metric_before: float | None = None
+    metric_after: float | None = None
+    confidence: float | None = None
+    source: str | None = None
+    status: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -137,10 +146,15 @@ class ReviewScriptAssetOut(BaseModel):
 
 
 class ComplianceRuleOut(BaseModel):
-    """GET /reviews/compliance/rules"""
+    """GET /reviews/compliance/rules — 和 ComplianceRule 模型字段对齐"""
     id: int | None = None
+    rule_code: str | None = None
+    name: str | None = None
     category: str | None = None
-    title: str | None = None
-    description: str | None = None
+    pattern: str | None = None
+    severity: str | None = None
+    guidance: str | None = None
+    source_url: str | None = None
+    version: int | None = None
     enabled: int | None = None
     created_at: str | None = None

@@ -2592,12 +2592,22 @@ export interface components {
         ComplianceRuleOut: {
             /** Id */
             id?: number | null;
+            /** Rule Code */
+            rule_code?: string | null;
+            /** Name */
+            name?: string | null;
             /** Category */
             category?: string | null;
-            /** Title */
-            title?: string | null;
-            /** Description */
-            description?: string | null;
+            /** Pattern */
+            pattern?: string | null;
+            /** Severity */
+            severity?: string | null;
+            /** Guidance */
+            guidance?: string | null;
+            /** Source Url */
+            source_url?: string | null;
+            /** Version */
+            version?: number | null;
             /** Enabled */
             enabled?: number | null;
             /** Created At */
@@ -4038,22 +4048,40 @@ export interface components {
             id?: number | null;
             /** Session Id */
             session_id?: number | null;
-            /** Status */
-            status?: string | null;
+            /** Report Id */
+            report_id?: number | null;
+            /** Evidence Key */
+            evidence_key?: string | null;
+            /** Finding Type */
+            finding_type?: string | null;
             /** Category */
             category?: string | null;
             /** Title */
             title?: string | null;
-            /** Confidence */
-            confidence?: number | null;
+            /** Description */
+            description?: string | null;
+            /** Severity */
+            severity?: string | null;
             /** Start Seconds */
             start_seconds?: number | null;
             /** End Seconds */
             end_seconds?: number | null;
-            /** Evidence Summary */
-            evidence_summary?: string | null;
-            /** Recommendation */
-            recommendation?: string | null;
+            /** Evidence Type */
+            evidence_type?: string | null;
+            /** Evidence Text */
+            evidence_text?: string | null;
+            /** Metric Name */
+            metric_name?: string | null;
+            /** Metric Before */
+            metric_before?: number | null;
+            /** Metric After */
+            metric_after?: number | null;
+            /** Confidence */
+            confidence?: number | null;
+            /** Source */
+            source?: string | null;
+            /** Status */
+            status?: string | null;
             /** Created At */
             created_at?: string | null;
             /** Updated At */

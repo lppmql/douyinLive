@@ -1,6 +1,10 @@
-"""Phase 1: 所有 CRUD API 路由注册 + Phase 3: 采集路由 + Phase 4: 监控路由"""
-from fastapi import APIRouter
+"""业务 API 路由注册。
 
+v1_router 统一要求登录鉴权（auth 路由因含 public 接口单独注册到 app）。
+"""
+from fastapi import APIRouter, Depends
+
+from app.core.security import get_current_user
 from app.api.v1.live_rooms import router as live_rooms_router
 from app.api.v1.live_sessions import router as live_sessions_router
 from app.api.v1.live_metrics import router as live_metrics_router
@@ -15,14 +19,14 @@ from app.api.v1.ws import rest_router as transcript_router
 
 from app.api.v1.prompt_templates import router as prompt_templates_router
 from app.api.v1.ai import router as ai_router
-from app.api.v1.auth import router as auth_router
 from app.api.v1.user_mgmt import router as user_mgmt_router
 from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.dataease import router as dataease_router
 from app.api.v1.reviews import router as reviews_router
 from app.api.v1.anchor_schedules import router as anchor_schedules_router
 
-v1_router = APIRouter(prefix="/api/v1")
+# 所有业务 API 统一要求登录（auth 路由含 login/refreshToken 公开接口，单独注册）
+v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_user)])
 v1_router.include_router(live_rooms_router)
 v1_router.include_router(live_sessions_router)
 v1_router.include_router(live_metrics_router)
@@ -36,7 +40,6 @@ v1_router.include_router(monitor_router)
 v1_router.include_router(transcript_router)
 v1_router.include_router(prompt_templates_router)
 v1_router.include_router(ai_router)
-v1_router.include_router(auth_router)
 v1_router.include_router(user_mgmt_router)
 v1_router.include_router(dashboard_router)
 v1_router.include_router(dataease_router)

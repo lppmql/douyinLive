@@ -3,6 +3,8 @@ M8 核心链路集成测试 — 经营仪表盘 (dashboard)
 =============================================
 测试链条：汇总数据 → 日期筛选 → 按主播分组
 覆盖端点：GET /dashboard/summary, GET /dashboard/summary/by-anchor
+
+⚠️  P0-01 后所有业务 API 要求登录鉴权，所有测试均需带 auth_headers
 """
 
 from datetime import datetime
@@ -11,9 +13,9 @@ from datetime import datetime
 class TestDashboardSummary:
     """GET /api/v1/dashboard/summary — 核心经营指标汇总"""
 
-    def test_summary_with_empty_db_returns_zeros(self, client):
+    def test_summary_with_empty_db_returns_zeros(self, client, auth_headers):
         """空数据库 → 200 + 全零指标"""
-        resp = client.get("/api/v1/dashboard/summary")
+        resp = client.get("/api/v1/dashboard/summary", headers=auth_headers)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -28,7 +30,7 @@ class TestDashboardSummary:
         assert data["detail_completion_rate"] == 0.0
         assert data["open_review_action_count"] == 0
 
-    def test_summary_with_sessions(self, client, db):
+    def test_summary_with_sessions(self, client, db, auth_headers):
         """有直播场次数据 → 返回正确的汇总值"""
         from app.models.live_rooms import LiveRoom
         from app.models.live_sessions import LiveSession
@@ -80,7 +82,7 @@ class TestDashboardSummary:
         db.add_all(sessions)
         db.commit()
 
-        resp = client.get("/api/v1/dashboard/summary")
+        resp = client.get("/api/v1/dashboard/summary", headers=auth_headers)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -93,7 +95,7 @@ class TestDashboardSummary:
         assert data["total_leads"] == 25  # 5+8+12
         assert data["total_ad_cost"] == 600.0  # 100+200+300
 
-    def test_summary_with_date_filter(self, client, db):
+    def test_summary_with_date_filter(self, client, db, auth_headers):
         """日期筛选：只统计指定日期范围内的场次"""
         from app.models.live_rooms import LiveRoom
         from app.models.live_sessions import LiveSession
@@ -130,6 +132,7 @@ class TestDashboardSummary:
         resp = client.get(
             "/api/v1/dashboard/summary",
             params={"start_date": "2026-07-20", "end_date": "2026-07-20"},
+            headers=auth_headers,
         )
 
         assert resp.status_code == 200
@@ -138,11 +141,12 @@ class TestDashboardSummary:
         assert data["total_viewers"] == 1000
         assert data["total_leads"] == 5
 
-    def test_summary_with_date_filter_no_results(self, client, db):
+    def test_summary_with_date_filter_no_results(self, client, auth_headers):
         """日期范围内无数据 → 全零"""
         resp = client.get(
             "/api/v1/dashboard/summary",
             params={"start_date": "2025-01-01", "end_date": "2025-01-01"},
+            headers=auth_headers,
         )
 
         assert resp.status_code == 200
@@ -153,16 +157,16 @@ class TestDashboardSummary:
 class TestDashboardByAnchor:
     """GET /api/v1/dashboard/summary/by-anchor — 按主播分组汇总"""
 
-    def test_by_anchor_empty_db_returns_empty(self, client):
+    def test_by_anchor_empty_db_returns_empty(self, client, auth_headers):
         """空数据库 → 空列表 + 全零汇总"""
-        resp = client.get("/api/v1/dashboard/summary/by-anchor")
+        resp = client.get("/api/v1/dashboard/summary/by-anchor", headers=auth_headers)
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["anchors"] == []
         assert data["total"]["session_count"] == 0
 
-    def test_by_anchor_groups_correctly(self, client, db):
+    def test_by_anchor_groups_correctly(self, client, db, auth_headers):
         """按主播分组，每个主播一行"""
         from app.models.live_rooms import LiveRoom
         from app.models.live_sessions import LiveSession
@@ -198,7 +202,7 @@ class TestDashboardByAnchor:
         ])
         db.commit()
 
-        resp = client.get("/api/v1/dashboard/summary/by-anchor")
+        resp = client.get("/api/v1/dashboard/summary/by-anchor", headers=auth_headers)
 
         assert resp.status_code == 200
         data = resp.json()
@@ -216,7 +220,7 @@ class TestDashboardByAnchor:
         assert total["session_count"] == 2
         assert total["total_viewers"] == 3000
 
-    def test_by_anchor_with_date_filter(self, client, db):
+    def test_by_anchor_with_date_filter(self, client, db, auth_headers):
         """按主播分组 + 日期筛选"""
         from app.models.live_rooms import LiveRoom
         from app.models.live_sessions import LiveSession
@@ -249,6 +253,7 @@ class TestDashboardByAnchor:
         resp = client.get(
             "/api/v1/dashboard/summary/by-anchor",
             params={"start_date": "2026-07-21", "end_date": "2026-07-21"},
+            headers=auth_headers,
         )
 
         assert resp.status_code == 200

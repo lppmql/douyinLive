@@ -31,6 +31,7 @@ from sqlalchemy.pool import StaticPool
 from app.models.base import Base
 from app.core.database import get_db
 from app.api.v1 import v1_router
+from app.api.v1.auth import router as auth_router
 from app.core.security import get_password_hash
 
 # 确保所有模型已注册到 Base.metadata（create_all 需要）
@@ -90,6 +91,8 @@ def override_get_db():
 #  不继承 main.py 的 lifespan（避免 Redis/ASR/scheduler/浏览器池启动）
 # ============================================================
 test_app = FastAPI(title="Test App - 集成测试")
+# auth_router 单独注册（含公开的 login/refreshToken，不经过 v1_router 的全局鉴权）
+test_app.include_router(auth_router, prefix="/api/v1")
 test_app.include_router(v1_router)
 test_app.dependency_overrides[get_db] = override_get_db
 

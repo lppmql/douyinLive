@@ -21,6 +21,11 @@ test-backend:
 test-frontend:
 	cd frontend && pnpm typecheck
 
+# 前端冒烟测试（需要后端运行在 localhost:8000 + 浏览器已安装）
+# 首次运行前: cd frontend && pnpm e2e:install
+test-frontend-e2e:
+	cd frontend && pnpm e2e
+
 # ── 代码检查 ──
 lint: lint-backend lint-frontend
 

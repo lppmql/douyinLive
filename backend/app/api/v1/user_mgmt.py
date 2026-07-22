@@ -21,6 +21,26 @@ def _require_admin(current_user: User = Depends(get_current_user)):
     return current_user
 
 
+def _count_super_admins(db: Session) -> int:
+    """统计当前数据库中 R_SUPER 角色的活跃用户数。"""
+    return (
+        db.query(User)
+        .filter(User.status == "active")
+        .filter(User.roles.contains('"R_SUPER"'))
+        .count()
+    )
+
+
+def _guard_last_super_admin(db: Session, target_user: User):
+    """如果 target_user 是最后一个超级管理员，抛出 400 错误。"""
+    if "R_SUPER" in (target_user.roles or []):
+        if _count_super_admins(db) <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="不能删除或降级最后一个超级管理员",
+            )
+
+
 @router.get("/", response_model=SoybeanResponse[PageResult[UserResponse]])
 def list_users(
     current: int = Query(1, ge=1, description="页码"),
@@ -105,6 +125,11 @@ def update_user(
     if data.password:
         update_dict["password_hash"] = get_password_hash(data.password)
 
+    # 如果要修改角色：检查是否会移除最后一个超级管理员的 R_SUPER
+    new_roles = update_dict.get("roles")
+    if new_roles is not None and "R_SUPER" not in new_roles:
+        _guard_last_super_admin(db, user)
+
     for key, value in update_dict.items():
         setattr(user, key, value)
     db.commit()
@@ -124,6 +149,7 @@ def delete_user(
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    _guard_last_super_admin(db, user)
     db.delete(user)
     db.commit()
     return ok_response(None, msg="删除成功")

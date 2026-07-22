@@ -42,6 +42,8 @@
     "preview": "vite preview",
     "release": "sa release",
     "typecheck": "vue-tsc --noEmit --skipLibCheck",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium",
     "update-pkg": "sa update-pkg"
   },
   "dependencies": {
@@ -96,7 +98,8 @@
     "vite-plugin-svg-icons": "2.0.1",
     "vite-plugin-vue-devtools": "8.1.2",
     "vite-plugin-vue-transition-root-validator": "^0.1.0",
-    "vue-tsc": "3.2.8"
+    "vue-tsc": "3.2.8",
+    "@playwright/test": "^1.52.0"
   },
   "simple-git-hooks": {
     "commit-msg": "pnpm sa git-commit-verify",
