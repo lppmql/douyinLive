@@ -49,7 +49,9 @@ const watermarkProps = computed<WatermarkProps>(() => {
     class="h-full"
   >
     <AppProvider>
-      <RouterView class="bg-layout" />
+      <ErrorBoundary>
+        <RouterView class="bg-layout" />
+      </ErrorBoundary>
       <NWatermark v-if="themeStore.watermark.visible" v-bind="watermarkProps" />
     </AppProvider>
   </NConfigProvider>

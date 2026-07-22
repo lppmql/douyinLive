@@ -19,7 +19,7 @@ import { test, expect } from '@playwright/test';
 
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
 const TEST_USER = process.env.TEST_USERNAME || 'admin';
-const TEST_PASS = process.env.TEST_PASSWORD || 'admin123456';
+const TEST_PASS = process.env.TEST_PASSWORD || 'Admin123456';
 
 /** 登录获取 Token，将 Token 写入 localStorage */
 async function login(page: ReturnType<typeof test['info']> extends never ? never : any) {

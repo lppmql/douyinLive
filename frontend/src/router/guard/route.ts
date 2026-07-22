@@ -12,47 +12,60 @@ import { getRouteName } from '@/router/elegant/transform';
  */
 export function createRouteGuard(router: Router) {
   router.beforeEach(async (to, from) => {
-    const location = await initRoute(to);
+    // ✨ 2026-07-22 A4：路由守卫整体 try-catch，出错时自动回首页
+    try {
+      const location = await initRoute(to);
 
-    if (location) {
-      return location;
-    }
+      if (location) {
+        return location;
+      }
 
-    const authStore = useAuthStore();
+      const authStore = useAuthStore();
 
-    const rootRoute: RouteKey = 'root';
-    const loginRoute: RouteKey = 'login';
-    const noAuthorizationRoute: RouteKey = '403';
+      const rootRoute: RouteKey = 'root';
+      const loginRoute: RouteKey = 'login';
+      const noAuthorizationRoute: RouteKey = '403';
 
-    const isLogin = Boolean(localStg.get('token'));
-    const needLogin = !to.meta.constant;
-    const routeRoles = to.meta.roles || [];
+      const isLogin = Boolean(localStg.get('token'));
+      const needLogin = !to.meta.constant;
+      const routeRoles = to.meta.roles || [];
 
-    const hasRole = authStore.userInfo.roles.some(role => routeRoles.includes(role));
-    const hasAuth = authStore.isStaticSuper || !routeRoles.length || hasRole;
+      const hasRole = authStore.userInfo.roles.some(role => routeRoles.includes(role));
+      const hasAuth = authStore.isStaticSuper || !routeRoles.length || hasRole;
 
-    // if it is login route when logged in, then switch to the root page
-    if (to.name === loginRoute && isLogin) {
-      return { name: rootRoute };
-    }
+      // if it is login route when logged in, then switch to the root page
+      if (to.name === loginRoute && isLogin) {
+        return { name: rootRoute };
+      }
 
-    // if the route does not need login, then it is allowed to access directly
-    if (!needLogin) {
+      // if the route does not need login, then it is allowed to access directly
+      if (!needLogin) {
+        return handleRouteSwitch(to, from);
+      }
+
+      // the route need login but the user is not logged in, then switch to the login page
+      if (!isLogin) {
+        return { name: loginRoute, query: { redirect: to.fullPath } };
+      }
+
+      // if the user is logged in but does not have authorization, then switch to the 403 page
+      if (!hasAuth) {
+        return { name: noAuthorizationRoute };
+      }
+
+      // switch route normally
       return handleRouteSwitch(to, from);
+    } catch (err) {
+      // 路由守卫出错了（比如 store 未初始化、localStorage 损坏等）
+      // eslint-disable-next-line no-console
+      console.error('[ROUTE-GUARD] 路由守卫异常:', err);
+      // 尝试给用户友好提示
+      if (window.$message) {
+        window.$message.error('页面导航出错了，已返回首页', { duration: 4000 });
+      }
+      // 安全回退：去首页或登录页
+      return { name: 'root' };
     }
-
-    // the route need login but the user is not logged in, then switch to the login page
-    if (!isLogin) {
-      return { name: loginRoute, query: { redirect: to.fullPath } };
-    }
-
-    // if the user is logged in but does not have authorization, then switch to the 403 page
-    if (!hasAuth) {
-      return { name: noAuthorizationRoute };
-    }
-
-    // switch route normally
-    return handleRouteSwitch(to, from);
   });
 }
 
