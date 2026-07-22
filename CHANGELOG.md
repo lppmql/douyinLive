@@ -6,6 +6,31 @@
 
 ## [2026-07-22]
 
+### Security
+- **P0-01：所有业务 API 统一登录鉴权**（影响 16 个子路由）：
+  - `v1_router` 新增全局 `dependencies=[Depends(get_current_user)]`
+  - auth 路由单独注册（login/refreshToken 保持公开）
+  - 之前采集、复盘、场次、话术、知识库等接口无需登录即可访问
+- **P0-06：保护最后一个超级管理员**：
+  - 不能删除/降级最后一个 R_SUPER 管理员
+
+### Fixed
+- **P0-02：修复 ReviewFindingOut Schema 字段错配**：
+  - 补回 9 个缺失字段（finding_type、description、severity、evidence 系列等）
+  - 删除 2 个不存在的字段（evidence_summary、recommendation）
+  - `_row_dict` 增加 datetime→ISO 字符串转换
+  - 修复后更新 finding 状态不会丢失证据数据
+- **P0-03：修复 ComplianceRuleOut Schema 字段错配**：
+  - title/description → name/guidance/pattern（和数据库模型一致）
+
+### Added
+- **P0-04：Review API 响应契约测试**（`test_review_contracts.py`，12 个测试）：
+  - workbench / finding update / compliance rules 返回值 Schema 校验
+  - 所有复盘端点未登录 → 401 验证
+- **P0-05：Playwright 前端冒烟测试框架**：
+  - 10 个核心页面基础检查（登录→每页标题+非白屏+控制台无致命错误）
+  - `pnpm e2e` 命令，`make test-frontend-e2e` 入口
+
 ### Changed
 - **采集页二轮瘦身**（`index.vue` 752→204 行，-73%）：
   - 新增 `useCollectorLogin` composable：扫码登录流程独立管理（发起→轮询→成功/失败→清理）
