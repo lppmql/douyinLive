@@ -1,19 +1,21 @@
 <!-- 采集日志表格 — 从 collector/index.vue 拆分 -->
 <script setup lang="ts">
+import { h } from 'vue';
 import { NButton, NCard, NDataTable, NTag, NRadioGroup, NRadioButton, NSpace } from 'naive-ui';
 import { $t } from '@/locales';
-import type { DataTableColumn } from 'naive-ui';
+import { formatLogTime, formatFullTime, getStageLabel, getLogPayload, getLogSummary } from '../utils/collectorHelpers';
 
 defineOptions({ name: 'CollectorLogTable' });
 
-defineProps<{
+const props = defineProps<{
   loading: boolean;
   silentRefreshing: boolean;
   clearLogsLoading: boolean;
   logs: Api.Douyin.CollectorLog[];
-  logColumns: DataTableColumn<Api.Douyin.CollectorLog>[];
   logLevel: string;
   logTaskId: number | null;
+  /** 当前毫秒时间戳，驱动相对时间显示（"刚刚"/"X 分钟前"） */
+  now: number;
 }>();
 
 const emit = defineEmits<{
@@ -21,11 +23,78 @@ const emit = defineEmits<{
   (e: 'clear'): void;
   (e: 'filter', level: string): void;
   (e: 'clearTaskFilter'): void;
+  /** 点击"查看"按钮打开日志详情弹窗 */
+  (e: 'openDetail', log: Api.Douyin.CollectorLog): void;
 }>();
 
 function getLogRowKey(row: Api.Douyin.CollectorLog) {
   return row.id;
 }
+
+/* ===== 表格列定义（原来在父组件 index.vue 中，搬到这里管理） ===== */
+
+const logColumns = [
+  {
+    title: () => $t('page.collector.logTime'),
+    key: 'created_at',
+    width: 150,
+    render(row: Api.Douyin.CollectorLog) {
+      return h('span', { title: formatFullTime(row.created_at) }, formatLogTime(row.created_at, props.now));
+    }
+  },
+  {
+    title: '任务',
+    key: 'task_id',
+    width: 90,
+    render(row: Api.Douyin.CollectorLog) {
+      return row.task_id ? `#${row.task_id}` : '-';
+    }
+  },
+  {
+    title: '阶段',
+    key: 'stage',
+    width: 100,
+    render(row: Api.Douyin.CollectorLog) {
+      return getStageLabel(getLogPayload(row).stage);
+    }
+  },
+  {
+    title: () => $t('page.collector.logLevel'),
+    key: 'level',
+    width: 80,
+    render(row: { level: string }) {
+      const typeMap: Record<string, 'success' | 'warning' | 'error' | 'info'> = {
+        info: 'info',
+        warn: 'warning',
+        error: 'error'
+      };
+      return h(NTag, { type: typeMap[row.level] || 'info', size: 'small' }, { default: () => row.level.toUpperCase() });
+    }
+  },
+  { title: () => $t('page.collector.logMessage'), key: 'message', minWidth: 300, ellipsis: { tooltip: true } },
+  {
+    title: '数据摘要',
+    key: 'summary',
+    minWidth: 240,
+    ellipsis: { tooltip: true },
+    render(row: Api.Douyin.CollectorLog) {
+      return getLogSummary(row);
+    }
+  },
+  {
+    title: '详情',
+    key: 'detail',
+    width: 70,
+    fixed: 'right' as const,
+    render(row: Api.Douyin.CollectorLog) {
+      return h(
+        NButton,
+        { text: true, type: 'primary', size: 'tiny', onClick: () => emit('openDetail', row) },
+        { default: () => '查看' }
+      );
+    }
+  }
+];
 </script>
 
 <template>
