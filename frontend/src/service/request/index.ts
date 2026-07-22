@@ -136,9 +136,25 @@ export const backendRequest = createFlatRequest(
     } as RequestInstanceState,
     transform(response: AxiosResponse) {
       const body = response.data;
+
+      // 响应体为空 → 降级返回 null，让页面用默认值渲染，避免白屏
+      if (body === null || body === undefined) {
+        // eslint-disable-next-line no-console
+        console.warn('[backendRequest] 后端返回了空的响应体，已降级为 null');
+        return null;
+      }
+
       // 兼容 Soybean Admin 的 {code, data, msg} 包装格式（auth 接口返回此格式）
-      if (body && typeof body === 'object' && 'code' in body && 'data' in body) {
-        return body.data;
+      if (typeof body === 'object' && 'code' in body && 'data' in body) {
+        const wrapped = body as { code: unknown; data: unknown; msg?: unknown };
+        // 如果 data 是 null/undefined，输出警告帮助排查
+        if (wrapped.data === null || wrapped.data === undefined) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[backendRequest] 后端返回 code=${String(wrapped.code)} 但 data 为空，msg=${String(wrapped.msg ?? '无')}`
+          );
+        }
+        return wrapped.data;
       }
       // 普通 FastAPI 接口直接返回数据
       return body;

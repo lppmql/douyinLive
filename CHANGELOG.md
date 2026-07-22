@@ -55,6 +55,13 @@
   - **增强全局错误处理**：`app.config.errorHandler` 和 `unhandledrejection` 现在会给用户 toast 提示
   - **路由守卫异常保护**：`beforeEach` 整体 try-catch，出错自动回首页
   - **修复冒烟测试默认密码**：`admin123456` → `Admin123456`（对齐数据库种子数据）
+- **P1-01：Phase 2 数据完整性校验与参数验证加固**：
+  - **前端安全取值工具**（`safeAccess.ts`）：新增 `safeGet`（防 undefined 链式崩溃）/ `ensureArray`（防 `.map()` 崩溃）/ `safeNumber`（后端返回 null 也不怕）
+  - **响应拦截器加固**：`backendRequest` 的 `transform` 加 null 检查，后端返回空数据时输出警告而非静默崩溃
+  - **复盘工作台安全性修复**：5 处 API 调用从手动 `.data` 改为 `unwrapServiceData` 统一解包
+  - **API 参数边界校验**：5 个分页/limit 类 API 前端加范围裁剪（`current>=1`, `size 1~500`）
+  - **后端 Schema 约束**：8 个 CRUD schema 共 ~50 个字段加 `min_length`/`max_length`/`gt`/`pattern` 约束
+  - **统一错误响应格式**（`error_handler.py`）：3 类异常统一转 `{"code":"XXXX","msg":"..."}` 格式
 
 ---
 ## [2026-07-21]

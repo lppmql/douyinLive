@@ -345,7 +345,7 @@ async def re_login(account_id: int, db: Session = Depends(get_db)):
 def list_logs(
     task_id: Optional[int] = Query(None),
     level: Optional[str] = Query(None),
-    limit: int = Query(100, le=500),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     """获取采集日志"""

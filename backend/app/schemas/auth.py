@@ -29,8 +29,8 @@ class SoybeanResponse(BaseModel, Generic[T]):
 
 class LoginRequest(BaseModel):
     """登录请求"""
-    username: str
-    password: str
+    username: str = Field(min_length=1, max_length=100, description="用户名，不能为空")
+    password: str = Field(min_length=1, max_length=128, description="密码，不能为空")
 
 
 class TokenData(BaseModel):
@@ -67,13 +67,13 @@ class UserResponse(BaseModel):
 
 class UserCreate(BaseModel):
     """创建用户请求"""
-    username: str
-    password: str
-    nickname: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
+    username: str = Field(min_length=1, max_length=100, description="用户名")
+    password: str = Field(min_length=6, max_length=128, description="密码，最少 6 位")
+    nickname: Optional[str] = Field(default=None, max_length=100, description="昵称")
+    email: Optional[str] = Field(default=None, max_length=200, description="邮箱")
+    phone: Optional[str] = Field(default=None, max_length=30, description="手机号")
     roles: list[str] = Field(default_factory=lambda: ["R_USER"])
-    status: str = "active"
+    status: str = Field(default="active", pattern="^(active|disabled)$", description="用户状态")
 
 
 class UserUpdate(BaseModel):

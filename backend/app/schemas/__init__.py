@@ -1,7 +1,7 @@
 """Pydantic 数据模型 - 请求/响应"""
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from app.core.status import TaskStatus
 
 
@@ -13,15 +13,15 @@ class MessageResponse(BaseModel):
 
 # ===== 直播间 =====
 class LiveRoomBase(BaseModel):
-    account_name: str
-    anchor_name: str
-    anchor_nickname: Optional[str] = None
-    anchor_avatar_url: Optional[str] = None
-    douyin_id: Optional[str] = None
-    douyin_uid: Optional[str] = None
-    room_id_str: Optional[str] = None
-    team_name: Optional[str] = None
-    platform: str = "douyin"
+    account_name: str = Field(min_length=1, max_length=200, description="账号名称")
+    anchor_name: str = Field(min_length=1, max_length=200, description="主播名称")
+    anchor_nickname: Optional[str] = Field(default=None, max_length=200, description="主播昵称")
+    anchor_avatar_url: Optional[str] = Field(default=None, max_length=500, description="头像 URL")
+    douyin_id: Optional[str] = Field(default=None, max_length=200, description="抖音 ID")
+    douyin_uid: Optional[str] = Field(default=None, max_length=200, description="抖音 UID")
+    room_id_str: Optional[str] = Field(default=None, max_length=200, description="直播间 ID 字符串")
+    team_name: Optional[str] = Field(default=None, max_length=200, description="团队名称")
+    platform: str = Field(default="douyin", max_length=50, description="平台")
     status: bool = True
 
 
@@ -49,13 +49,13 @@ class LiveRoomResponse(LiveRoomBase):
 
 # ===== 直播场次 =====
 class LiveSessionBase(BaseModel):
-    room_id: int
-    session_title: Optional[str] = None
-    dashboard_url: Optional[str] = None
-    stream_url: Optional[str] = None
+    room_id: int = Field(gt=0, description="直播间 ID")
+    session_title: Optional[str] = Field(default=None, max_length=500, description="场次标题")
+    dashboard_url: Optional[str] = Field(default=None, max_length=1000, description="大屏 URL")
+    stream_url: Optional[str] = Field(default=None, max_length=1000, description="流地址")
     live_start_time: Optional[datetime] = None
     live_end_time: Optional[datetime] = None
-    live_status: str = "ended"
+    live_status: str = Field(default="ended", max_length=50, description="直播状态")
 
 
 class LiveSessionCreate(LiveSessionBase):
@@ -205,15 +205,15 @@ class LiveSessionDetailResponse(BaseModel):
 
 # ===== 评论 =====
 class CommentBase(BaseModel):
-    session_id: int
-    user_nickname: Optional[str] = None
-    user_sec_uid: Optional[str] = None
-    webcast_uid: Optional[str] = None
-    comment_content: Optional[str] = None
+    session_id: int = Field(gt=0, description="场次 ID")
+    user_nickname: Optional[str] = Field(default=None, max_length=200, description="用户昵称")
+    user_sec_uid: Optional[str] = Field(default=None, max_length=200, description="用户 sec_uid")
+    webcast_uid: Optional[str] = Field(default=None, max_length=200, description="直播间 UID")
+    comment_content: Optional[str] = Field(default=None, max_length=5000, description="评论内容")
     comment_time: Optional[datetime] = None
-    is_high_intent: int = 0
-    sentiment: Optional[str] = None
-    keywords: Optional[str] = None
+    is_high_intent: int = Field(default=0, ge=0, le=1, description="是否高意向")
+    sentiment: Optional[str] = Field(default=None, max_length=50, description="情感倾向")
+    keywords: Optional[str] = Field(default=None, max_length=500, description="关键词")
 
 
 class CommentCreate(CommentBase):
@@ -231,12 +231,12 @@ LiveSessionDetailResponse.model_rebuild()
 
 # ===== 话术分段 =====
 class TranscriptSegmentBase(BaseModel):
-    session_id: int
-    segment_start: Optional[float] = None
-    segment_end: Optional[float] = None
-    text_content: Optional[str] = None
-    segment_type: Optional[str] = None
-    asr_status: str = TaskStatus.PENDING
+    session_id: int = Field(gt=0, description="场次 ID")
+    segment_start: Optional[float] = Field(default=None, ge=0, description="开始秒数")
+    segment_end: Optional[float] = Field(default=None, ge=0, description="结束秒数")
+    text_content: Optional[str] = Field(default=None, max_length=10000, description="文本内容")
+    segment_type: Optional[str] = Field(default=None, max_length=100, description="分段类型")
+    asr_status: str = Field(default=TaskStatus.PENDING, max_length=50, description="ASR 状态")
 
 
 class TranscriptSegmentCreate(TranscriptSegmentBase):
@@ -253,11 +253,11 @@ class TranscriptSegmentResponse(TranscriptSegmentBase):
 
 # ===== 留资 =====
 class LeadBase(BaseModel):
-    session_id: int
-    lead_name: Optional[str] = None
-    lead_phone: Optional[str] = None
-    lead_source: Optional[str] = None
-    is_valid: int = 1
+    session_id: int = Field(gt=0, description="场次 ID")
+    lead_name: Optional[str] = Field(default=None, max_length=200, description="留资姓名")
+    lead_phone: Optional[str] = Field(default=None, max_length=30, description="留资电话")
+    lead_source: Optional[str] = Field(default=None, max_length=200, description="留资来源")
+    is_valid: int = Field(default=1, ge=0, le=1, description="是否有效")
     create_time: Optional[datetime] = None
 
 
@@ -273,11 +273,11 @@ class LeadResponse(LeadBase):
 
 # ===== 知识库 =====
 class KnowledgeBaseBase(BaseModel):
-    session_id: Optional[int] = None
-    category: Optional[str] = None
-    title: Optional[str] = None
-    content: Optional[str] = None
-    source_type: Optional[str] = None
+    session_id: Optional[int] = Field(default=None, gt=0, description="场次 ID")
+    category: Optional[str] = Field(default=None, max_length=200, description="分类")
+    title: Optional[str] = Field(default=None, max_length=500, description="标题")
+    content: Optional[str] = Field(default=None, max_length=50000, description="内容")
+    source_type: Optional[str] = Field(default=None, max_length=100, description="来源类型")
 
 
 class KnowledgeBaseCreate(KnowledgeBaseBase):
@@ -292,10 +292,10 @@ class KnowledgeBaseResponse(KnowledgeBaseBase):
 
 # ===== AI 分析报告 =====
 class AnalysisReportBase(BaseModel):
-    session_id: int
-    report_type: str
-    report_title: Optional[str] = None
-    summary: Optional[str] = None
+    session_id: int = Field(gt=0, description="场次 ID")
+    report_type: str = Field(min_length=1, max_length=100, description="报告类型")
+    report_title: Optional[str] = Field(default=None, max_length=500, description="报告标题")
+    summary: Optional[str] = Field(default=None, max_length=5000, description="摘要")
 
 
 class AnalysisReportCreate(AnalysisReportBase):

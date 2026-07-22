@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.database import engine, SessionLocal
+from app.core.error_handler import register_exception_handlers
 from app.models.scraper_tasks import ScraperTask
 from app.api.v1 import v1_router
 from app.api.v1.auth import router as auth_router
@@ -120,6 +121,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ✨ 统一异常处理：把 FastAPI 默认的 {"detail":"..."} 转成前端认识的 {"code":"XXXX","msg":"..."}
+register_exception_handlers(app)
 
 
 @app.middleware("http")

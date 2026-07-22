@@ -48,9 +48,15 @@ export function fetchLiveSessionPage(params: {
   live_status?: string;
   detail_status?: string;
 }) {
+  // ✨ 参数边界校验：防止传 0 或负数导致后端异常
+  const safeParams = {
+    ...params,
+    current: Math.max(1, params.current || 1),
+    size: Math.min(500, Math.max(1, params.size || 20)),
+  };
   return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.LiveSessionListItem>>({
     url: `${API_PREFIX}/live-sessions/page`,
-    params
+    params: safeParams
   });
 }
 
@@ -179,10 +185,12 @@ export function fetchDataEaseStatus() {
 
 /** 增量同步缺失或已过期的 DataEase 数据 */
 export function syncDataEase(limit = 100) {
+  // ✨ 参数边界校验
+  const safeLimit = Math.min(500, Math.max(1, limit));
   return backendRequest<Api.Douyin.DataEaseSyncResult>({
     url: `${API_PREFIX}/dataease/sync`,
     method: 'POST',
-    params: { limit }
+    params: { limit: safeLimit }
   });
 }
 
@@ -378,9 +386,15 @@ export function fetchKnowledgeItemPage(params: {
   category?: string;
   source_type?: string;
 }) {
+  // ✨ 参数边界校验
+  const safeParams = {
+    ...params,
+    current: Math.max(1, params.current || 1),
+    size: Math.min(500, Math.max(1, params.size || 20)),
+  };
   return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.KnowledgeItem>>({
     url: `${API_PREFIX}/knowledge-base/page`,
-    params
+    params: safeParams
   });
 }
 
@@ -407,9 +421,15 @@ export function fetchKnowledgeTimeSlicePage(params: {
   anchor_name?: string;
   evidence_type?: string;
 }) {
+  // ✨ 参数边界校验
+  const safeParams = {
+    ...params,
+    current: Math.max(1, params.current || 1),
+    size: Math.min(500, Math.max(1, params.size || 20)),
+  };
   return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.KnowledgeTimeSlice>>({
     url: `${API_PREFIX}/knowledge-base/time-slices/page`,
-    params
+    params: safeParams
   });
 }
 
@@ -492,10 +512,12 @@ export function saveToKnowledgeBase(sessionId: number) {
 
 /** 增量同步最近场次的数据、评论、话术和分析到知识库 */
 export function syncRecentKnowledge(limit = 20) {
+  // ✨ 参数边界校验：限制在 1~500 范围内
+  const safeLimit = Math.min(500, Math.max(1, limit));
   return backendRequest<Api.Douyin.KnowledgeSyncResult & { session_count: number }>({
     url: `${API_PREFIX}/ai/kb/sync/recent`,
     method: 'POST',
-    params: { limit }
+    params: { limit: safeLimit }
   });
 }
 

@@ -193,7 +193,7 @@ def list_transcription_tasks(
 @rest_router.get("/{session_id:int}/segments", response_model=list[TranscriptSegmentOut])
 def list_transcript_segments(
     session_id: int,
-    limit: int = Query(200, le=500),
+    limit: int = Query(200, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
     """获取某场直播的话术分段列表"""

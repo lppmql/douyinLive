@@ -10,6 +10,7 @@ import {
   updateReviewFindingStatus,
   updateScriptAsset
 } from '@/service/api/douyin';
+import { unwrapServiceData } from '@/utils/service';
 import MetricsChart from './metrics-chart.vue';
 import ReviewVideoPlayer from './review-video-player.vue';
 import ReviewTimeline from './review-timeline.vue';
@@ -58,7 +59,7 @@ const criticalCount = computed(
 async function loadWorkbench(autoGenerate = true) {
   loading.value = true;
   try {
-    workbench.value = (await fetchReviewWorkbench(props.sessionId)).data || null;
+    workbench.value = unwrapServiceData(await fetchReviewWorkbench(props.sessionId), '复盘工作台数据为空');
     if (autoGenerate && workbench.value && !workbench.value.findings.length) await generateReview();
   } catch (error) {
     message.error((error as { message?: string }).message || '复盘工作台加载失败');
@@ -70,10 +71,10 @@ async function loadWorkbench(autoGenerate = true) {
 async function generateReview() {
   generating.value = true;
   try {
-    const response = await generateSessionReview(props.sessionId);
-    if (response.data) workbench.value = response.data.workbench;
+    const reviewResult = unwrapServiceData(await generateSessionReview(props.sessionId), '复盘生成数据为空');
+    workbench.value = reviewResult.workbench;
     emit('refreshDetail');
-    message.success(`复盘已更新，共 ${response.data?.finding_count || 0} 条真实证据`);
+    message.success(`复盘已更新，共 ${reviewResult.finding_count || 0} 条真实证据`);
   } catch (error) {
     message.error((error as { message?: string }).message || '复盘生成失败');
   } finally {
@@ -83,10 +84,13 @@ async function generateReview() {
 
 async function updateFinding(item: Api.Douyin.ReviewFinding, status: Api.Douyin.ReviewFinding['status']) {
   try {
-    const response = await updateReviewFindingStatus(props.sessionId, item.id, status);
-    if (response.data && workbench.value) {
+    const updatedFinding = unwrapServiceData(
+      await updateReviewFindingStatus(props.sessionId, item.id, status),
+      '复盘发现状态更新失败'
+    );
+    if (workbench.value) {
       const index = workbench.value.findings.findIndex(finding => finding.id === item.id);
-      if (index >= 0) workbench.value.findings[index] = response.data;
+      if (index >= 0) workbench.value.findings[index] = updatedFinding;
     }
     message.success('复盘发现状态已更新');
   } catch {
@@ -109,7 +113,7 @@ async function saveAsset() {
   if (!assetForm.title.trim() || !assetForm.content.trim()) return message.warning('话术标题和原文不能为空');
   assetSaving.value = true;
   try {
-    const response = await createScriptAsset(props.sessionId, {
+    const newAsset = unwrapServiceData(await createScriptAsset(props.sessionId, {
       transcript_segment_id: assetForm.transcript_segment_id,
       category: assetForm.category,
       title: assetForm.title.trim(),
@@ -117,8 +121,8 @@ async function saveAsset() {
       start_seconds: assetForm.start_seconds,
       end_seconds: assetForm.end_seconds,
       performance_note: assetForm.performance_note.trim() || null
-    });
-    if (response.data && workbench.value) workbench.value.script_assets.unshift(response.data);
+    }), '话术收录失败');
+    if (workbench.value) workbench.value.script_assets.unshift(newAsset);
     assetModalVisible.value = false;
     message.success('真实话术已加入候选资产');
   } catch (error) {
@@ -131,10 +135,13 @@ async function saveAsset() {
 async function changeAssetStatus(item: Api.Douyin.ScriptAsset, status: Api.Douyin.ScriptAsset['status']) {
   updatingAssetId.value = item.id;
   try {
-    const response = await updateScriptAsset(props.sessionId, item.id, { status });
-    if (response.data && workbench.value) {
+    const updatedAsset = unwrapServiceData(
+      await updateScriptAsset(props.sessionId, item.id, { status }),
+      '话术资产状态更新失败'
+    );
+    if (workbench.value) {
       const index = workbench.value.script_assets.findIndex(asset => asset.id === item.id);
-      if (index >= 0) workbench.value.script_assets[index] = response.data;
+      if (index >= 0) workbench.value.script_assets[index] = updatedAsset;
     }
     message.success('话术资产状态已更新');
   } catch {
