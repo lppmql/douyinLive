@@ -4,6 +4,29 @@
 
 ---
 
+## [2026-07-22]
+
+### Changed
+- **采集页二轮瘦身**（`index.vue` 752→204 行，-73%）：
+  - 新增 `useCollectorLogin` composable：扫码登录流程独立管理（发起→轮询→成功/失败→清理）
+  - 新增 `useCollectorData` composable：所有状态+数据加载+监控/采集/ASR/DataEase/日志/账号操作
+  - `CollectorLogTable` 内置 logColumns 列定义（不再从父组件传入），新增 `openDetail` 事件
+  - `index.vue` 精简为纯编排器：只负责组合子组件+生命周期
+- **用户管理页方案 A 重构**（`index.vue` 408→108 行，-74%）：
+  - 新增 `useUserManagement` composable：表格配置+搜索+CRUD+表单验证规则
+  - 新增 `UserDrawer` 子组件：创建/编辑从 NModal 改为 NDrawer（侧边滑出，体验更流畅）
+  - 删除确认从 `dialog.warning()` 改为 `NPopconfirm`（内联确认，不用弹窗打断操作）
+  - 表单验证从手动 if 检查改为 `NForm :rules` 声明式规则
+- **知识库页方案 A 重构**（`index.vue` 718→43 行，-94%）：
+  - 新增 `useKnowledgeChat` composable：聊天状态+发送问题+清空对话+复制文本
+  - 新增 `ChatPanel` 子组件：手写 HTML 全部替换为 Naive UI（NButton/NInput/NAlert/NSkeleton）
+  - 新增 `SourcePanel` 子组件：来源卡片用 NCard+NTag 统一风格
+  - 新增 `knowledge-adapter`：来源类型中文映射（话术/评论/指标/知识）
+  - 新增推荐问题列表（4 个预设问题，点击即发送）
+  - 打字中状态从 CSS 手写动画改为 NSkeleton 骨架屏
+- **后端无改动**，三个任务全是纯前端重构
+
+---
 ## [2026-07-21]
 
 ### Fixed
