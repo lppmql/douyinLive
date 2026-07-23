@@ -133,7 +133,7 @@
   - **统一 APP_VERSION**：`config.py` 中 `0.1.0` → `0.9.0`，与版本标签一致
   - **PLAYWRIGHT_HEADLESS 生效**：`browser.py` 2 处 `headless=True` 硬编码 → `headless=settings.PLAYWRIGHT_HEADLESS`，现在可通过 `.env` 控制
   - **补齐 CI 检查**：CI 新增 ruff check + alembic check 步骤，新增 docker-check job；Makefile `check` 目标补上 `docker-check` 依赖
-  - **过期文档更新**：`开发.md` 更新文件行数/任务状态/断链；`ADR 0006` 更新待办状态/文件名/行数；`验收测试/README.md` 修复 6 个英文断链
+  - **过期文档更新**：`开发.md` 更新文件行数/任务状态/断链；`ADR 0006` 更新待办状态/文件名/行数；`验收测试/说明.md` 修复 6 个英文断链
 
 ### Changed
 - **主播排班页方案 A 重构**（`index.vue` 646 行 → 147 行，-77%）：
@@ -167,9 +167,9 @@
 
 ### Added
 - **Matt Pocock 工程技能体系配置**：
-  - 新增 `docs/agents/issue-tracker.md`：GitHub Issues 作为问题追踪器，含 `gh` CLI 常用操作手册
-  - 新增 `docs/agents/triage-labels.md`：5 标签分类体系（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）
-  - 新增 `docs/agents/domain.md`：单上下文领域文档消费者规则（先读 CONTEXT.md + ADR，再探索代码）
+  - 新增 `docs/agents/问题追踪.md`：GitHub Issues 作为问题追踪器，含 `gh` CLI 常用操作手册
+  - 新增 `docs/agents/分类标签.md`：5 标签分类体系（needs-triage / needs-info / ready-for-agent / ready-for-human / wontfix）
+  - 新增 `docs/agents/领域文档.md`：单上下文领域文档消费者规则（先读 CONTEXT.md + ADR，再探索代码）
   - 新增 `docs/agents/skill技能使用示例.md`：~25 个技能的详细中文使用示例 + 3 套组合拳场景
   - CLAUDE.md 新增 `## Agent skills` 块，注册三个配置入口
   - 新增 [ADR 0008](docs/adr/0008-引入Matt-Pocock工程技能体系.md)
@@ -312,7 +312,7 @@
 - Dependabot groups：npm/pip 的 patch 和 minor 各合并为一个 PR（不再 10 个分散 PR）
 - pytest-cov + CI 覆盖率红线（初始阈值 50%）
 - `docs/adr/` 目录：5 个架构决策记录（只增不改）
-- `docs/架构/README.md`：架构文档导航
+- `docs/架构/说明.md`：架构文档导航
 - `docs/adr/0002-*`：绞杀者迁移模板（7 步标准流程）
 - `CHANGELOG.md`：按时间倒序的版本变更记录
 
