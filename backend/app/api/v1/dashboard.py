@@ -96,11 +96,10 @@ def get_dashboard_summary_by_anchor(
     db: Session = Depends(get_db),
 ):
     """按主播（douyin_id）分组汇总经营指标，用于首页主播明细表。"""
-    query = db.query(
+    # ── 子查询：按 douyin_id 聚合，不碰 avatar_url，避免同一主播被拆成多行 ──
+    agg_sub = db.query(
         LiveSession.douyin_id,
-        LiveSession.anchor_name,
-        LiveSession.anchor_avatar_url,
-        func.max(LiveSession.id).label("anchor_avatar_session_id"),
+        func.max(LiveSession.id).label("latest_session_id"),
         func.count(LiveSession.id).label("session_count"),
         func.coalesce(func.sum(LiveSession.total_viewers), 0).label("total_viewers"),
         func.coalesce(func.sum(LiveSession.comments_count), 0).label("total_comments"),
@@ -110,10 +109,27 @@ def get_dashboard_summary_by_anchor(
         func.coalesce(func.sum(LiveSession.interaction_count), 0).label("total_interactions"),
         func.coalesce(func.sum(LiveSession.new_followers), 0).label("total_new_followers"),
     ).filter(LiveSession.douyin_id != "")
-    query = _date_filter(query, LiveSession, start_date, end_date)
-    query = query.group_by(LiveSession.douyin_id, LiveSession.anchor_name, LiveSession.anchor_avatar_url).order_by(
-        func.count(LiveSession.id).desc()
-    )
+    agg_sub = _date_filter(agg_sub, LiveSession, start_date, end_date)
+    agg_sub = agg_sub.group_by(LiveSession.douyin_id).subquery()
+
+    # ── 主查询：关联最新场次，获取主播名和头像 URL ──
+    query = db.query(
+        agg_sub.c.douyin_id,
+        LiveSession.anchor_name,
+        LiveSession.anchor_avatar_url,
+        agg_sub.c.latest_session_id.label("anchor_avatar_session_id"),
+        agg_sub.c.session_count,
+        agg_sub.c.total_viewers,
+        agg_sub.c.total_comments,
+        agg_sub.c.total_private_messages,
+        agg_sub.c.total_leads,
+        agg_sub.c.total_ad_cost,
+        agg_sub.c.total_interactions,
+        agg_sub.c.total_new_followers,
+    ).join(
+        LiveSession,
+        LiveSession.id == agg_sub.c.latest_session_id
+    ).order_by(agg_sub.c.session_count.desc())
 
     rows = query.all()
     anchors: list[dict[str, Any]] = []

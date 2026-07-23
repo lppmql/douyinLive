@@ -33,9 +33,14 @@ const props = withDefaults(
 
 const displayName = computed(() => props.nickname?.trim() || props.name?.trim() || '未知主播');
 
+/** 头像 URL 计算规则：
+ *  1. 有 sessionId → 走后端代理（避免抖音防盗链），即使 avatarUrl 为空也先试代理
+ *  2. 没 sessionId → 直接用 avatarUrl 原始地址
+ *  3. 都没值 → 返回空字符串，AnchorAvatar 组件会显示名字首字作为 fallback */
 const displayAvatarUrl = computed(() => {
-  if (!props.avatarUrl) return '';
-  return props.sessionId ? getLiveSessionAvatarUrl(props.sessionId) : props.avatarUrl;
+  if (props.sessionId) return getLiveSessionAvatarUrl(props.sessionId);
+  if (props.avatarUrl) return props.avatarUrl;
+  return '';
 });
 
 const secondaryText = computed(() => {

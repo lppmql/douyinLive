@@ -99,11 +99,14 @@ function formatBytes(value: number | null | undefined): string {
 }
 
 .resource-stat {
+  height: 100%;
   min-height: 70px;
   padding: 9px 11px;
   border: 1px solid color-mix(in srgb, var(--n-border-color) 72%, transparent);
   border-radius: 8px;
   background: rgb(255 255 255 / 48%);
+  display: flex;
+  flex-direction: column;
 }
 
 :global(.dark) .resource-stat {

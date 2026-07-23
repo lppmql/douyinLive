@@ -134,7 +134,7 @@ function intervalLabel(seconds: number): string {
 
     <CollectorResourceOverview :usage="resourceUsage" />
 
-    <NGrid cols="1 s:2 l:3" responsive="screen" :x-gap="12" :y-gap="12">
+    <NGrid cols="1 s:2 m:3 l:3" responsive="screen" :x-gap="12" :y-gap="12" item-responsive>
       <NGi v-for="module in modules" :key="module.key">
         <div
           class="collector-module"
@@ -217,12 +217,15 @@ function intervalLabel(seconds: number): string {
 }
 
 .collector-module {
+  height: 100%;
   min-height: 144px;
   padding: 14px;
   border: 1px solid var(--n-border-color);
   border-radius: 10px;
   background: var(--n-color);
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  display: flex;
+  flex-direction: column;
 }
 
 .collector-module--active {
