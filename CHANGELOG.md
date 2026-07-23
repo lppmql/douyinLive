@@ -29,6 +29,8 @@
 - **安全停机编排**：后端与前端使用独立进程组，终端 `Ctrl+C` 只交给启动脚本统一处理；停机先暂停新任务，再等待当前控制任务和实时采集完成，最后关闭 Playwright、Vite 和端口。
 
 ### Fixed
+- **主播头像不显示**：后端仪表盘按 `douyin_id` 子查询聚合统计数据，再 JOIN 最新场次获取头像 URL，避免 `GROUP BY anchor_avatar_url` 把同一主播拆成多行导致头像丢失。前端 `AnchorIdentity` 组件改为有 `sessionId` 时始终走后端代理，即使原始头像 URL 为空也先尝试通过代理获取。
+- **控制中心卡片高度不齐**：6 个模块卡片改为 3 列 × 2 排布局，CSS 统一加 `height: 100%` + `display: flex; flex-direction: column`，利用 Grid 的 `align-items: stretch` 实现同一行卡片高度一致。4 个电脑资源统计卡片同时统一高度。
 - 修复刷新与直播监控并发时可能出现的 `BrowserContext.new_page: Target page, context or browser has been closed`。
 - 修复删除采集账号返回 500、账号身份字段缺失、任务停止与重试反馈不完整等问题。
 - 修复直播场次详情评论归属和评论用户信息契约，避免跨场次显示评论。
