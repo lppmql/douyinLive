@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker stop *)",
+      "Bash(docker rm *)",
+      "Bash(docker compose *)",
+      "Bash(grep -oP \"\\\\`[^']*\\\\`|'[^']*'\")"
+    ]
+  }
+}
