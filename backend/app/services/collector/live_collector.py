@@ -9,6 +9,7 @@ from playwright.async_api import BrowserContext
 
 from app.models.scraper_tasks import ScraperTask
 from app.services.collector.collector_framework import AdaptiveCollector
+from app.services.collector.comments import _parse_comment_user_profile
 
 
 class MetricsCollector(AdaptiveCollector):
@@ -76,8 +77,13 @@ class CommentCollector(AdaptiveCollector):
             comments_raw = info if isinstance(info, list) else []
         parsed = []
         for c in comments_raw:
+            if not isinstance(c, dict):
+                continue
+            profile = _parse_comment_user_profile(c)
             parsed.append({
-                "user_nickname": c.get("user_nickname", c.get("nickname")),
+                **profile,
+                "user_sec_uid": c.get("user_sec_uid") or c.get("secUId") or c.get("sec_uid"),
+                "webcast_uid": c.get("webcast_uid") or c.get("webcastUid"),
                 "comment_content": c.get("comment_content", c.get("content")),
                 "comment_time": c.get("comment_time") or datetime.utcnow(),
             })

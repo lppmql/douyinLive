@@ -24,6 +24,68 @@ from app.services.collector.utils import (
 from app.services.collector.constants import COMMENT_URL
 
 
+def _first_comment_user_value(sources: list[dict], *keys: str) -> object | None:
+    """从评论本身或嵌套用户对象中取第一个真实非空字段。"""
+    for source in sources:
+        for key in keys:
+            value = source.get(key)
+            if value not in (None, "", [], {}):
+                return value
+    return None
+
+
+def _normalize_avatar_url(value: object | None) -> str | None:
+    """兼容字符串、URL 列表和抖音常见头像对象，只保留真实 HTTPS 地址。"""
+    if isinstance(value, dict):
+        value = (
+            value.get("urlList")
+            or value.get("url_list")
+            or value.get("urls")
+            or value.get("url")
+        )
+    if isinstance(value, list):
+        value = next((item for item in value if isinstance(item, str) and item.strip()), None)
+    if not isinstance(value, str):
+        return None
+    url = value.strip()
+    return url[:1000] if url.startswith("https://") else None
+
+
+def _parse_comment_user_profile(item: dict) -> dict[str, str | None]:
+    """提取评论用户公开资料；sec_uid 只用于去重，绝不冒充公开抖音号。"""
+    nested_sources = [
+        value
+        for value in (item.get("user"), item.get("author"), item.get("userInfo"), item.get("user_info"))
+        if isinstance(value, dict)
+    ]
+    sources = [item, *nested_sources]
+    nickname = _first_comment_user_value(sources, "user_nickname", "nickname", "nickName", "displayName")
+    avatar = _first_comment_user_value(
+        sources,
+        "user_avatar_url",
+        "avatarUrl",
+        "avatar_url",
+        "avatarThumb",
+        "avatar_thumb",
+        "avatar",
+    )
+    douyin_id = _first_comment_user_value(
+        sources,
+        "user_douyin_id",
+        "douyinId",
+        "douyin_id",
+        "uniqueId",
+        "unique_id",
+        "shortId",
+        "short_id",
+    )
+    return {
+        "user_nickname": str(nickname).strip()[:100] if nickname not in (None, "") else None,
+        "user_avatar_url": _normalize_avatar_url(avatar),
+        "user_douyin_id": str(douyin_id).strip()[:100] if douyin_id not in (None, "") else None,
+    }
+
+
 async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
     """访问评论页，采集评论数据"""
     url = f"{COMMENT_URL}?roomId={room_id}&fullscreen=0"
@@ -72,12 +134,14 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
             for c in comment_list:
                 if not isinstance(c, dict):
                     continue
-                nickname = c.get("user_nickname") or c.get("nickname") or c.get("nickName") or ""
+                profile = _parse_comment_user_profile(c)
                 content = c.get("comment_content") or c.get("content") or ""
                 if not content:
                     continue
                 comments.append({
-                    "user_nickname": nickname,
+                    **profile,
+                    "user_sec_uid": c.get("user_sec_uid") or c.get("secUId") or c.get("sec_uid"),
+                    "webcast_uid": c.get("webcast_uid") or c.get("webcastUid"),
                     "comment_content": content,
                     "comment_time": _parse_comment_time(c.get("comment_time") or c.get("createTime")),
                 })
@@ -88,12 +152,13 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
 def _save_comments(db: Session, session_id: int, comments: list) -> int:
     """保存评论数据（增量模式，按标识去重）。"""
     session = db.get(LiveSession, session_id)
-    existing_pairs = {
-        _comment_identity(row.user_nickname, row.comment_content or "", row.comment_time, row.user_sec_uid)
+    existing_by_identity = {
+        _comment_identity(row.user_nickname, row.comment_content or "", row.comment_time, row.user_sec_uid): row
         for row in db.query(Comment).filter(Comment.session_id == session_id).all()
     }
     seen_pairs = set()
     count = 0
+    profile_updated = False
     for c in comments:
         content = c.get("comment_content", "").strip()
         comment_time = c.get("comment_time")
@@ -113,7 +178,16 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
 
         nickname = c.get("user_nickname", "未知")
         pair = _comment_identity(nickname, content, comment_time, c.get("user_sec_uid"))
-        if pair in existing_pairs or pair in seen_pairs:
+        existing = existing_by_identity.get(pair)
+        if existing:
+            # 同一条评论再次抓到更完整用户资料时只补空字段，不覆盖已保存的真实值。
+            for field in ("user_avatar_url", "user_douyin_id", "user_sec_uid", "webcast_uid"):
+                value = c.get(field)
+                if value and not getattr(existing, field):
+                    setattr(existing, field, value)
+                    profile_updated = True
+            continue
+        if pair in seen_pairs:
             continue
         seen_pairs.add(pair)
 
@@ -121,6 +195,8 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
             comment = Comment(
                 session_id=session_id,
                 user_nickname=nickname,
+                user_avatar_url=c.get("user_avatar_url"),
+                user_douyin_id=c.get("user_douyin_id"),
                 user_sec_uid=c.get("user_sec_uid"),
                 webcast_uid=c.get("webcast_uid"),
                 comment_content=content,
@@ -128,7 +204,7 @@ def _save_comments(db: Session, session_id: int, comments: list) -> int:
             )
             db.add(comment)
             count += 1
-    if count:
+    if count or profile_updated:
         db.commit()
     return count
 
@@ -140,7 +216,18 @@ def _replace_session_comments(db: Session, session_id: int, comments: list) -> i
     annotations = {}
     for row in old_rows:
         key = ((row.user_nickname or "").strip(), (row.comment_content or "").strip())
-        annotations.setdefault(key, (row.is_high_intent, row.sentiment, row.keywords))
+        annotations.setdefault(
+            key,
+            (
+                row.is_high_intent,
+                row.sentiment,
+                row.keywords,
+                row.user_avatar_url,
+                row.user_douyin_id,
+                row.user_sec_uid,
+                row.webcast_uid,
+            ),
+        )
 
     db.query(Comment).filter(Comment.session_id == session_id).delete(synchronize_session=False)
     seen = set()
@@ -156,12 +243,14 @@ def _replace_session_comments(db: Session, session_id: int, comments: list) -> i
         if not content or identity in seen:
             continue
         seen.add(identity)
-        annotation = annotations.get((nickname, content), (0, None, None))
+        annotation = annotations.get((nickname, content), (0, None, None, None, None, None, None))
         db.add(Comment(
             session_id=session_id,
             user_nickname=nickname,
-            user_sec_uid=item.get("user_sec_uid"),
-            webcast_uid=item.get("webcast_uid"),
+            user_avatar_url=item.get("user_avatar_url") or annotation[3],
+            user_douyin_id=item.get("user_douyin_id") or annotation[4],
+            user_sec_uid=item.get("user_sec_uid") or annotation[5],
+            webcast_uid=item.get("webcast_uid") or annotation[6],
             comment_content=content,
             comment_time=comment_time or datetime.utcnow(),
             is_high_intent=annotation[0] or 0,

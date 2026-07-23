@@ -25,6 +25,7 @@ declare namespace Api {
       douyin_id: string;
       anchor_name: string;
       anchor_avatar_url: string;
+      anchor_avatar_session_id: number | null;
       session_count: number;
       total_viewers: number;
       total_comments: number;
@@ -276,6 +277,8 @@ declare namespace Api {
       id: number;
       session_id: number;
       user_nickname: string | null;
+      user_avatar_url: string | null;
+      user_douyin_id: string | null;
       user_sec_uid: string | null;
       webcast_uid: string | null;
       comment_content: string | null;
@@ -312,13 +315,17 @@ declare namespace Api {
     interface CollectorAccount {
       id: number;
       account_name: string | null;
+      douyin_nickname: string | null;
       douyin_id: string | null;
       login_status: 'logged_in' | 'expired' | 'never';
+      cookie_status: 'valid' | 'expired' | 'unchecked' | 'missing';
       cookie_saved: boolean;
       fingerprint_saved: boolean;
       viewport_width: number | null;
       viewport_height: number | null;
       last_login_at: string | null;
+      cookie_checked_at: string | null;
+      cookie_refreshed_at: string | null;
       expires_at: string | null;
       created_at: string;
       updated_at: string;
@@ -330,6 +337,18 @@ declare namespace Api {
       level: 'info' | 'warn' | 'error';
       message: string | null;
       raw_json: unknown;
+      session_id: number | null;
+      anchor_name: string | null;
+      anchor_nickname: string | null;
+      anchor_avatar_url: string | null;
+      douyin_id: string | null;
+      session_title: string | null;
+      live_start_time: string | null;
+      room_id_str: string | null;
+      task_type: string | null;
+      event_type: string | null;
+      stage: string | null;
+      data_details: Record<string, unknown>;
       created_at: string;
     }
 
@@ -380,8 +399,111 @@ declare namespace Api {
       account_id: number;
       valid: boolean;
       login_status: 'logged_in' | 'expired';
+      cookie_status: 'valid' | 'expired' | 'unchecked' | 'missing';
+      douyin_nickname: string | null;
+      douyin_id: string | null;
       checked_at: string;
       message: string;
+    }
+
+    type CollectorModuleKey = 'data_refresh' | 'monitor' | 'asr' | 'ai_review' | 'knowledge' | 'dataease';
+
+    interface CollectorModuleStatus {
+      key: CollectorModuleKey;
+      label: string;
+      mode: 'action' | 'service' | 'automatic';
+      enabled: boolean;
+      running: boolean;
+      status: string;
+      pending_count: number;
+      processing_count: number;
+      completed_count: number;
+      failed_count: number;
+      summary: string;
+      disabled_reason: string;
+      interval_seconds: number;
+      enabled_at: string | null;
+      last_scheduled_at: string | null;
+      next_run_at: string | null;
+    }
+
+    interface ResourceComponentUsage {
+      key: string;
+      label: string;
+      running: boolean;
+      cpu_percent: number;
+      memory_bytes: number;
+    }
+
+    interface ComputerResourceUsage {
+      sampled_at: string;
+      cpu_percent: number;
+      memory_percent: number;
+      memory_used_bytes: number;
+      memory_total_bytes: number;
+      disk_used_percent: number;
+      disk_free_bytes: number;
+      app_memory_bytes: number;
+      pressure_level: 'normal' | 'high' | 'critical';
+      pressure_message: string;
+      components: ResourceComponentUsage[];
+    }
+
+    interface UnifiedCollectorTask {
+      task_key: string;
+      source: 'scraper' | 'asr';
+      id: number;
+      module_key: CollectorModuleKey;
+      task_type: string;
+      task_label: string;
+      status: 'pending' | 'queued' | 'running' | 'processing' | 'completed' | 'failed' | 'cancelled';
+      progress_percent: number;
+      progress_current: number;
+      progress_total: number;
+      progress_stage: string | null;
+      progress_message: string | null;
+      account_id: number | null;
+      session_id: number | null;
+      anchor_name: string | null;
+      anchor_nickname: string | null;
+      anchor_avatar_url: string | null;
+      douyin_id: string | null;
+      session_title: string | null;
+      error_message: string | null;
+      trace_id: string | null;
+      worker_id: string | null;
+      heartbeat_at: string | null;
+      retry_count: number;
+      max_retries: number;
+      retry_of_task_id: number | null;
+      can_stop: boolean;
+      can_retry: boolean;
+      created_at: string;
+      started_at: string | null;
+      completed_at: string | null;
+      result_json: Record<string, unknown> | null;
+      collected_anchor_count: number;
+      collected_session_count: number;
+      new_session_count: number;
+      checked_detail_count: number;
+      refreshed_detail_count: number;
+      failed_detail_count: number;
+      remaining_detail_count: number;
+    }
+
+    interface CollectorControlCenter {
+      modules: CollectorModuleStatus[];
+      current_task: UnifiedCollectorTask | null;
+      active_task_count: number;
+      queued_task_count: number;
+      latest_task: UnifiedCollectorTask | null;
+      resource_usage: ComputerResourceUsage;
+    }
+
+    interface CollectorTaskAction {
+      success: boolean;
+      message: string;
+      task: UnifiedCollectorTask | null;
     }
 
     interface AsrControlStatus {
@@ -686,6 +808,9 @@ declare namespace Api {
       source_type: string | null;
       session_id: number | null;
       anchor_name?: string | null;
+      anchor_nickname?: string | null;
+      anchor_avatar_url?: string | null;
+      douyin_id?: string | null;
       time_range?: string;
       slice_start_seconds?: number;
       slice_end_seconds?: number;

@@ -15,6 +15,8 @@ class Comment(Base, TimestampMixin):
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="ID")
     session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")
     user_nickname = Column(String(100), nullable=True, comment="用户昵称")
+    user_avatar_url = Column(String(1000), nullable=True, comment="评论用户头像 URL")
+    user_douyin_id = Column(String(100), nullable=True, comment="评论用户公开抖音号")
     user_sec_uid = Column(String(200), nullable=True, comment="评论用户稳定SecUID")
     webcast_uid = Column(String(200), nullable=True, comment="本条评论Webcast用户标识")
     comment_content = Column(Text, nullable=True, comment="评论内容")

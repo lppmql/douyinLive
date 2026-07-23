@@ -30,6 +30,8 @@ from app.services.collector.account_repo import (
     save_account_to_db,
     update_account_state,
 )
+from app.services.collector.account_identity import fetch_account_identity
+from app.services.collector.browser_session import BrowserLeaseKind, BrowserSessionCoordinator
 from app.services.collector.constants import LEADS_BASE, DEFAULT_FINGERPRINT
 from app.services.tasks.runtime import touch_task, publish_task_event
 
@@ -98,7 +100,41 @@ class BrowserManager:
             cls._instance._initialized = False
             cls._instance._browser_lock = asyncio.Lock()
             cls._instance._context_lock = asyncio.Lock()
+            cls._instance._session_coordinator = BrowserSessionCoordinator()
         return cls._instance
+
+    def session_lease(self, owner: str, *, kind: BrowserLeaseKind = "maintenance"):
+        """所有复用 Cookie 的页面操作都必须从这里领取独占会话。"""
+        return self._session_coordinator.lease(owner, kind=kind)
+
+    def session_snapshot(self) -> dict[str, str | int | None]:
+        """返回当前浏览器被谁使用及刷新等待数量。"""
+        return self._session_coordinator.snapshot()
+
+    @staticmethod
+    def _observe_playwright_transport(playwright) -> None:
+        """读取 Playwright 驱动退出结果，避免终端信号留下无人接收的 Future。"""
+        try:
+            error_future = playwright._impl_obj._connection._transport.on_error_future
+        except AttributeError:
+            return
+
+        def consume_result(future):
+            if future.cancelled():
+                return
+            try:
+                error = future.exception()
+            except asyncio.CancelledError:
+                return
+            if error:
+                # 业务页面操作会单独记录真正的采集错误；这个 Future 仅表示驱动管道已关闭。
+                logger.debug("Playwright 驱动管道已结束: %s", error)
+
+        error_future.add_done_callback(consume_result)
+
+    async def wait_until_session_idle(self, timeout_seconds: float = 15) -> bool:
+        """等待共享登录会话空闲，供安全关闭浏览器使用。"""
+        return await self._session_coordinator.wait_until_idle(timeout_seconds)
 
     async def ensure_browser(self) -> Browser:
         """获取或创建浏览器实例（固定参数）"""
@@ -110,6 +146,7 @@ class BrowserManager:
                     except Exception:
                         pass
                 self._playwright = await async_playwright().start()
+                self._observe_playwright_transport(self._playwright)
                 self._browser = await self._playwright.chromium.launch(
                     headless=settings.PLAYWRIGHT_HEADLESS,
                     channel=BROWSER_CHANNEL,
@@ -260,6 +297,11 @@ class BrowserManager:
 
     async def check_account_health(self, account: ScraperAccount) -> tuple[bool, str]:
         """使用账号保存的 Cookie 与指纹做隔离的轻量登录态检查。"""
+        async with self.session_lease(f"account-health:{account.id}", kind="account"):
+            return await self._check_account_health_unlocked(account)
+
+    async def _check_account_health_unlocked(self, account: ScraperAccount) -> tuple[bool, str]:
+        """已取得浏览器会话租约后的真实 Cookie 检查。"""
         if not account.storage_state_path or not Path(account.storage_state_path).is_file():
             return False, "未找到账号登录状态文件，请重新扫码"
 
@@ -269,6 +311,22 @@ class BrowserManager:
         )
         try:
             expired = await self.check_login_expired(context)
+            if not expired:
+                identity = await fetch_account_identity(context)
+                if identity.get("douyin_nickname"):
+                    account.douyin_nickname = identity["douyin_nickname"]
+                if identity.get("douyin_id"):
+                    account.douyin_id = identity["douyin_id"]
+                try:
+                    # 存活检查可能收到平台轮换的新 Cookie，验证成功后立即落盘，
+                    # 后续采集继续使用同一套 Cookie 和浏览器指纹，不需要重新扫码。
+                    state = await context.storage_state(path=account.storage_state_path)
+                    Path(account.storage_state_path).chmod(0o600)
+                    account.cookies_json = json.dumps(state.get("cookies", []), ensure_ascii=False)
+                    account.cookie_refreshed_at = datetime.utcnow()
+                except Exception as exc:
+                    # Cookie 已经通过真实页面验证，落盘失败只记录告警，不能误判账号失效。
+                    logger.warning("账号 Cookie 刷新保存失败 account_id=%s: %s", account.id, exc)
             return (False, "Cookie 已失效，请重新扫码") if expired else (True, "账号登录状态有效")
         except Exception as exc:
             logger.warning("账号存活检查失败 account_id=%s: %s", account.id, exc)
@@ -278,8 +336,9 @@ class BrowserManager:
 
     async def set_logged_in_context(self, context: BrowserContext, storage_path: str, account_id: int):
         """串行替换登录上下文，避免扫码完成时关闭正在恢复的上下文。"""
-        async with self._context_lock:
-            await self._set_logged_in_context_unlocked(context, storage_path, account_id)
+        async with self.session_lease(f"login-replace:{account_id}", kind="login"):
+            async with self._context_lock:
+                await self._set_logged_in_context_unlocked(context, storage_path, account_id)
 
     async def _set_logged_in_context_unlocked(
         self,
@@ -308,19 +367,20 @@ class BrowserManager:
         刷新持久化登录上下文的 StorageState
         每次采集成功后调用，延长 Cookie 有效期
         """
-        if self._logged_in_context and self._logged_in_storage_path:
-            try:
-                await self._logged_in_context.storage_state(path=self._logged_in_storage_path)
-                state = await self._logged_in_context.storage_state()
-                cookies_json = json.dumps(state.get("cookies", []), ensure_ascii=False)
-                self._update_account_state(
-                    account_id=self._logged_in_account_id,
-                    storage_path=self._logged_in_storage_path,
-                    cookies_json=cookies_json,
-                )
-                logger.info(f"持久化上下文 Cookie 已刷新: {self._logged_in_storage_path}")
-            except Exception as e:
-                logger.warning(f"刷新 Cookie 失败: {e}")
+        async with self.session_lease("cookie-refresh", kind="account"):
+            if self._logged_in_context and self._logged_in_storage_path:
+                try:
+                    await self._logged_in_context.storage_state(path=self._logged_in_storage_path)
+                    state = await self._logged_in_context.storage_state()
+                    cookies_json = json.dumps(state.get("cookies", []), ensure_ascii=False)
+                    self._update_account_state(
+                        account_id=self._logged_in_account_id,
+                        storage_path=self._logged_in_storage_path,
+                        cookies_json=cookies_json,
+                    )
+                    logger.info(f"持久化上下文 Cookie 已刷新: {self._logged_in_storage_path}")
+                except Exception as e:
+                    logger.warning(f"刷新 Cookie 失败: {e}")
 
     async def start_qr_login(
         self,
@@ -347,19 +407,25 @@ class BrowserManager:
         return {"qr_base64": "", "message": "登录任务已创建"}
 
     async def _qr_login_worker(self, task_id: int, account_name: str, account_id: Optional[int] = None):
-        """后台扫码登录工作线程"""
-        playwright = None
+        """扫码期间独占共享浏览器，避免监控或刷新与登录页面争抢账号状态。"""
+        async with self.session_lease(f"qr-login:{task_id}", kind="login"):
+            await self._qr_login_worker_serialized(task_id, account_name, account_id)
+
+    async def _qr_login_worker_serialized(
+        self,
+        task_id: int,
+        account_name: str,
+        account_id: Optional[int] = None,
+    ):
+        """在浏览器租约内完成二维码登录并把上下文交给统一管理器。"""
         browser = None
+        context = None
+        context_adopted = False
         try:
             self.login_sessions[task_id]["status"] = "scanning"
             self.login_sessions[task_id]["message"] = "正在打开浏览器..."
 
-            playwright = await async_playwright().start()
-            browser = await playwright.chromium.launch(
-                headless=settings.PLAYWRIGHT_HEADLESS,
-                channel=BROWSER_CHANNEL,
-                args=BROWSER_ARGS,
-            )
+            browser = await self.ensure_browser()
 
             existing_account = self._find_account_by_id(account_id)
             fingerprint = self._load_account_fingerprint(existing_account)
@@ -461,6 +527,7 @@ class BrowserManager:
                 # 保存 StorageState
                 storage_path, cookies_json = await self._save_context_state(context, task_id)
                 fingerprint_snapshot = await self._capture_fingerprint(page)
+                identity = await fetch_account_identity(context)
                 ua = fingerprint_snapshot.get("user_agent")
                 vp = fingerprint_snapshot.get("viewport") or {}
 
@@ -471,6 +538,8 @@ class BrowserManager:
                     "user_agent": ua,
                     "viewport_width": vp.get("width") if vp else None,
                     "viewport_height": vp.get("height") if vp else None,
+                    "douyin_nickname": identity.get("douyin_nickname"),
+                    "douyin_id": identity.get("douyin_id"),
                 })
 
                 # 直接写入数据库（不依赖前端轮询）
@@ -484,11 +553,19 @@ class BrowserManager:
                     ua=ua,
                     vp_width=vp.get("width") if vp else None,
                     vp_height=vp.get("height") if vp else None,
+                    douyin_nickname=identity.get("douyin_nickname"),
+                    douyin_id=identity.get("douyin_id"),
                 )
                 self.login_sessions[task_id]["account_id"] = saved_account_id
 
                 # 将登录上下文设置为持久化上下文（不关闭浏览器！）
-                await self.set_logged_in_context(context, storage_path, saved_account_id or task_id)
+                async with self._context_lock:
+                    await self._set_logged_in_context_unlocked(
+                        context,
+                        storage_path,
+                        saved_account_id or task_id,
+                    )
+                context_adopted = True
                 logger.info(
                     f"扫码登录完成! storage_path={storage_path}, "
                     f"final_url={page.url}, account_id={saved_account_id}, 上下文已持久化"
@@ -523,9 +600,13 @@ class BrowserManager:
                 self._finish_login_task(task_id, TaskStatus.FAILED, "扫码登录超时，请重新扫码")
                 # 即使超时也保存上下文（可能部分登录成功）
                 try:
-                    await self.set_logged_in_context(context,
-                        str(STORAGE_DIR / f"login_task_{task_id}_partial.json"),
-                        task_id)
+                    async with self._context_lock:
+                        await self._set_logged_in_context_unlocked(
+                            context,
+                            str(STORAGE_DIR / f"login_task_{task_id}_partial.json"),
+                            task_id,
+                        )
+                    context_adopted = True
                 except Exception:
                     pass
                 return
@@ -536,14 +617,19 @@ class BrowserManager:
             self.login_sessions[task_id]["message"] = f"登录失败: {str(e)}"
             self._finish_login_task(task_id, TaskStatus.FAILED, f"扫码登录失败: {str(e)}")
         finally:
-            # 注意：不关闭 browser 和 playwright！
-            # 上下文被保持为持久化上下文，浏览器需要继续运行
-            pass
+            # 成功或部分成功的登录上下文由统一管理器继续复用；失败页面必须立即释放。
+            if context and not context_adopted:
+                try:
+                    await context.close()
+                except Exception:
+                    pass
 
     async def _save_context_state(self, context: BrowserContext, task_id: int) -> tuple[str, str]:
         """保存上下文状态到文件，并返回 cookies 备份。"""
         path = str(STORAGE_DIR / f"login_task_{task_id}.json")
         state = await context.storage_state(path=path)
+        # Cookie 与指纹属于登录凭据，只允许当前系统用户读写。
+        Path(path).chmod(0o600)
         cookies_json = json.dumps(state.get("cookies", []), ensure_ascii=False)
         logger.info(f"StorageState 已保存: {path}")
         return path, cookies_json
@@ -605,7 +691,9 @@ class BrowserManager:
         ua: str | None,
         vp_width: int | None,
         vp_height: int | None,
-        account_id: Optional[int] = None
+        account_id: Optional[int] = None,
+        douyin_nickname: str | None = None,
+        douyin_id: str | None = None,
     ) -> Optional[int]:
         """登录成功后写入 ScraperAccount 表，并返回最终账号 ID。
 
@@ -617,6 +705,7 @@ class BrowserManager:
                 db, task_id, account_name, storage_path,
                 cookies_json, browser_fingerprint_json,
                 ua, vp_width, vp_height, account_id,
+                douyin_nickname, douyin_id,
             )
             # 登录成功后同时将关联任务标记为完成
             if saved_id:
@@ -671,6 +760,8 @@ class BrowserManager:
             "user_agent": session.get("user_agent"),
             "viewport_width": session.get("viewport_width"),
             "viewport_height": session.get("viewport_height"),
+            "douyin_nickname": session.get("douyin_nickname"),
+            "douyin_id": session.get("douyin_id"),
             "message": session.get("message", ""),
         }
 
@@ -703,24 +794,49 @@ class BrowserManager:
         return True
 
     async def close(self):
-        """关闭浏览器（释放所有资源）"""
-        async with self._context_lock:
-            async with self._browser_lock:
-                self._logged_in_context = None
-                self._logged_in_account_id = None
-                if self._browser:
-                    try:
-                        await self._browser.close()
-                    except Exception:
-                        pass
+        """按页面、上下文、浏览器、驱动的顺序关闭，确保异步响应完整收尾。"""
+        async with self.session_lease("browser-close", kind="maintenance"):
+            async with self._context_lock:
+                async with self._browser_lock:
+                    browser = self._browser
+                    contexts = list(browser.contexts) if browser and browser.is_connected() else []
+
+                    self._logged_in_context = None
+                    self._logged_in_account_id = None
+                    self._logged_in_storage_path = None
+
+                    # 直接 browser.close() 会让仍在读取响应的页面同时断线。先逐层关闭，
+                    # Playwright 才能把每个 Future 的结果交还给调用方，而不是在退出后报噪声。
+                    for context in contexts:
+                        for page in list(context.pages):
+                            try:
+                                await page.close(run_before_unload=False)
+                            except Exception:
+                                pass
+                        try:
+                            await context.close()
+                        except Exception:
+                            pass
+                    await asyncio.sleep(0)
+
+                    if self._playwright:
+                        try:
+                            # stop() 会先给驱动管道设置停止标记，再回收它启动的浏览器。
+                            # 此处不再额外 browser.close()，避免同一管道被关闭两次。
+                            await self._playwright.stop()
+                        except Exception:
+                            pass
+                    elif browser:
+                        try:
+                            if browser.is_connected():
+                                await browser.close()
+                        except Exception:
+                            pass
                     self._browser = None
-                if self._playwright:
-                    try:
-                        await self._playwright.stop()
-                    except Exception:
-                        pass
                     self._playwright = None
-                logger.info("浏览器实例已关闭")
+                    # 让驱动关闭回调在 lifespan 结束前执行，避免“Future exception was never retrieved”。
+                    await asyncio.sleep(0)
+                    logger.info("浏览器实例已关闭")
 
 
 # 全局单例

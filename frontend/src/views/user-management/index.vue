@@ -7,7 +7,6 @@
 import { onMounted } from 'vue';
 import { NButton, NCard, NAlert, NInput, NTag, NSpace } from 'naive-ui';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
-import BusinessPageHeader from '@/components/business/page-header.vue';
 import UserDrawer from './modules/UserDrawer.vue';
 import { useUserManagement } from './composables/useUserManagement';
 import type { UserRecord } from '@/service/api/user';
@@ -24,27 +23,6 @@ onMounted(() => {
 
 <template>
   <NSpace vertical :size="16" class="business-page">
-    <BusinessPageHeader
-      title="系统用户管理"
-      description="维护中台登录账号、角色和启停状态。管理员账号受保护；不确定是否仍需使用时，建议先停用而不是删除。"
-      icon="mdi:account-group-outline"
-      :status="
-        um.tableError.value
-          ? '用户列表加载失败'
-          : um.loading.value && !um.mobilePagination.value?.itemCount
-            ? '正在读取用户'
-            : `共 ${um.mobilePagination.value?.itemCount || 0} 个用户`
-      "
-      :status-type="um.tableError.value ? 'error' : 'info'"
-    >
-      <template #actions>
-        <NButton type="primary" @click="um.openCreate">
-          <template #icon><SvgIcon icon="mdi:account-plus-outline" /></template>
-          新增用户
-        </NButton>
-      </template>
-    </BusinessPageHeader>
-
     <NCard :bordered="false" class="card-wrapper h-full" title="用户列表">
       <!-- 加载错误 -->
       <NAlert v-if="um.tableError.value" class="mb-16px" type="error" :bordered="false" show-icon>
@@ -66,6 +44,10 @@ onMounted(() => {
           <NButton @click="um.handleResetSearch">重置</NButton>
         </div>
         <div class="business-toolbar__actions">
+          <NButton type="primary" @click="um.openCreate">
+            <template #icon><SvgIcon icon="mdi:account-plus-outline" /></template>
+            新增用户
+          </NButton>
           <TableHeaderOperation v-model:columns="um.columnChecks.value" :loading="um.loading.value" @refresh="um.getData">
             <template #default>
               <NTag type="info" round size="small">超级管理员不可删除</NTag>
@@ -97,12 +79,12 @@ onMounted(() => {
     <UserDrawer
       v-model:visible="um.drawerVisible.value"
       :operate-type="um.operateType.value"
-      :editing-id="um.editingId.value"
       :form-data="um.formData"
       :form-rules="um.formRules"
       :role-options="um.roleOptions"
       :status-options="um.statusOptions"
       :saving="um.saving.value"
+      @update-field="um.updateFormField"
       @save="um.handleSave"
     />
   </NSpace>

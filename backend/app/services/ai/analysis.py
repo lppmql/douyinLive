@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.live_sessions import LiveSession
 from app.models.analysis_reports import AnalysisReport
+from app.prompts import get_system_prompt
 from app.services.ai.deepseek_client import chat_json
 from app.services.ai.prompt_service import get_prompt_template
 
@@ -61,7 +62,7 @@ def analyze_trend(session_ids: list[int], db: Session | None = None) -> dict[str
             return None
 
         result = chat_json(
-            system_prompt="你是一个直播数据分析师。请按要求输出 JSON。",
+            system_prompt=get_system_prompt("trend_analysis"),
             user_message=prompt_template.content.replace("{sessions_data}", sessions_data),
             temperature=0.3,
             operation="trend_analysis",
@@ -123,7 +124,7 @@ def detect_anomalies(session_id: int, db: Session | None = None) -> dict[str, An
         )
 
         result = chat_json(
-            system_prompt="你是一个异常检测分析师。请按要求输出 JSON。",
+            system_prompt=get_system_prompt("anomaly_detection"),
             user_message=user_message,
             temperature=0.3,
             operation="anomaly_detection",

@@ -1,7 +1,7 @@
 <!-- 知识库 — 聊天面板（Naive UI 组件替代手写 HTML） -->
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue';
-import { NButton, NInput, NScrollbar, NEmpty, NSkeleton } from 'naive-ui';
+import { NButton, NInput, NScrollbar, NSkeleton } from 'naive-ui';
 import type { ChatMessage } from '../composables/useKnowledgeChat';
 
 defineOptions({ name: 'KnowledgeChatPanel' });
@@ -38,6 +38,11 @@ const recommendedQuestions = [
   '投流 ROI 太低怎么优化？',
   '哪些品类适合做直播引流？'
 ];
+
+/** 将键盘事件交给问答编排层，统一判断回车发送和换行。 */
+function handleKeydown(event: KeyboardEvent) {
+  emit('keydown', event);
+}
 </script>
 
 <template>
@@ -150,7 +155,7 @@ const recommendedQuestions = [
           clearable
           round
           size="large"
-          @keydown="(e: KeyboardEvent) => emit('keydown', e)"
+          @keydown="handleKeydown"
           @update:value="(v: string) => emit('update:question', v)"
         />
         <NButton

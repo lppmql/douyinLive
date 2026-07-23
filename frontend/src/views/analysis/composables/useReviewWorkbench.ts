@@ -1,8 +1,7 @@
-import { computed, h, ref } from 'vue';
+import { computed, ref } from 'vue';
 import type { SelectOption } from 'naive-ui';
 import { useMessage } from 'naive-ui';
-import { useRouter } from 'vue-router';
-import AnchorAvatar from '@/components/business/anchor-avatar.vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import { unwrapServiceData } from '@/utils/service';
 import {
@@ -10,7 +9,6 @@ import {
   fetchLiveSessions,
   fetchReviewWorkbench,
   generateSessionReview,
-  getLiveSessionAvatarUrl,
   optimizeSession,
   scoreSession
 } from '@/service/api/douyin';
@@ -34,8 +32,12 @@ export type ActionStage = '' | 'evidence' | 'score' | 'optimize' | 'score-only' 
 
 /** 场次下拉选项（扩展 SelectOption，带主播头像信息） */
 export type SessionSelectOption = SelectOption & {
+  sessionId: number;
   anchorName: string;
+  anchorNickname: string | null;
+  douyinId: string | null;
   avatarUrl: string | null;
+  metaLabel: string;
 };
 
 // ========== Composable ==========
@@ -55,6 +57,7 @@ export type SessionSelectOption = SelectOption & {
 export function useReviewWorkbench() {
   const message = useMessage();
   const router = useRouter();
+  const route = useRoute();
 
   // ---- 响应式状态 ----
 
@@ -98,23 +101,24 @@ export function useReviewWorkbench() {
   /** 最近一份分析报告 */
   const latestReport = computed(() => sessionReports.value[0] || null);
 
-  /** 当前选中场次的主播头像 URL（供子组件直接使用） */
-  const selectedSessionAvatarUrl = computed(() => {
-    if (!selectedSession.value) return undefined;
-    return getSessionAvatarUrl(selectedSession.value);
-  });
-
   /** 是否有操作正在进行中 */
   const actionBusy = computed(() => Boolean(actionStage.value));
 
   /** 场次下拉选项列表（含主播头像信息） */
   const sessionOptions = computed(() =>
-    sessions.value.map<SessionSelectOption>(session => ({
-      value: session.id,
-      label: `${session.anchor_name || '未知主播'} · ${formatShortDateTime(session.live_start_time)} · ${formatDuration(session.live_duration_seconds)} · ${session.live_status === 'live' ? '直播中' : '已结束'}`,
-      anchorName: session.anchor_name || '未知主播',
-      avatarUrl: session.anchor_avatar_url ? getLiveSessionAvatarUrl(session.id) : null
-    }))
+    sessions.value.map<SessionSelectOption>(session => {
+      const metaLabel = `${formatShortDateTime(session.live_start_time)} · ${formatDuration(session.live_duration_seconds)} · ${session.live_status === 'live' ? '直播中' : '已结束'}`;
+      return {
+        value: session.id,
+        label: `${session.anchor_name || '未知主播'} · ${session.douyin_id || '未获取抖音号'} · ${metaLabel}`,
+        sessionId: session.id,
+        anchorName: session.anchor_name || '未知主播',
+        anchorNickname: session.anchor_nickname,
+        douyinId: session.douyin_id,
+        avatarUrl: session.anchor_avatar_url,
+        metaLabel
+      };
+    })
   );
 
   /** 五维评分指标列表（已过滤无效值） */
@@ -165,20 +169,6 @@ export function useReviewWorkbench() {
     restoreReportsFromList(reports, v => { scoreResult.value = v; }, v => { optimizeResult.value = v; });
   }
 
-  /** 渲染场次下拉选项（带主播头像） */
-  function renderSessionLabel(option: SelectOption) {
-    const sessionOption = option as SessionSelectOption;
-    return h('div', { class: 'flex min-w-0 items-center gap-8px' }, [
-      h(AnchorAvatar, { size: 26, src: sessionOption.avatarUrl || undefined, name: sessionOption.anchorName }),
-      h('span', { class: 'min-w-0 flex-1 truncate' }, String(sessionOption.label || ''))
-    ]);
-  }
-
-  /** 获取场次主播头像 URL */
-  function getSessionAvatarUrl(session: Api.Douyin.LiveSession) {
-    return session.anchor_avatar_url ? getLiveSessionAvatarUrl(session.id) : undefined;
-  }
-
   // ---- 异步操作 ----
 
   /** 加载单个场次的复盘上下文（工作台 + 报告列表） */
@@ -215,9 +205,16 @@ export function useReviewWorkbench() {
       sessions.value = sortSessionsByLatest(
         unwrapServiceData(sessionsResponse, '直播场次读取失败')
       );
-      const latestSession = sessions.value[0];
-      selectedSessionId.value = latestSession?.id || null;
-      if (latestSession) await loadSessionContext(latestSession.id);
+      const rawSessionId = Array.isArray(route.query.sessionId) ? route.query.sessionId[0] : route.query.sessionId;
+      const requestedSessionId = Number(rawSessionId);
+      const initialSession = sessions.value.find(item => item.id === requestedSessionId) || sessions.value[0];
+      selectedSessionId.value = initialSession?.id || null;
+      if (initialSession) {
+        if (String(route.query.sessionId || '') !== String(initialSession.id)) {
+          void router.replace({ query: { ...route.query, sessionId: String(initialSession.id) } });
+        }
+        await loadSessionContext(initialSession.id);
+      }
     } catch (error) {
       loadError.value = (error as { message?: string }).message || 'AI 复盘页面加载失败';
       message.error(loadError.value);
@@ -229,6 +226,9 @@ export function useReviewWorkbench() {
   /** 切换场次 */
   async function changeSession(value: number | null) {
     selectedSessionId.value = value;
+    if (value && String(route.query.sessionId || '') !== String(value)) {
+      void router.replace({ query: { ...route.query, sessionId: String(value) } });
+    }
     workbench.value = null;
     sessionReports.value = [];
     scoreResult.value = null;
@@ -299,7 +299,10 @@ export function useReviewWorkbench() {
 
   /** 跳转到话术转写页面 */
   function openTranscripts() {
-    router.push({ name: 'transcripts' });
+    router.push({
+      name: 'transcripts',
+      query: selectedSessionId.value ? { sessionId: String(selectedSessionId.value) } : undefined
+    });
   }
 
   // ---- 导出 ----
@@ -319,7 +322,6 @@ export function useReviewWorkbench() {
     activeTab,
     // 计算属性
     selectedSession,
-    selectedSessionAvatarUrl,
     analysisReady,
     coveredDomainCount,
     openFindingCount,
@@ -330,9 +332,6 @@ export function useReviewWorkbench() {
     improvementSuggestions,
     nextLivePlan,
     complianceNotes,
-    // 渲染辅助
-    renderSessionLabel,
-    getSessionAvatarUrl,
     // 操作
     initializePage,
     changeSession,

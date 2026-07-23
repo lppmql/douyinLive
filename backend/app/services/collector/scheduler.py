@@ -81,13 +81,32 @@ class SchedulerManager:
         logger.info("SchedulerManager 已启动")
 
     async def stop(self):
-        """仅停止实时监控任务；共享浏览器由应用生命周期统一管理。"""
+        """先暂停新调度并等待在途页面收尾，再关闭实时监控调度器。"""
         if self._scheduler and self._scheduler.running:
+            self.pause_scheduling()
+            idle = await self.wait_until_idle(timeout_seconds=45)
+            if not idle:
+                logger.warning("实时采集任务 45 秒内未结束，将保留断点并继续安全停机")
             self._scheduler.shutdown(wait=False)
         self._running = False
         self._paused_for_collection = False
         self._session_jobs.clear()
         logger.info("SchedulerManager 已停止")
+
+    def pause_scheduling(self) -> None:
+        """只阻止新任务进入，现有任务继续运行到安全检查点。"""
+        if self._scheduler and self._scheduler.running:
+            self._scheduler.pause()
+
+    async def wait_until_idle(self, timeout_seconds: int = 15) -> bool:
+        """等待在途浏览器任务结束，关闭开关时再安全释放 Chromium。"""
+        deadline = asyncio.get_running_loop().time() + max(1, timeout_seconds)
+        while self._active_browser_jobs > 0 or self._browser_job_lock.locked():
+            if asyncio.get_running_loop().time() >= deadline:
+                return False
+            await asyncio.sleep(0.2)
+        remaining = max(0.1, deadline - asyncio.get_running_loop().time())
+        return await browser_manager.wait_until_session_idle(remaining)
 
     @property
     def running(self) -> bool:
@@ -155,11 +174,16 @@ class SchedulerManager:
     async def run_serialized_browser_operation(self, operation):
         """让账号检查等临时操作与实时采集共用同一浏览器队列。"""
         async with self._browser_job_lock:
-            self._active_browser_jobs += 1
-            try:
-                return await operation()
-            finally:
-                self._active_browser_jobs = max(0, self._active_browser_jobs - 1)
+            async with browser_manager.session_lease("account-operation", kind="account"):
+                self._active_browser_jobs += 1
+                try:
+                    return await operation()
+                finally:
+                    self._active_browser_jobs = max(0, self._active_browser_jobs - 1)
+
+    def begin_collection_takeover(self) -> None:
+        """刷新任务开始排队后立即阻止监控领取新的浏览器页面。"""
+        self._paused_for_collection = True
 
     def resume_after_collection(self) -> None:
         """全量刷新结束后立即唤醒监控，不等待下一个轮询周期。"""
@@ -191,7 +215,8 @@ class SchedulerManager:
     async def _monitor_check(self):
         """串行执行开播探测，避免与详情/流地址页面争用登录上下文。"""
         async with self._browser_job_lock:
-            await self._monitor_check_serialized()
+            async with browser_manager.session_lease("monitor:discovery", kind="monitor"):
+                await self._monitor_check_serialized()
 
     async def _monitor_check_serialized(self):
         """开播检测任务"""
@@ -199,10 +224,18 @@ class SchedulerManager:
         from app.models.live_rooms import LiveRoom
         from app.models.live_sessions import LiveSession
         from app.services.collector.monitor import MockLiveDetector
+        from app.services.tasks.recovery import recover_orphaned_monitor_tasks
 
         db = SessionLocal()
         monitor_browser_started = False
         try:
+            recovered_tasks = recover_orphaned_monitor_tasks(db)
+            if recovered_tasks:
+                logger.warning(
+                    "已回收 %s 个旧后端遗留的实时采集任务: ids=%s",
+                    len(recovered_tasks),
+                    [task.id for task in recovered_tasks],
+                )
             if self._has_running_full_collection(db):
                 if not self._paused_for_collection:
                     logger.info("刷新数据采集正在运行，实时监控保持开启并暂缓重复浏览器任务")
@@ -239,6 +272,8 @@ class SchedulerManager:
                     self.add_session_jobs(active_session.id, active_session.dashboard_url or dashboard_url)
                 elif not result.is_live and active_session:
                     await self._on_live_end(db, room)
+        except asyncio.CancelledError:
+            logger.info("实时监控检查已在停机安全点取消")
         except Exception as e:
             self._last_error = str(e)[:500]
             logger.error(f"monitor_check 异常: {e}")
@@ -332,7 +367,11 @@ class SchedulerManager:
     async def _collect_wrapper(self, session_id: int, dashboard_url: str, job_type: str):
         """多个主播可排队采集，但同一时刻只打开一个大屏页面。"""
         async with self._browser_job_lock:
-            await self._collect_wrapper_serialized(session_id, dashboard_url, job_type)
+            async with browser_manager.session_lease(
+                f"monitor:{job_type}:{session_id}",
+                kind="monitor",
+            ):
+                await self._collect_wrapper_serialized(session_id, dashboard_url, job_type)
 
     async def _collect_wrapper_serialized(self, session_id: int, dashboard_url: str, job_type: str):
         """统一采集包装器 — 异常处理 + 任务记录"""
@@ -393,21 +432,12 @@ class SchedulerManager:
                 if not session:
                     raise RuntimeError(f"直播场次不存在: {session_id}")
                 result = await collect_live_session_snapshot(db, context, session)
-                try:
-                    from app.services.sync import sync_session
-
-                    sync_session(db, session_id)
-                    result["dataease_synced"] = True
-                except Exception as sync_exc:
-                    db.rollback()
-                    result["dataease_synced"] = False
-                    logger.exception("实时 DataEase 同步失败 session=%s: %s", session_id, sync_exc)
                 task.progress_percent = 100
                 task.progress_stage = "live_detail"
                 task.progress_message = (
                     f"汇总字段 {result['overview_field_count']}，趋势 {result['trend_row_count']} 条，"
                     f"指标写入 {result['new_metric_count']} 条，评论记录 {result['new_comment_count']} 条，"
-                    f"画像 {result['profile_count']} 条，DataEase {'已同步' if result['dataease_synced'] else '同步失败'}"
+                    f"画像 {result['profile_count']} 条；DataEase 等待独立同步任务处理"
                 )
             else:
                 collector_cls = collector_map.get(job_type)
@@ -423,6 +453,20 @@ class SchedulerManager:
             touch_task(task)
             db.commit()
             publish_task_event("scraper", task, "completed", {"session_id": session_id, "task_type": job_type})
+        except asyncio.CancelledError:
+            if task:
+                task.status = TaskStatus.CANCELLED
+                task.error_message = "服务安全停止，任务将在下次监控时重新执行"
+                task.completed_at = datetime.utcnow()
+                touch_task(task)
+                db.commit()
+                publish_task_event(
+                    "scraper",
+                    task,
+                    TaskStatus.CANCELLED,
+                    {"session_id": session_id, "task_type": job_type},
+                )
+            logger.info("实时采集任务已在停机安全点取消 [%s/%s]", job_type, session_id)
         except Exception as e:
             logger.error(f"采集失败 [{job_type}/{session_id}]: {e}")
             if task:
@@ -494,6 +538,10 @@ async def _save_collected_data(db: Session, session_id: int, job_type: str, resu
             comment = Comment(
                 session_id=session_id,
                 user_nickname=nickname or None,
+                user_avatar_url=c.get("user_avatar_url"),
+                user_douyin_id=c.get("user_douyin_id"),
+                user_sec_uid=c.get("user_sec_uid"),
+                webcast_uid=c.get("webcast_uid"),
                 comment_content=content,
                 comment_time=c.get("comment_time") or datetime.utcnow(),
             )

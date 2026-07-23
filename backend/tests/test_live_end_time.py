@@ -51,9 +51,13 @@ class LiveEndTimeTest(unittest.IsolatedAsyncioTestCase):
             peak_online_count=0,
             comments_count=0,
             leads_count=0,
+            anchor_name="测试主播",
+            anchor_nickname=None,
+            detail_collection_status="pending",
         )
 
-        with patch("app.services.collector.end_live.sync_session"):
+        # 这里只验证结束时间计算；日志保存由单独测试覆盖，所以隔离它的数据库细节。
+        with patch("app.services.collector.end_live.add_collector_log"):
             await process_live_end(FakeDb(session), 1)
 
         self.assertEqual(session.live_duration_seconds, 0)

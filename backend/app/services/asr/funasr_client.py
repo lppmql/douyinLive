@@ -113,7 +113,7 @@ class FunasrClient:
         def normalize_result(data: dict, elapsed_seconds: float) -> Optional[dict]:
             text = str(data.get("text") or "").strip()
             mode = data.get("mode")
-            # 2pass-online 是尚未精修的临时结果；只保存最终离线结果，避免重复话术。
+            # 兼容历史 2-pass 返回；当前回放转写只使用最终离线结果，避免重复话术。
             if not text or mode in {"online", "2pass-online"}:
                 return None
 
@@ -142,7 +142,9 @@ class FunasrClient:
 
         try:
             await self._ws.send(json.dumps({
-                "mode": "2pass",
+                # 本项目处理的是历史直播回放，离线模式比 2-pass 少加载一套在线模型，
+                # 在 8GB 电脑上更稳定，且保留最终离线识别结果。
+                "mode": "offline",
                 "chunk_size": [5, 10, 5],
                 "chunk_interval": 10,
                 "encoder_chunk_look_back": 4,

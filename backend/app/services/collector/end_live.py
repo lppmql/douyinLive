@@ -1,4 +1,4 @@
-"""下播处理 — 汇总数据、更新场次记录、触发 DataEase 同步"""
+"""下播处理：只完成场次收口，后续模块由各自开关独立控制。"""
 from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -9,10 +9,9 @@ from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.leads import Lead
 from app.models.stream_sources import StreamSource
-from app.models.scraper_logs import ScraperLog
 from app.services.asr.control import get_asr_runtime_status
 from app.services.asr.queue import queue_auto_transcriptions
-from app.services.sync import sync_session
+from app.services.collector.log_service import add_collector_log
 
 
 async def process_live_end(db: Session, session_id: int):
@@ -21,7 +20,7 @@ async def process_live_end(db: Session, session_id: int):
     1. 聚合 live_metrics 统计
     2. 更新 live_sessions 最终数据
     3. 标记 stream_sources 为过期
-    4. 同步 de_ 大屏表数据
+    4. ASR 开关开启时，把该场话术转写加入独立队列
     """
     try:
         session = db.query(LiveSession).get(session_id)
@@ -61,19 +60,25 @@ async def process_live_end(db: Session, session_id: int):
         ).update({"status": "expired", "expires_at": now})
 
         # 记录日志
-        log = ScraperLog(
+        add_collector_log(
+            db,
+            session=session,
             level="info",
-            message=f"直播场次 {session_id} 已结束, 时长 {session.live_duration_seconds}s, "
-                    f"评论 {comment_count}, 留资 {lead_count}",
+            stage="live_end",
+            event_type="session_ended",
+            message=(
+                f"主播 {session.anchor_name or session.anchor_nickname or '未知主播'}，"
+                f"场次 #{session_id} 已结束，时长 {session.live_duration_seconds} 秒，"
+                f"评论 {comment_count} 条，留资 {lead_count} 条"
+            ),
+            details={
+                "duration_seconds": session.live_duration_seconds,
+                "comment_count": comment_count,
+                "lead_count": lead_count,
+                "dataease_status": "等待独立同步",
+            },
         )
-        db.add(log)
         db.commit()
-
-        # 同步 de_ 大屏表
-        try:
-            sync_session(db, session_id)
-        except Exception as sync_err:
-            logger.error(f"DataEase 同步失败 session={session_id}: {sync_err}")
 
         if getattr(session, "detail_collection_status", None) == "complete":
             runtime = get_asr_runtime_status()

@@ -52,10 +52,19 @@ export function getStageLabel(stage: unknown): string {
     detail_enrichment: '详情补齐',
     cookie_refresh: '保存登录态',
     dataease_sync: '同步 DataEase',
+    ai_review: '生成 AI 复盘',
+    knowledge_sync: '写入知识库',
     asr_queue: '排队生成话术',
-    post_collection: '话术/复盘入库',
+    asr_transcription: '话术转写',
+    live_end: '场次收口',
+    post_collection: '旧版自动后处理',
+    queued: '等待执行',
+    starting: '准备执行',
+    stopping: '正在安全停止',
+    recovered: '恢复任务',
     completed: '采集完成',
-    failed: '采集失败'
+    failed: '执行失败',
+    cancelled: '已安全停止'
   };
   return labels[String(stage || '')] || String(stage || '常规日志');
 }

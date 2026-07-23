@@ -2,7 +2,7 @@
  * Playwright 冒烟测试配置
  *
  * 用途：启动前端 dev server，检查 10 个核心页面是否正常加载。
- * 前提：后端必须已运行在 localhost:8000，且数据库中有可用测试用户。
+ * 前提：后端必须已运行在 localhost:8000，并提供测试账号或临时访问令牌。
  *
  * 运行方式：
  *   cd frontend
@@ -16,7 +16,7 @@ export default defineConfig({
   timeout: 30_000,
   retries: 1,
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:9527',
     headless: true,
     viewport: { width: 1440, height: 900 },
     ignoreHTTPSErrors: true,
@@ -24,7 +24,7 @@ export default defineConfig({
   },
   webServer: {
     command: 'pnpm dev',
-    url: 'http://localhost:5173',
+    url: 'http://localhost:9527',
     reuseExistingServer: true,
     timeout: 60_000,
   },

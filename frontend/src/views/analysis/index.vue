@@ -20,6 +20,7 @@ import AnalysisStatCards from './components/AnalysisStatCards.vue';
 import AnalysisScoreOverview from './components/AnalysisScoreOverview.vue';
 import AnalysisEvidence from './components/AnalysisEvidence.vue';
 import AnalysisReportHistory from './components/AnalysisReportHistory.vue';
+import SessionWorkflowNav from '@/components/business/session-workflow-nav.vue';
 
 defineOptions({ name: 'Analysis' });
 
@@ -40,7 +41,6 @@ const {
   activeTab,
   // 计算属性
   selectedSession,
-  selectedSessionAvatarUrl,
   analysisReady,
   coveredDomainCount,
   openFindingCount,
@@ -65,6 +65,8 @@ onMounted(initializePage);
 
 <template>
   <NSpace vertical :size="16" class="analysis-page business-page" :aria-busy="loading">
+    <SessionWorkflowNav :session-id="selectedSessionId" active="analysis" />
+
     <!-- 加载失败（且无缓存数据） -->
     <NResult
       v-if="loadError && !sessions.length"
@@ -93,7 +95,6 @@ onMounted(initializePage);
         :loading="loading"
         :session-options="sessionOptions"
         :selected-session="selectedSession"
-        :selected-session-avatar-url="selectedSessionAvatarUrl"
         :action-busy="actionBusy"
         :action-stage="actionStage"
         :latest-report="latestReport"

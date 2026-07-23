@@ -25,6 +25,18 @@ export function useCollectorPolling(
 
   let dataPollTimer: number | null = null;
   let clockTimer: number | null = null;
+  let polling = false;
+
+  async function runPoll() {
+    // 慢请求还没返回时直接跳过本轮，避免多组状态请求越积越多拖慢浏览器。
+    if (polling) return;
+    polling = true;
+    try {
+      await onPoll();
+    } finally {
+      polling = false;
+    }
+  }
 
   /** 开始数据轮询：每 5 秒检查是否有任务在运行，有就静默刷新 */
   function startPolling() {
@@ -33,7 +45,7 @@ export function useCollectorPolling(
       // 页面不可见时跳过，省资源
       if (document.visibilityState !== 'visible') return;
       if (shouldPoll()) {
-        onPoll();
+        void runPoll();
       }
     }, 5000);
   }

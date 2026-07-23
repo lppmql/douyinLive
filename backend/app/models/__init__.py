@@ -21,6 +21,7 @@ from app.models.knowledge_time_slices import KnowledgeTimeSlice
 from app.models.user import User
 from app.models.review import ReviewFinding, ReviewActionItem, ScriptAsset, ComplianceRule
 from app.models.ai_call_traces import AiCallTrace
+from app.models.collector_module_states import CollectorModuleState
 
 __all__ = [
     "Base",
@@ -49,4 +50,5 @@ __all__ = [
     "ScriptAsset",
     "ComplianceRule",
     "AiCallTrace",
+    "CollectorModuleState",
 ]

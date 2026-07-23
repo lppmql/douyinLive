@@ -127,6 +127,8 @@ export const request = createFlatRequest(
 export const backendRequest = createFlatRequest(
   {
     baseURL: otherBaseURL.backend,
+    // 头像、视频和下载由原生标签加载，需携带后端签发的短时 HttpOnly 媒体 Cookie。
+    withCredentials: true,
     timeout: 120000 // 采集类请求（浏览器采集）可能超过 10s，设为 120s
   },
   {

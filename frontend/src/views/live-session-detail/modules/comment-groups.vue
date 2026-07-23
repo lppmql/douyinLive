@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import AnchorAvatar from '@/components/business/anchor-avatar.vue';
+import { getCommentUserAvatarUrl } from '@/service/api/douyin';
 
 defineOptions({ name: 'LiveCommentGroups' });
 const props = defineProps<{ comments: Api.Douyin.LiveComment[] }>();
@@ -7,11 +9,26 @@ const page = ref(1);
 const pageSize = 12;
 
 const groups = computed(() => {
-  const map = new Map<string, { user: string; comments: Api.Douyin.LiveComment[] }>();
+  const map = new Map<
+    string,
+    {
+      user: string;
+      douyinId: string | null;
+      avatarCommentId: number | null;
+      comments: Api.Douyin.LiveComment[];
+    }
+  >();
   (props.comments || []).forEach(comment => {
     const user = comment.user_nickname?.trim() || '匿名用户';
     const identity = comment.user_sec_uid || user;
-    const group = map.get(identity) || { user, comments: [] };
+    const group = map.get(identity) || {
+      user,
+      douyinId: comment.user_douyin_id,
+      avatarCommentId: comment.user_avatar_url ? comment.id : null,
+      comments: []
+    };
+    if (!group.douyinId && comment.user_douyin_id) group.douyinId = comment.user_douyin_id;
+    if (!group.avatarCommentId && comment.user_avatar_url) group.avatarCommentId = comment.id;
     group.comments.push(comment);
     map.set(identity, group);
   });
@@ -43,11 +60,18 @@ function formatTime(value: string | null) {
         <NCard size="small" class="comment-card h-full" :bordered="true">
           <template #header>
             <div class="flex min-w-0 items-center gap-10px">
-              <NAvatar round :size="34">{{ group.user.slice(0, 1) }}</NAvatar>
-              <div class="min-w-0">
+              <AnchorAvatar
+                :size="38"
+                :name="group.user"
+                :src="group.avatarCommentId ? getCommentUserAvatarUrl(group.comments[0].session_id, group.avatarCommentId) : ''"
+              />
+              <div class="min-w-0 flex-1">
                 <div class="truncate font-600">{{ group.user }}</div>
-                <div class="text-12px text-gray-400">{{ group.comments.length }} 条评论</div>
+                <div class="truncate text-11px text-gray-400">
+                  抖音号 {{ group.douyinId || '未获取' }}
+                </div>
               </div>
+              <NTag size="small" :bordered="false" round>{{ group.comments.length }} 条评论</NTag>
             </div>
           </template>
           <NSpace vertical :size="10">

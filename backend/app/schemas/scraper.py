@@ -8,6 +8,7 @@ from app.core.status import TaskStatus
 # ===== 采集账号 =====
 class ScraperAccountBase(BaseModel):
     account_name: Optional[str] = None
+    douyin_nickname: Optional[str] = None
     douyin_id: Optional[str] = None
     login_status: str = "never"
 
@@ -18,6 +19,7 @@ class ScraperAccountCreate(ScraperAccountBase):
 
 class ScraperAccountUpdate(BaseModel):
     account_name: Optional[str] = None
+    douyin_nickname: Optional[str] = None
     douyin_id: Optional[str] = None
     login_status: Optional[str] = None
     expires_at: Optional[datetime] = None
@@ -30,9 +32,12 @@ class ScraperAccountResponse(ScraperAccountBase):
     viewport_width: Optional[int] = None
     viewport_height: Optional[int] = None
     cookie_saved: bool = False
+    cookie_status: str = "missing"
     fingerprint_saved: bool = False
     expires_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
+    cookie_checked_at: Optional[datetime] = None
+    cookie_refreshed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
@@ -55,6 +60,10 @@ class ScraperTaskResponse(ScraperTaskBase):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    cancel_requested_at: Optional[datetime] = None
+    retry_of_task_id: Optional[int] = None
+    task_options_json: Optional[dict[str, Any]] = None
+    result_json: Optional[dict[str, Any]] = None
     idempotency_key: Optional[str] = None
     trace_id: Optional[str] = None
     worker_id: Optional[str] = None
@@ -96,6 +105,18 @@ class ScraperLogResponse(ScraperLogBase):
 
     id: int
     raw_json: Optional[Any] = None
+    session_id: Optional[int] = None
+    anchor_name: Optional[str] = None
+    anchor_nickname: Optional[str] = None
+    anchor_avatar_url: Optional[str] = None
+    douyin_id: Optional[str] = None
+    session_title: Optional[str] = None
+    live_start_time: Optional[datetime] = None
+    room_id_str: Optional[str] = None
+    task_type: Optional[str] = None
+    event_type: Optional[str] = None
+    stage: Optional[str] = None
+    data_details: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
 
 # ===== 采集器状态 =====
@@ -125,6 +146,9 @@ class AccountHealthResponse(BaseModel):
     account_id: int
     valid: bool
     login_status: str
+    cookie_status: str
+    douyin_nickname: Optional[str] = None
+    douyin_id: Optional[str] = None
     checked_at: datetime
     message: str
 
@@ -193,3 +217,107 @@ class LogsClearResponse(BaseModel):
     """清空采集日志的响应"""
     message: str
     deleted_count: int = 0
+
+
+# ===== 采集控制中心 =====
+class CollectorModuleStatus(BaseModel):
+    """一个开关模块的真实状态，前端不需要再拼装多套状态接口。"""
+
+    key: str
+    label: str
+    mode: str
+    enabled: bool = False
+    running: bool = False
+    status: str = "idle"
+    pending_count: int = 0
+    processing_count: int = 0
+    completed_count: int = 0
+    failed_count: int = 0
+    summary: str = ""
+    disabled_reason: str = ""
+    interval_seconds: int = 0
+    enabled_at: Optional[datetime] = None
+    last_scheduled_at: Optional[datetime] = None
+    next_run_at: Optional[datetime] = None
+
+
+class ResourceComponentUsage(BaseModel):
+    """本项目一个进程或容器的真实资源占用。"""
+
+    key: str
+    label: str
+    running: bool = False
+    cpu_percent: float = 0
+    memory_bytes: int = 0
+
+
+class ComputerResourceUsage(BaseModel):
+    """数据采集页使用的电脑资源快照。"""
+
+    sampled_at: datetime
+    cpu_percent: float = 0
+    memory_percent: float = 0
+    memory_used_bytes: int = 0
+    memory_total_bytes: int = 0
+    disk_used_percent: float = 0
+    disk_free_bytes: int = 0
+    app_memory_bytes: int = 0
+    pressure_level: str = "normal"
+    pressure_message: str = ""
+    components: list[ResourceComponentUsage] = Field(default_factory=list)
+
+
+class UnifiedTaskResponse(BaseModel):
+    """采集任务和 ASR 任务在任务抽屉中的统一展示结构。"""
+
+    task_key: str
+    source: str
+    id: int
+    module_key: str
+    task_type: str
+    task_label: str
+    status: str
+    progress_percent: int = 0
+    progress_current: int = 0
+    progress_total: int = 0
+    progress_stage: Optional[str] = None
+    progress_message: Optional[str] = None
+    account_id: Optional[int] = None
+    session_id: Optional[int] = None
+    anchor_name: Optional[str] = None
+    session_title: Optional[str] = None
+    error_message: Optional[str] = None
+    trace_id: Optional[str] = None
+    worker_id: Optional[str] = None
+    heartbeat_at: Optional[datetime] = None
+    retry_count: int = 0
+    max_retries: int = 0
+    retry_of_task_id: Optional[int] = None
+    can_stop: bool = False
+    can_retry: bool = False
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    result_json: Optional[dict[str, Any]] = None
+    collected_anchor_count: int = 0
+    collected_session_count: int = 0
+    new_session_count: int = 0
+    checked_detail_count: int = 0
+    refreshed_detail_count: int = 0
+    failed_detail_count: int = 0
+    remaining_detail_count: int = 0
+
+
+class CollectorControlCenterResponse(BaseModel):
+    modules: list[CollectorModuleStatus]
+    current_task: Optional[UnifiedTaskResponse] = None
+    active_task_count: int = 0
+    queued_task_count: int = 0
+    latest_task: Optional[UnifiedTaskResponse] = None
+    resource_usage: ComputerResourceUsage
+
+
+class CollectorTaskActionResponse(BaseModel):
+    success: bool
+    message: str
+    task: Optional[UnifiedTaskResponse] = None

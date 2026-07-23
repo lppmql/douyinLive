@@ -13,7 +13,7 @@ from app.core.logger import logger
 from app.models.live_metrics import LiveMetric
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
-from app.services.collector.comments import _parse_comments_from_live_screen_text
+from app.services.collector.comments import _parse_comment_user_profile, _parse_comments_from_live_screen_text
 from app.services.collector.metrics import _parse_watch_profiles
 from app.services.collector.utils import (
     _is_context_closed_message,
@@ -27,6 +27,16 @@ HOME_URL = "https://leads.cluerich.com/pc/growth/home"
 
 
 # ==================== 页面抓取 ====================
+
+
+async def _drain_response_tasks(tasks: list[asyncio.Task], timeout_seconds: float = 3) -> None:
+    """回收响应解析任务，避免页面或驱动关闭后留下未读取的异步异常。"""
+    if not tasks:
+        return
+    _done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
+    for task in pending:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
@@ -84,14 +94,18 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
             is_logged_in = False
             logger.warning(f"room_id={room_id} 页面为登录页，Cookie 已过期")
         await asyncio.sleep(0.5)
-        if response_tasks:
-            await asyncio.gather(*response_tasks, return_exceptions=True)
+        await _drain_response_tasks(response_tasks)
     except Exception as e:
         logger.warning(f"大屏页加载异常: {e}")
         body_text = ""
         is_logged_in = False
     finally:
-        await page.close()
+        try:
+            await page.close()
+        except Exception as exc:
+            if not _is_context_closed_message(exc):
+                logger.debug("大屏页面关闭失败: %s", exc)
+        await _drain_response_tasks(response_tasks)
 
     if not is_logged_in:
         return {"session_info": {}, "metrics": [], "profiles": [], "is_logged_in": False}
@@ -320,15 +334,16 @@ async def _scrape_home_live_card(context: BrowserContext) -> dict:
     """从主页直播卡片提取主播、标题、实时人数等稳定信息。"""
     page = await context.new_page()
     captured_api = []
+    response_tasks = []
 
     async def on_response(resp):
         try:
             if "json" in resp.headers.get("content-type", ""):
-                captured_api.append(await resp.json())
+                captured_api.append(await asyncio.wait_for(resp.json(), timeout=3))
         except Exception:
             pass
 
-    page.on("response", lambda r: asyncio.ensure_future(on_response(r)))
+    page.on("response", lambda r: response_tasks.append(asyncio.create_task(on_response(r))))
     try:
         await page.goto(HOME_URL, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(5)
@@ -336,7 +351,12 @@ async def _scrape_home_live_card(context: BrowserContext) -> dict:
     except Exception:
         return {}
     finally:
-        await page.close()
+        try:
+            await page.close()
+        except Exception as exc:
+            if not _is_context_closed_message(exc):
+                logger.debug("主页直播卡片页面关闭失败: %s", exc)
+        await _drain_response_tasks(response_tasks)
 
     lines = [line.strip() for line in body_text.split("\n") if line.strip()]
     info = {
@@ -498,8 +518,7 @@ async def _scrape_history_session_detail(
             pass
 
         body_text = await page.evaluate("document.body?.innerText || ''")
-        if response_tasks:
-            await asyncio.gather(*response_tasks, return_exceptions=True)
+        await _drain_response_tasks(response_tasks)
         if validate_history and not _is_expected_history_session(body_text, session):
             logger.warning(
                 "历史场次详情页校验失败，跳过写入: session_id=%s room_id=%s",
@@ -558,6 +577,7 @@ async def _scrape_history_session_detail(
                 await page.close()
             except Exception:
                 pass
+            await _drain_response_tasks(response_tasks)
 
 
 def _is_expected_history_session(body_text: str, session: LiveSession) -> bool:
@@ -590,8 +610,10 @@ async def _fetch_all_session_comments(page, room_id: str) -> tuple[list[dict], b
         for item in rows:
             if not isinstance(item, dict) or not item.get("content"):
                 continue
+            profile = _parse_comment_user_profile(item)
             comments.append({
-                "user_nickname": item.get("nickName") or "未知",
+                **profile,
+                "user_nickname": profile["user_nickname"] or "未知",
                 "user_sec_uid": item.get("secUId") or None,
                 "webcast_uid": item.get("webcastUid") or None,
                 "comment_content": str(item.get("content")),

@@ -35,6 +35,7 @@ from app.services.collector.utils import (
     _safe_int,
 )
 from app.services.collector.constants import LIVE_SCREEN_URL
+from app.services.tasks.exceptions import TaskCancellationRequested
 
 # 历史场次接口地址
 HISTORY_API_URL = "https://leads.cluerich.com/live_console/history"
@@ -165,6 +166,7 @@ async def _enrich_history_sessions(
     account: ScraperAccount,
     room: LiveRoom,
     progress_callback: Optional[Callable[[int, int, int, int], None]] = None,
+    cancellation_callback: Optional[Callable[[], bool]] = None,
     sanitize_error=None,
 ) -> dict:
     """尝试补齐全部历史场次的大屏详情、回放流和评论。"""
@@ -209,11 +211,15 @@ async def _enrich_history_sessions(
 
     async def scrape_one(session: LiveSession):
         nonlocal current_context
+        if cancellation_callback and cancellation_callback():
+            raise TaskCancellationRequested("用户已停止全部数据刷新")
         room_id = _extract_room_id_from_dashboard_url(session.dashboard_url)
         if not room_id:
             return session, None, "缺少场次 room_id"
         async with semaphore:
             for attempt in range(CONTEXT_RECOVERY_ATTEMPTS + 1):
+                if cancellation_callback and cancellation_callback():
+                    raise TaskCancellationRequested("用户已停止全部数据刷新")
                 try:
                     detail = await asyncio.wait_for(
                         _scrape_history_session_detail(current_context, room_id, session),
@@ -244,6 +250,12 @@ async def _enrich_history_sessions(
 
     detail_tasks = [asyncio.create_task(scrape_one(session)) for session in target_sessions]
     for detail_task in asyncio.as_completed(detail_tasks):
+        if cancellation_callback and cancellation_callback():
+            for pending_task in detail_tasks:
+                if not pending_task.done():
+                    pending_task.cancel()
+            await asyncio.gather(*detail_tasks, return_exceptions=True)
+            raise TaskCancellationRequested("用户已停止全部数据刷新")
         session, detail, error = await detail_task
         checked += 1
         if error:

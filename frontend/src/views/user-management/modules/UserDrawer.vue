@@ -14,10 +14,11 @@ import {
 
 defineOptions({ name: 'UserDrawer' });
 
-defineProps<{
+type UserFormField = 'username' | 'password' | 'nickname' | 'email' | 'phone' | 'roles' | 'status';
+
+const props = defineProps<{
   visible: boolean;
   operateType: 'add' | 'edit';
-  editingId: number | null;
   formData: {
     username: string;
     password: string;
@@ -35,8 +36,14 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void;
+  (e: 'updateField', field: UserFormField, value: string | string[]): void;
   (e: 'save'): void;
 }>();
+
+/** 表单值由父级统一保存，避免子组件直接修改传入对象。 */
+function updateField(field: UserFormField, value: string | string[]) {
+  emit('updateField', field, value);
+}
 </script>
 
 <template>
@@ -47,30 +54,56 @@ const emit = defineEmits<{
       </NAlert>
       <NForm label-placement="top" :rules="formRules">
         <NFormItem label="用户名" path="username" required>
-          <NInput v-model:value="formData.username" placeholder="请输入用户名" />
+          <NInput
+            :value="props.formData.username"
+            placeholder="请输入用户名"
+            @update:value="value => updateField('username', value)"
+          />
         </NFormItem>
         <NFormItem :label="operateType === 'add' ? '密码' : '新密码'" :path="operateType === 'add' ? 'password' : ''">
           <NInput
-            v-model:value="formData.password"
+            :value="props.formData.password"
             type="password"
             show-password-on="click"
             :placeholder="operateType === 'add' ? '请输入密码' : '留空则不修改'"
+            @update:value="value => updateField('password', value)"
           />
         </NFormItem>
         <NFormItem label="昵称">
-          <NInput v-model:value="formData.nickname" placeholder="请输入昵称" />
+          <NInput
+            :value="props.formData.nickname"
+            placeholder="请输入昵称"
+            @update:value="value => updateField('nickname', value)"
+          />
         </NFormItem>
         <NFormItem label="邮箱">
-          <NInput v-model:value="formData.email" placeholder="请输入邮箱" />
+          <NInput
+            :value="props.formData.email"
+            placeholder="请输入邮箱"
+            @update:value="value => updateField('email', value)"
+          />
         </NFormItem>
         <NFormItem label="手机号">
-          <NInput v-model:value="formData.phone" placeholder="请输入手机号" />
+          <NInput
+            :value="props.formData.phone"
+            placeholder="请输入手机号"
+            @update:value="value => updateField('phone', value)"
+          />
         </NFormItem>
         <NFormItem label="角色">
-          <NSelect v-model:value="formData.roles" :options="roleOptions" multiple />
+          <NSelect
+            :value="props.formData.roles"
+            :options="roleOptions"
+            multiple
+            @update:value="value => updateField('roles', value)"
+          />
         </NFormItem>
         <NFormItem label="状态">
-          <NSelect v-model:value="formData.status" :options="statusOptions" />
+          <NSelect
+            :value="props.formData.status"
+            :options="statusOptions"
+            @update:value="value => updateField('status', value)"
+          />
         </NFormItem>
       </NForm>
       <template #footer>

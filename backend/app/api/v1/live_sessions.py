@@ -32,6 +32,7 @@ from app.schemas import (
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
+AVATAR_HOST_SUFFIXES = (".douyinpic.com", ".byteimg.com")
 LIVE_SESSION_LIST_COLUMNS = (
     LiveSession.id,
     LiveSession.anchor_name,
@@ -67,7 +68,34 @@ def _attach_room_profile(session: LiveSession) -> dict:
 def _is_allowed_avatar_url(url: str) -> bool:
     parsed = urlparse(url)
     hostname = (parsed.hostname or "").lower()
-    return parsed.scheme == "https" and hostname.endswith(".douyinpic.com")
+    return parsed.scheme == "https" and hostname.endswith(AVATAR_HOST_SUFFIXES)
+
+
+def _proxy_avatar_response(avatar_url: str) -> Response:
+    """只代理受信任的抖音头像域名，避免前端防盗链和后端任意地址访问。"""
+    if not _is_allowed_avatar_url(avatar_url):
+        raise HTTPException(400, "头像地址不受信任")
+    try:
+        upstream = httpx.get(
+            avatar_url,
+            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
+            follow_redirects=False,
+            timeout=10,
+        )
+        upstream.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "头像读取失败") from exc
+
+    content_type = upstream.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if not content_type.startswith("image/"):
+        raise HTTPException(502, "头像响应格式无效")
+    if len(upstream.content) > MAX_AVATAR_BYTES:
+        raise HTTPException(502, "头像文件过大")
+    return Response(
+        content=upstream.content,
+        media_type=content_type,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 @router.get("/page", response_model=LiveSessionPageResponse)
@@ -176,31 +204,18 @@ def get_session_avatar(session_id: int, db: Session = Depends(get_db)):
     avatar_url = session.anchor_avatar_url
     if not avatar_url:
         raise HTTPException(404, "该场次暂无主播头像")
-    if not _is_allowed_avatar_url(avatar_url):
-        raise HTTPException(400, "主播头像地址不受信任")
+    return _proxy_avatar_response(avatar_url)
 
-    try:
-        upstream = httpx.get(
-            avatar_url,
-            headers={"User-Agent": "Mozilla/5.0", "Referer": "https://live.douyin.com/"},
-            follow_redirects=False,
-            timeout=10,
-        )
-        upstream.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise HTTPException(502, "主播头像读取失败") from exc
 
-    content_type = upstream.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-    if not content_type.startswith("image/"):
-        raise HTTPException(502, "主播头像响应格式无效")
-    if len(upstream.content) > MAX_AVATAR_BYTES:
-        raise HTTPException(502, "主播头像文件过大")
-
-    return Response(
-        content=upstream.content,
-        media_type=content_type,
-        headers={"Cache-Control": "public, max-age=3600"},
-    )
+@router.get("/{session_id}/comments/{comment_id}/avatar")
+def get_comment_user_avatar(session_id: int, comment_id: int, db: Session = Depends(get_db)):
+    """同源返回评论用户头像，并校验评论确实属于当前场次。"""
+    comment = db.get(Comment, comment_id)
+    if not comment or comment.session_id != session_id:
+        raise HTTPException(404, "直播评论不存在")
+    if not comment.user_avatar_url:
+        raise HTTPException(404, "该评论用户暂无头像")
+    return _proxy_avatar_response(comment.user_avatar_url)
 
 
 @router.get("/{session_id}/video")

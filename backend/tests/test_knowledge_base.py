@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from app.api.v1.ai import QaRequest
 from app.api.v1.knowledge_base import page_knowledge, page_time_slices
+from app.models.knowledge_base import KnowledgeBase
 from app.services.ai.kb_service import _contextual_question, _format_conversation, _normalize_history, _query_terms
 
 
@@ -42,7 +43,8 @@ class FakeDb:
 
 class KnowledgeBaseTest(unittest.TestCase):
     def test_whole_knowledge_uses_server_pagination_shape(self):
-        rows = [SimpleNamespace(id=1), SimpleNamespace(id=2)]
+        # 分页接口会读取 ORM 列，测试也使用真实模型，避免假的对象掩盖序列化契约。
+        rows = [KnowledgeBase(id=1), KnowledgeBase(id=2)]
 
         result = page_knowledge(
             current=2,
@@ -55,7 +57,7 @@ class KnowledgeBaseTest(unittest.TestCase):
 
         self.assertEqual(result["total"], 2)
         self.assertEqual(result["current"], 2)
-        self.assertEqual([row.id for row in result["records"]], [2])
+        self.assertEqual([row["id"] for row in result["records"]], [2])
 
     def test_time_slice_page_serializes_real_metrics(self):
         row = SimpleNamespace(

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { h, reactive, ref } from 'vue';
-import { NTag, NButton, NAvatar } from 'naive-ui';
+import { NTag, NButton } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { $t } from '@/locales';
 import { fetchLiveSessionPage } from '@/service/api/douyin';
 import { defaultTransform, useNaivePaginatedTable } from '@/hooks/common/table';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
 
 import { getServiceErrorMessage } from '@/utils/service';
 
@@ -92,19 +93,14 @@ function createColumns(): NaiveUI.TableColumn<Api.Douyin.LiveSessionListItem>[] 
       width: 220,
       fixed: 'left',
       render(row: Api.Douyin.LiveSessionListItem) {
-        return h('div', { class: 'flex items-center gap-8px min-w-0' }, [
-          h(NAvatar, {
-            round: true,
-            size: 34,
-            src: row.anchor_avatar_url || undefined,
-            objectFit: 'cover',
-            renderFallback: () => row.anchor_name?.slice(0, 1) || '主'
-          }),
-          h('div', { class: 'min-w-0' }, [
-            h('div', { class: 'truncate font-600' }, row.anchor_name || '-'),
-            h('div', { class: 'truncate text-12px text-gray-400' }, row.douyin_id || row.anchor_nickname || '-')
-          ])
-        ]);
+        return h(AnchorIdentity, {
+          sessionId: row.id,
+          avatarUrl: row.anchor_avatar_url,
+          name: row.anchor_name,
+          nickname: row.anchor_nickname,
+          douyinId: row.douyin_id,
+          size: 34
+        });
       }
     },
     {

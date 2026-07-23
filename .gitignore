@@ -31,6 +31,7 @@ data/
 # Logs
 *.log
 tmp/
+.runtime/
 
 # Frontend
 frontend/node_modules/

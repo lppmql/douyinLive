@@ -13,7 +13,6 @@ const props = defineProps<{
   alerts: Api.Douyin.ReviewLiveAlert[];
 }>();
 const emit = defineEmits<{
-  createAsset: [segment: Api.Douyin.ReviewTranscriptSegment];
   updateFinding: [finding: Api.Douyin.ReviewFinding, status: Api.Douyin.ReviewFinding['status']];
 }>();
 
@@ -29,7 +28,6 @@ interface TimelineEvent {
   severity?: Api.Douyin.ReviewFinding['severity'];
   findingId?: number;
   finding?: Api.Douyin.ReviewFinding;
-  segment?: Api.Douyin.ReviewTranscriptSegment;
 }
 
 const reviewStore = useReviewStore();
@@ -96,8 +94,7 @@ const events = computed<TimelineEvent[]>(() => {
       endSecond: item.segment_end,
       title: item.segment_type || '主播话术',
       content: item.text_content || '-',
-      category: item.segment_type || undefined,
-      segment: item
+      category: item.segment_type || undefined
     });
   });
   props.metrics.forEach((item, index) => {
@@ -200,15 +197,6 @@ function isActive(item: TimelineEvent) {
               <SvgIcon icon="mdi:dots-horizontal" />
             </NButton>
           </NDropdown>
-          <NButton
-            v-if="item.segment"
-            size="tiny"
-            secondary
-            class="shrink-0"
-            @click.stop="emit('createAsset', item.segment)"
-          >
-            收录话术
-          </NButton>
         </div>
       </template>
     </NVirtualList>

@@ -1,5 +1,5 @@
 """采集任务表"""
-from sqlalchemy import Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
+from sqlalchemy import JSON, Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 
@@ -11,6 +11,7 @@ class ScraperTask(Base, TimestampMixin):
         Index("idx_scraper_tasks_status_type", "status", "task_type", "id"),
         Index("idx_scraper_tasks_idempotency", "idempotency_key", unique=True),
         Index("idx_scraper_tasks_trace", "trace_id"),
+        Index("idx_scraper_tasks_retry_of", "retry_of_task_id"),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="任务ID")
@@ -21,6 +22,10 @@ class ScraperTask(Base, TimestampMixin):
     started_at = Column(DateTime, nullable=True, comment="开始时间")
     completed_at = Column(DateTime, nullable=True, comment="完成时间")
     error_message = Column(Text, nullable=True, comment="错误信息")
+    cancel_requested_at = Column(DateTime, nullable=True, comment="用户请求安全停止任务的时间")
+    retry_of_task_id = Column(BigInteger, nullable=True, comment="本次任务重试自哪个历史任务")
+    task_options_json = Column(JSON, nullable=True, comment="任务启动参数快照")
+    result_json = Column(JSON, nullable=True, comment="任务完成后的结构化结果")
     idempotency_key = Column(String(100), nullable=True, comment="幂等键，防止任务重复提交")
     trace_id = Column(String(64), nullable=True, comment="任务链路追踪ID")
     worker_id = Column(String(100), nullable=True, comment="当前执行Worker")

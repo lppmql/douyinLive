@@ -44,7 +44,12 @@ def find_latest_logged_in_account(db: Session) -> Optional[ScraperAccount]:
             ScraperAccount.login_status == "logged_in",
             ScraperAccount.storage_state_path.isnot(None),
         )
-        .order_by(ScraperAccount.last_login_at.desc().nullslast())
+        # MySQL 不支持 SQLAlchemy 生成的 NULLS LAST 语法，用布尔排序实现相同效果。
+        .order_by(
+            ScraperAccount.last_login_at.is_(None),
+            ScraperAccount.last_login_at.desc(),
+            ScraperAccount.id.desc(),
+        )
         .first()
     )
 
@@ -98,6 +103,8 @@ def update_account_state(
         account.storage_state_path = storage_path
     if cookies_json:
         account.cookies_json = cookies_json
+    if storage_path or cookies_json:
+        account.cookie_refreshed_at = datetime.utcnow()
     account.updated_at = datetime.utcnow()
     # 注意：不在此处 commit，由调用方统一管理事务边界
 
@@ -113,6 +120,8 @@ def save_account_to_db(
     vp_width: int | None,
     vp_height: int | None,
     account_id: Optional[int] = None,
+    douyin_nickname: str | None = None,
+    douyin_id: str | None = None,
 ) -> Optional[int]:
     """登录成功后写入 ScraperAccount 表，并返回最终账号 ID。
 
@@ -136,8 +145,14 @@ def save_account_to_db(
         existing.viewport_height = vp_height
         existing.login_status = "logged_in"
         existing.last_login_at = datetime.utcnow()
+        existing.cookie_checked_at = datetime.utcnow()
+        existing.cookie_refreshed_at = datetime.utcnow()
         existing.cookies_json = cookies_json
         existing.browser_fingerprint_json = browser_fingerprint_json
+        if douyin_nickname:
+            existing.douyin_nickname = douyin_nickname
+        if douyin_id:
+            existing.douyin_id = douyin_id
         saved_account = existing
         logger.info("更新已有账号 account_id=%s name=%s", saved_account.id, account_name)
     else:
@@ -145,12 +160,16 @@ def save_account_to_db(
             account_name=account_name,
             login_status="logged_in",
             last_login_at=datetime.utcnow(),
+            cookie_checked_at=datetime.utcnow(),
+            cookie_refreshed_at=datetime.utcnow(),
             storage_state_path=storage_path,
             cookies_json=cookies_json,
             browser_fingerprint_json=browser_fingerprint_json,
             user_agent=ua,
             viewport_width=vp_width,
             viewport_height=vp_height,
+            douyin_nickname=douyin_nickname,
+            douyin_id=douyin_id,
         )
         db.add(saved_account)
         db.flush()

@@ -38,6 +38,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Login
+         * @description 用户登录 → 返回 JWT Token
+         */
+        post: operations["login_api_v1_auth_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/refreshToken": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Token
+         * @description 刷新 Token
+         */
+        post: operations["refresh_token_api_v1_auth_refreshToken_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/getUserInfo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get User Info
+         * @description 获取当前登录用户信息（Soybean Admin 兼容格式）
+         */
+        get: operations["get_user_info_api_v1_auth_getUserInfo_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/live-rooms/": {
         parameters: {
             query?: never;
@@ -166,6 +226,26 @@ export interface paths {
          * @description 同源返回已采集的抖音主播头像，避免 CDN 限制浏览器跨站嵌入。
          */
         get: operations["get_session_avatar_api_v1_live_sessions__session_id__avatar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/live-sessions/{session_id}/comments/{comment_id}/avatar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Comment User Avatar
+         * @description 同源返回评论用户头像，并校验评论确实属于当前场次。
+         */
+        get: operations["get_comment_user_avatar_api_v1_live_sessions__session_id__comments__comment_id__avatar_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -606,6 +686,126 @@ export interface paths {
         get: operations["get_collector_status_api_v1_collector_status_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collector/control-center": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Control Center
+         * @description 一次返回补齐动作、长期服务、后台自动同步和任务数量，供页面静默轮询。
+         */
+        get: operations["get_control_center_api_v1_collector_control_center_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collector/task-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Task Queue
+         * @description 返回采集、AI、知识库、DataEase 和逐场 ASR 的统一任务队列。
+         */
+        get: operations["get_task_queue_api_v1_collector_task_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collector/modules/{module_key}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Collector Module
+         * @description 开启长期运行服务，并立即从最新及正在直播的场次开始检查。
+         */
+        post: operations["start_collector_module_api_v1_collector_modules__module_key__start_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collector/modules/{module_key}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Collector Module
+         * @description 彻底关闭模块，不再创建新任务，并在安全点释放专属资源。
+         */
+        post: operations["stop_collector_module_api_v1_collector_modules__module_key__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collector/task-queue/{source}/{task_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Queue Task
+         * @description 停止任务队列中的单个任务；ASR 运行任务会在当前音频处理安全点退出。
+         */
+        post: operations["stop_queue_task_api_v1_collector_task_queue__source___task_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/collector/task-queue/{source}/{task_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Queue Task
+         * @description 重试失败或已停止任务，并复用已完成的真实数据与音频分片。
+         */
+        post: operations["retry_queue_task_api_v1_collector_task_queue__source___task_id__retry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1432,66 +1632,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/auth/login": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Login
-         * @description 用户登录 → 返回 JWT Token
-         */
-        post: operations["login_api_v1_auth_login_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/refreshToken": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh Token
-         * @description 刷新 Token
-         */
-        post: operations["refresh_token_api_v1_auth_refreshToken_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/auth/getUserInfo": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get User Info
-         * @description 获取当前登录用户信息（Soybean Admin 兼容格式）
-         */
-        get: operations["get_user_info_api_v1_auth_getUserInfo_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/users/": {
         parameters: {
             query?: never;
@@ -1842,6 +1982,12 @@ export interface components {
             valid: boolean;
             /** Login Status */
             login_status: string;
+            /** Cookie Status */
+            cookie_status: string;
+            /** Douyin Nickname */
+            douyin_nickname?: string | null;
+            /** Douyin Id */
+            douyin_id?: string | null;
             /**
              * Checked At
              * Format: date-time
@@ -2144,13 +2290,25 @@ export interface components {
         };
         /** AnalysisReportCreate */
         AnalysisReportCreate: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id: number;
-            /** Report Type */
+            /**
+             * Report Type
+             * @description 报告类型
+             */
             report_type: string;
-            /** Report Title */
+            /**
+             * Report Title
+             * @description 报告标题
+             */
             report_title?: string | null;
-            /** Summary */
+            /**
+             * Summary
+             * @description 摘要
+             */
             summary?: string | null;
             /** Report Content */
             report_content?: {
@@ -2159,13 +2317,25 @@ export interface components {
         };
         /** AnalysisReportResponse */
         AnalysisReportResponse: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id: number;
-            /** Report Type */
+            /**
+             * Report Type
+             * @description 报告类型
+             */
             report_type: string;
-            /** Report Title */
+            /**
+             * Report Title
+             * @description 报告标题
+             */
             report_title?: string | null;
-            /** Summary */
+            /**
+             * Summary
+             * @description 摘要
+             */
             summary?: string | null;
             /** Id */
             id: number;
@@ -2182,6 +2352,10 @@ export interface components {
         /**
          * AnchorScheduleDashboardResponse
          * @description GET /anchor-schedules/dashboard
+         *
+         *     直接映射 build_schedule_dashboard / build_schedule_range_dashboard
+         *     返回的字典结构。字段用宽松类型避免 Pydantic 过滤掉 Service 返回的
+         *     嵌套数据（actual_session 可能为 None、extra 标记等条件字段）。
          */
         AnchorScheduleDashboardResponse: {
             /**
@@ -2190,26 +2364,48 @@ export interface components {
              */
             schedule_date: string;
             /**
-             * Anchor Count
-             * @default 0
+             * Start Date
+             * @default
              */
-            anchor_count: number;
+            start_date: string;
             /**
-             * Planned Count
-             * @default 0
+             * End Date
+             * @default
              */
-            planned_count: number;
+            end_date: string;
             /**
-             * Actual Count
+             * Day Count
              * @default 0
              */
-            actual_count: number;
-            /** Completions */
-            completions?: {
+            day_count: number;
+            /**
+             * Generated At
+             * @default
+             */
+            generated_at: string;
+            /**
+             * Source Name
+             * @default
+             */
+            source_name: string;
+            /** Rule */
+            rule?: {
+                [key: string]: unknown;
+            };
+            /** Summary */
+            summary?: {
+                [key: string]: unknown;
+            };
+            /** Anchors */
+            anchors?: {
                 [key: string]: unknown;
             }[];
-            /** Details */
-            details?: {
+            /** Rows */
+            rows?: {
+                [key: string]: unknown;
+            }[];
+            /** Reminders */
+            reminders?: {
                 [key: string]: unknown;
             }[];
         };
@@ -2233,6 +2429,8 @@ export interface components {
              * @default
              */
             anchor_avatar_url: string;
+            /** Anchor Avatar Session Id */
+            anchor_avatar_session_id?: number | null;
             /**
              * Session Count
              * @default 0
@@ -2516,6 +2714,92 @@ export interface components {
             /** Error */
             error?: string | null;
         };
+        /** CollectorControlCenterResponse */
+        CollectorControlCenterResponse: {
+            /** Modules */
+            modules: components["schemas"]["CollectorModuleStatus"][];
+            current_task?: components["schemas"]["UnifiedTaskResponse"] | null;
+            /**
+             * Active Task Count
+             * @default 0
+             */
+            active_task_count: number;
+            /**
+             * Queued Task Count
+             * @default 0
+             */
+            queued_task_count: number;
+            latest_task?: components["schemas"]["UnifiedTaskResponse"] | null;
+            resource_usage: components["schemas"]["ComputerResourceUsage"];
+        };
+        /**
+         * CollectorModuleStatus
+         * @description 一个开关模块的真实状态，前端不需要再拼装多套状态接口。
+         */
+        CollectorModuleStatus: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Mode */
+            mode: string;
+            /**
+             * Enabled
+             * @default false
+             */
+            enabled: boolean;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /**
+             * Status
+             * @default idle
+             */
+            status: string;
+            /**
+             * Pending Count
+             * @default 0
+             */
+            pending_count: number;
+            /**
+             * Processing Count
+             * @default 0
+             */
+            processing_count: number;
+            /**
+             * Completed Count
+             * @default 0
+             */
+            completed_count: number;
+            /**
+             * Failed Count
+             * @default 0
+             */
+            failed_count: number;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /**
+             * Disabled Reason
+             * @default
+             */
+            disabled_reason: string;
+            /**
+             * Interval Seconds
+             * @default 0
+             */
+            interval_seconds: number;
+            /** Enabled At */
+            enabled_at?: string | null;
+            /** Last Scheduled At */
+            last_scheduled_at?: string | null;
+            /** Next Run At */
+            next_run_at?: string | null;
+        };
         /** CollectorStatusResponse */
         CollectorStatusResponse: {
             /**
@@ -2530,52 +2814,124 @@ export interface components {
             active_task_count: number;
             default_account?: components["schemas"]["ScraperAccountResponse"] | null;
         };
+        /** CollectorTaskActionResponse */
+        CollectorTaskActionResponse: {
+            /** Success */
+            success: boolean;
+            /** Message */
+            message: string;
+            task?: components["schemas"]["UnifiedTaskResponse"] | null;
+        };
         /** CommentCreate */
         CommentCreate: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id: number;
-            /** User Nickname */
+            /**
+             * User Nickname
+             * @description 用户昵称
+             */
             user_nickname?: string | null;
-            /** User Sec Uid */
+            /**
+             * User Avatar Url
+             * @description 用户头像 URL
+             */
+            user_avatar_url?: string | null;
+            /**
+             * User Douyin Id
+             * @description 用户公开抖音号
+             */
+            user_douyin_id?: string | null;
+            /**
+             * User Sec Uid
+             * @description 用户 sec_uid
+             */
             user_sec_uid?: string | null;
-            /** Webcast Uid */
+            /**
+             * Webcast Uid
+             * @description 直播间 UID
+             */
             webcast_uid?: string | null;
-            /** Comment Content */
+            /**
+             * Comment Content
+             * @description 评论内容
+             */
             comment_content?: string | null;
             /** Comment Time */
             comment_time?: string | null;
             /**
              * Is High Intent
+             * @description 是否高意向
              * @default 0
              */
             is_high_intent: number;
-            /** Sentiment */
+            /**
+             * Sentiment
+             * @description 情感倾向
+             */
             sentiment?: string | null;
-            /** Keywords */
+            /**
+             * Keywords
+             * @description 关键词
+             */
             keywords?: string | null;
         };
         /** CommentResponse */
         CommentResponse: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id: number;
-            /** User Nickname */
+            /**
+             * User Nickname
+             * @description 用户昵称
+             */
             user_nickname?: string | null;
-            /** User Sec Uid */
+            /**
+             * User Avatar Url
+             * @description 用户头像 URL
+             */
+            user_avatar_url?: string | null;
+            /**
+             * User Douyin Id
+             * @description 用户公开抖音号
+             */
+            user_douyin_id?: string | null;
+            /**
+             * User Sec Uid
+             * @description 用户 sec_uid
+             */
             user_sec_uid?: string | null;
-            /** Webcast Uid */
+            /**
+             * Webcast Uid
+             * @description 直播间 UID
+             */
             webcast_uid?: string | null;
-            /** Comment Content */
+            /**
+             * Comment Content
+             * @description 评论内容
+             */
             comment_content?: string | null;
             /** Comment Time */
             comment_time?: string | null;
             /**
              * Is High Intent
+             * @description 是否高意向
              * @default 0
              */
             is_high_intent: number;
-            /** Sentiment */
+            /**
+             * Sentiment
+             * @description 情感倾向
+             */
             sentiment?: string | null;
-            /** Keywords */
+            /**
+             * Keywords
+             * @description 关键词
+             */
             keywords?: string | null;
             /** Id */
             id: number;
@@ -2587,7 +2943,7 @@ export interface components {
         };
         /**
          * ComplianceRuleOut
-         * @description GET /reviews/compliance/rules
+         * @description GET /reviews/compliance/rules — 和 ComplianceRule 模型字段对齐
          */
         ComplianceRuleOut: {
             /** Id */
@@ -2612,6 +2968,64 @@ export interface components {
             enabled?: number | null;
             /** Created At */
             created_at?: string | null;
+        };
+        /**
+         * ComputerResourceUsage
+         * @description 数据采集页使用的电脑资源快照。
+         */
+        ComputerResourceUsage: {
+            /**
+             * Sampled At
+             * Format: date-time
+             */
+            sampled_at: string;
+            /**
+             * Cpu Percent
+             * @default 0
+             */
+            cpu_percent: number;
+            /**
+             * Memory Percent
+             * @default 0
+             */
+            memory_percent: number;
+            /**
+             * Memory Used Bytes
+             * @default 0
+             */
+            memory_used_bytes: number;
+            /**
+             * Memory Total Bytes
+             * @default 0
+             */
+            memory_total_bytes: number;
+            /**
+             * Disk Used Percent
+             * @default 0
+             */
+            disk_used_percent: number;
+            /**
+             * Disk Free Bytes
+             * @default 0
+             */
+            disk_free_bytes: number;
+            /**
+             * App Memory Bytes
+             * @default 0
+             */
+            app_memory_bytes: number;
+            /**
+             * Pressure Level
+             * @default normal
+             */
+            pressure_level: string;
+            /**
+             * Pressure Message
+             * @default
+             */
+            pressure_message: string;
+            /** Components */
+            components?: components["schemas"]["ResourceComponentUsage"][];
         };
         /**
          * DashboardSummaryResponse
@@ -2852,28 +3266,58 @@ export interface components {
         };
         /** KnowledgeBaseCreate */
         KnowledgeBaseCreate: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id?: number | null;
-            /** Category */
+            /**
+             * Category
+             * @description 分类
+             */
             category?: string | null;
-            /** Title */
+            /**
+             * Title
+             * @description 标题
+             */
             title?: string | null;
-            /** Content */
+            /**
+             * Content
+             * @description 内容
+             */
             content?: string | null;
-            /** Source Type */
+            /**
+             * Source Type
+             * @description 来源类型
+             */
             source_type?: string | null;
         };
         /** KnowledgeBaseResponse */
         KnowledgeBaseResponse: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id?: number | null;
-            /** Category */
+            /**
+             * Category
+             * @description 分类
+             */
             category?: string | null;
-            /** Title */
+            /**
+             * Title
+             * @description 标题
+             */
             title?: string | null;
-            /** Content */
+            /**
+             * Content
+             * @description 内容
+             */
             content?: string | null;
-            /** Source Type */
+            /**
+             * Source Type
+             * @description 来源类型
+             */
             source_type?: string | null;
             /** Id */
             id: number;
@@ -3027,16 +3471,29 @@ export interface components {
         };
         /** LeadCreate */
         LeadCreate: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id: number;
-            /** Lead Name */
+            /**
+             * Lead Name
+             * @description 留资姓名
+             */
             lead_name?: string | null;
-            /** Lead Phone */
+            /**
+             * Lead Phone
+             * @description 留资电话
+             */
             lead_phone?: string | null;
-            /** Lead Source */
+            /**
+             * Lead Source
+             * @description 留资来源
+             */
             lead_source?: string | null;
             /**
              * Is Valid
+             * @description 是否有效
              * @default 1
              */
             is_valid: number;
@@ -3045,16 +3502,29 @@ export interface components {
         };
         /** LeadResponse */
         LeadResponse: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id: number;
-            /** Lead Name */
+            /**
+             * Lead Name
+             * @description 留资姓名
+             */
             lead_name?: string | null;
-            /** Lead Phone */
+            /**
+             * Lead Phone
+             * @description 留资电话
+             */
             lead_phone?: string | null;
-            /** Lead Source */
+            /**
+             * Lead Source
+             * @description 留资来源
+             */
             lead_source?: string | null;
             /**
              * Is Valid
+             * @description 是否有效
              * @default 1
              */
             is_valid: number;
@@ -3186,24 +3656,49 @@ export interface components {
         };
         /** LiveRoomCreate */
         LiveRoomCreate: {
-            /** Account Name */
+            /**
+             * Account Name
+             * @description 账号名称
+             */
             account_name: string;
-            /** Anchor Name */
+            /**
+             * Anchor Name
+             * @description 主播名称
+             */
             anchor_name: string;
-            /** Anchor Nickname */
+            /**
+             * Anchor Nickname
+             * @description 主播昵称
+             */
             anchor_nickname?: string | null;
-            /** Anchor Avatar Url */
+            /**
+             * Anchor Avatar Url
+             * @description 头像 URL
+             */
             anchor_avatar_url?: string | null;
-            /** Douyin Id */
+            /**
+             * Douyin Id
+             * @description 抖音 ID
+             */
             douyin_id?: string | null;
-            /** Douyin Uid */
+            /**
+             * Douyin Uid
+             * @description 抖音 UID
+             */
             douyin_uid?: string | null;
-            /** Room Id Str */
+            /**
+             * Room Id Str
+             * @description 直播间 ID 字符串
+             */
             room_id_str?: string | null;
-            /** Team Name */
+            /**
+             * Team Name
+             * @description 团队名称
+             */
             team_name?: string | null;
             /**
              * Platform
+             * @description 平台
              * @default douyin
              */
             platform: string;
@@ -3215,24 +3710,49 @@ export interface components {
         };
         /** LiveRoomResponse */
         LiveRoomResponse: {
-            /** Account Name */
+            /**
+             * Account Name
+             * @description 账号名称
+             */
             account_name: string;
-            /** Anchor Name */
+            /**
+             * Anchor Name
+             * @description 主播名称
+             */
             anchor_name: string;
-            /** Anchor Nickname */
+            /**
+             * Anchor Nickname
+             * @description 主播昵称
+             */
             anchor_nickname?: string | null;
-            /** Anchor Avatar Url */
+            /**
+             * Anchor Avatar Url
+             * @description 头像 URL
+             */
             anchor_avatar_url?: string | null;
-            /** Douyin Id */
+            /**
+             * Douyin Id
+             * @description 抖音 ID
+             */
             douyin_id?: string | null;
-            /** Douyin Uid */
+            /**
+             * Douyin Uid
+             * @description 抖音 UID
+             */
             douyin_uid?: string | null;
-            /** Room Id Str */
+            /**
+             * Room Id Str
+             * @description 直播间 ID 字符串
+             */
             room_id_str?: string | null;
-            /** Team Name */
+            /**
+             * Team Name
+             * @description 团队名称
+             */
             team_name?: string | null;
             /**
              * Platform
+             * @description 平台
              * @default douyin
              */
             platform: string;
@@ -3275,13 +3795,25 @@ export interface components {
         };
         /** LiveSessionCreate */
         LiveSessionCreate: {
-            /** Room Id */
+            /**
+             * Room Id
+             * @description 直播间 ID
+             */
             room_id: number;
-            /** Session Title */
+            /**
+             * Session Title
+             * @description 场次标题
+             */
             session_title?: string | null;
-            /** Dashboard Url */
+            /**
+             * Dashboard Url
+             * @description 大屏 URL
+             */
             dashboard_url?: string | null;
-            /** Stream Url */
+            /**
+             * Stream Url
+             * @description 流地址
+             */
             stream_url?: string | null;
             /** Live Start Time */
             live_start_time?: string | null;
@@ -3289,6 +3821,7 @@ export interface components {
             live_end_time?: string | null;
             /**
              * Live Status
+             * @description 直播状态
              * @default ended
              */
             live_status: string;
@@ -3385,13 +3918,25 @@ export interface components {
         };
         /** LiveSessionResponse */
         LiveSessionResponse: {
-            /** Room Id */
+            /**
+             * Room Id
+             * @description 直播间 ID
+             */
             room_id: number;
-            /** Session Title */
+            /**
+             * Session Title
+             * @description 场次标题
+             */
             session_title?: string | null;
-            /** Dashboard Url */
+            /**
+             * Dashboard Url
+             * @description 大屏 URL
+             */
             dashboard_url?: string | null;
-            /** Stream Url */
+            /**
+             * Stream Url
+             * @description 流地址
+             */
             stream_url?: string | null;
             /** Live Start Time */
             live_start_time?: string | null;
@@ -3399,6 +3944,7 @@ export interface components {
             live_end_time?: string | null;
             /**
              * Live Status
+             * @description 直播状态
              * @default ended
              */
             live_status: string;
@@ -3684,9 +4230,15 @@ export interface components {
          * @description 登录请求
          */
         LoginRequest: {
-            /** Username */
+            /**
+             * Username
+             * @description 用户名，不能为空
+             */
             username: string;
-            /** Password */
+            /**
+             * Password
+             * @description 密码，不能为空
+             */
             password: string;
         };
         /** LoginStartResponse */
@@ -3938,6 +4490,31 @@ export interface components {
             /** History */
             history?: components["schemas"]["QaHistoryMessage"][];
         };
+        /**
+         * ResourceComponentUsage
+         * @description 本项目一个进程或容器的真实资源占用。
+         */
+        ResourceComponentUsage: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
+            /**
+             * Cpu Percent
+             * @default 0
+             */
+            cpu_percent: number;
+            /**
+             * Memory Bytes
+             * @default 0
+             */
+            memory_bytes: number;
+        };
         /** ReviewActionCreate */
         ReviewActionCreate: {
             /** Finding Id */
@@ -4041,7 +4618,7 @@ export interface components {
         };
         /**
          * ReviewFindingOut
-         * @description PATCH /reviews/{session_id}/findings/{finding_id}
+         * @description PATCH /reviews/{session_id}/findings/{finding_id} — 和 ReviewFinding 模型字段对齐
          */
         ReviewFindingOut: {
             /** Id */
@@ -4196,6 +4773,8 @@ export interface components {
         ScraperAccountCreate: {
             /** Account Name */
             account_name?: string | null;
+            /** Douyin Nickname */
+            douyin_nickname?: string | null;
             /** Douyin Id */
             douyin_id?: string | null;
             /**
@@ -4208,6 +4787,8 @@ export interface components {
         ScraperAccountResponse: {
             /** Account Name */
             account_name?: string | null;
+            /** Douyin Nickname */
+            douyin_nickname?: string | null;
             /** Douyin Id */
             douyin_id?: string | null;
             /**
@@ -4227,6 +4808,11 @@ export interface components {
              */
             cookie_saved: boolean;
             /**
+             * Cookie Status
+             * @default missing
+             */
+            cookie_status: string;
+            /**
              * Fingerprint Saved
              * @default false
              */
@@ -4235,6 +4821,10 @@ export interface components {
             expires_at?: string | null;
             /** Last Login At */
             last_login_at?: string | null;
+            /** Cookie Checked At */
+            cookie_checked_at?: string | null;
+            /** Cookie Refreshed At */
+            cookie_refreshed_at?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -4250,6 +4840,8 @@ export interface components {
         ScraperAccountUpdate: {
             /** Account Name */
             account_name?: string | null;
+            /** Douyin Nickname */
+            douyin_nickname?: string | null;
             /** Douyin Id */
             douyin_id?: string | null;
             /** Login Status */
@@ -4272,6 +4864,32 @@ export interface components {
             id: number;
             /** Raw Json */
             raw_json?: unknown | null;
+            /** Session Id */
+            session_id?: number | null;
+            /** Anchor Name */
+            anchor_name?: string | null;
+            /** Anchor Nickname */
+            anchor_nickname?: string | null;
+            /** Anchor Avatar Url */
+            anchor_avatar_url?: string | null;
+            /** Douyin Id */
+            douyin_id?: string | null;
+            /** Session Title */
+            session_title?: string | null;
+            /** Live Start Time */
+            live_start_time?: string | null;
+            /** Room Id Str */
+            room_id_str?: string | null;
+            /** Task Type */
+            task_type?: string | null;
+            /** Event Type */
+            event_type?: string | null;
+            /** Stage */
+            stage?: string | null;
+            /** Data Details */
+            data_details?: {
+                [key: string]: unknown;
+            };
             /**
              * Created At
              * Format: date-time
@@ -4299,6 +4917,18 @@ export interface components {
             completed_at?: string | null;
             /** Error Message */
             error_message?: string | null;
+            /** Cancel Requested At */
+            cancel_requested_at?: string | null;
+            /** Retry Of Task Id */
+            retry_of_task_id?: number | null;
+            /** Task Options Json */
+            task_options_json?: {
+                [key: string]: unknown;
+            } | null;
+            /** Result Json */
+            result_json?: {
+                [key: string]: unknown;
+            } | null;
             /** Idempotency Key */
             idempotency_key?: string | null;
             /** Trace Id */
@@ -4575,18 +5205,34 @@ export interface components {
         };
         /** TranscriptSegmentCreate */
         TranscriptSegmentCreate: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id: number;
-            /** Segment Start */
+            /**
+             * Segment Start
+             * @description 开始秒数
+             */
             segment_start?: number | null;
-            /** Segment End */
+            /**
+             * Segment End
+             * @description 结束秒数
+             */
             segment_end?: number | null;
-            /** Text Content */
+            /**
+             * Text Content
+             * @description 文本内容
+             */
             text_content?: string | null;
-            /** Segment Type */
+            /**
+             * Segment Type
+             * @description 分段类型
+             */
             segment_type?: string | null;
             /**
              * Asr Status
+             * @description ASR 状态
              * @default pending
              */
             asr_status: string;
@@ -4630,18 +5276,34 @@ export interface components {
         };
         /** TranscriptSegmentResponse */
         TranscriptSegmentResponse: {
-            /** Session Id */
+            /**
+             * Session Id
+             * @description 场次 ID
+             */
             session_id: number;
-            /** Segment Start */
+            /**
+             * Segment Start
+             * @description 开始秒数
+             */
             segment_start?: number | null;
-            /** Segment End */
+            /**
+             * Segment End
+             * @description 结束秒数
+             */
             segment_end?: number | null;
-            /** Text Content */
+            /**
+             * Text Content
+             * @description 文本内容
+             */
             text_content?: string | null;
-            /** Segment Type */
+            /**
+             * Segment Type
+             * @description 分段类型
+             */
             segment_type?: string | null;
             /**
              * Asr Status
+             * @description ASR 状态
              * @default pending
              */
             asr_status: string;
@@ -4767,24 +5429,165 @@ export interface components {
             failed: number;
         };
         /**
+         * UnifiedTaskResponse
+         * @description 采集任务和 ASR 任务在任务抽屉中的统一展示结构。
+         */
+        UnifiedTaskResponse: {
+            /** Task Key */
+            task_key: string;
+            /** Source */
+            source: string;
+            /** Id */
+            id: number;
+            /** Module Key */
+            module_key: string;
+            /** Task Type */
+            task_type: string;
+            /** Task Label */
+            task_label: string;
+            /** Status */
+            status: string;
+            /**
+             * Progress Percent
+             * @default 0
+             */
+            progress_percent: number;
+            /**
+             * Progress Current
+             * @default 0
+             */
+            progress_current: number;
+            /**
+             * Progress Total
+             * @default 0
+             */
+            progress_total: number;
+            /** Progress Stage */
+            progress_stage?: string | null;
+            /** Progress Message */
+            progress_message?: string | null;
+            /** Account Id */
+            account_id?: number | null;
+            /** Session Id */
+            session_id?: number | null;
+            /** Anchor Name */
+            anchor_name?: string | null;
+            /** Session Title */
+            session_title?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /** Trace Id */
+            trace_id?: string | null;
+            /** Worker Id */
+            worker_id?: string | null;
+            /** Heartbeat At */
+            heartbeat_at?: string | null;
+            /**
+             * Retry Count
+             * @default 0
+             */
+            retry_count: number;
+            /**
+             * Max Retries
+             * @default 0
+             */
+            max_retries: number;
+            /** Retry Of Task Id */
+            retry_of_task_id?: number | null;
+            /**
+             * Can Stop
+             * @default false
+             */
+            can_stop: boolean;
+            /**
+             * Can Retry
+             * @default false
+             */
+            can_retry: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
+            /** Result Json */
+            result_json?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Collected Anchor Count
+             * @default 0
+             */
+            collected_anchor_count: number;
+            /**
+             * Collected Session Count
+             * @default 0
+             */
+            collected_session_count: number;
+            /**
+             * New Session Count
+             * @default 0
+             */
+            new_session_count: number;
+            /**
+             * Checked Detail Count
+             * @default 0
+             */
+            checked_detail_count: number;
+            /**
+             * Refreshed Detail Count
+             * @default 0
+             */
+            refreshed_detail_count: number;
+            /**
+             * Failed Detail Count
+             * @default 0
+             */
+            failed_detail_count: number;
+            /**
+             * Remaining Detail Count
+             * @default 0
+             */
+            remaining_detail_count: number;
+        };
+        /**
          * UserCreate
          * @description 创建用户请求
          */
         UserCreate: {
-            /** Username */
+            /**
+             * Username
+             * @description 用户名
+             */
             username: string;
-            /** Password */
+            /**
+             * Password
+             * @description 密码，最少 6 位
+             */
             password: string;
-            /** Nickname */
+            /**
+             * Nickname
+             * @description 昵称
+             */
             nickname?: string | null;
-            /** Email */
+            /**
+             * Email
+             * @description 邮箱
+             */
             email?: string | null;
-            /** Phone */
+            /**
+             * Phone
+             * @description 手机号
+             */
             phone?: string | null;
             /** Roles */
             roles?: string[];
             /**
              * Status
+             * @description 用户状态
              * @default active
              */
             status: string;
@@ -4911,6 +5714,94 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    login_api_v1_auth_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoybeanResponse_TokenData_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_token_api_v1_auth_refreshToken_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoybeanResponse_TokenData_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_user_info_api_v1_auth_getUserInfo_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoybeanResponse_UserInfoData_"];
                 };
             };
         };
@@ -5206,6 +6097,38 @@ export interface operations {
             header?: never;
             path: {
                 session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_comment_user_avatar_api_v1_live_sessions__session_id__comments__comment_id__avatar_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+                comment_id: number;
             };
             cookie?: never;
         };
@@ -6338,6 +7261,183 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CollectorStatusResponse"];
+                };
+            };
+        };
+    };
+    get_control_center_api_v1_collector_control_center_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectorControlCenterResponse"];
+                };
+            };
+        };
+    };
+    get_task_queue_api_v1_collector_task_queue_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnifiedTaskResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_collector_module_api_v1_collector_modules__module_key__start_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectorTaskActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_collector_module_api_v1_collector_modules__module_key__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                module_key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectorTaskActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_queue_task_api_v1_collector_task_queue__source___task_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source: string;
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectorTaskActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_queue_task_api_v1_collector_task_queue__source___task_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source: string;
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectorTaskActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -7615,94 +8715,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    login_api_v1_auth_login_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LoginRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SoybeanResponse_TokenData_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    refresh_token_api_v1_auth_refreshToken_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SoybeanResponse_TokenData_"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_user_info_api_v1_auth_getUserInfo_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SoybeanResponse_UserInfoData_"];
                 };
             };
         };

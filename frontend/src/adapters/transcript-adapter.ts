@@ -5,15 +5,18 @@
  * 所有函数都是纯函数，不依赖响应式状态。
  */
 import type { SelectOption } from 'naive-ui';
-import { getLiveSessionAvatarUrl } from '@/service/api/douyin';
 import { formatDate, formatDuration, getStatusLabel } from '@/utils/transcriptHelpers';
 
 // ========== 类型定义 ==========
 
 /** 场次下拉选项（扩展 SelectOption，带主播头像信息） */
 export interface SessionSelectOption extends SelectOption {
+  sessionId: number;
   anchorName: string;
+  anchorNickname: string | null;
+  douyinId: string | null;
   avatarUrl: string | null;
+  metaLabel: string;
 }
 
 /** 话术分类统计项 */
@@ -77,11 +80,16 @@ export function buildSessionOptions(
   return sessions.map(session => {
     const task = taskBySession.get(session.id);
     const date = session.live_start_time ? formatDate(session.live_start_time) : '时间未知';
+    const metaLabel = `${date} · ${formatDuration(session.live_duration_seconds)} · ${getStatusLabel(task?.status)}`;
     return {
       value: session.id,
-      label: `${session.anchor_name || '未知主播'} · ${date} · ${formatDuration(session.live_duration_seconds)} · ${getStatusLabel(task?.status)}`,
+      label: `${session.anchor_name || '未知主播'} · ${session.douyin_id || '未获取抖音号'} · ${metaLabel}`,
+      sessionId: session.id,
       anchorName: session.anchor_name || '未知主播',
-      avatarUrl: session.anchor_avatar_url ? getLiveSessionAvatarUrl(session.id) : null
+      anchorNickname: session.anchor_nickname,
+      douyinId: session.douyin_id,
+      avatarUrl: session.anchor_avatar_url,
+      metaLabel
     };
   });
 }

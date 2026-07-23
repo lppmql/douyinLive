@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { h, onMounted, ref } from 'vue';
 import { fetchDashboardSummary, fetchDashboardSummaryByAnchor } from '@/service/api/douyin';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
 
 defineOptions({ name: 'Home' });
 
@@ -126,17 +127,13 @@ const anchorColumns = [
     key: 'anchor_name',
     width: 180,
     render(row: Api.Douyin.AnchorSummaryItem) {
-      return h('div', { class: 'flex items-center gap-10px' }, [
-        h('img', {
-          src: row.anchor_avatar_url || '',
-          class: 'size-32px rounded-full object-cover shrink-0',
-          onError: (e: Event) => { (e.target as HTMLImageElement).style.display = 'none'; }
-        }),
-        h('div', { class: 'min-w-0' }, [
-          h('div', { class: 'text-13px font-600 truncate' }, row.anchor_name || '未知主播'),
-          h('div', { class: 'text-11px text-gray-400 truncate' }, `抖音号: ${row.douyin_id || '-'}`)
-        ])
-      ]);
+      return h(AnchorIdentity, {
+        sessionId: row.anchor_avatar_session_id,
+        avatarUrl: row.anchor_avatar_url,
+        name: row.anchor_name,
+        douyinId: row.douyin_id,
+        size: 32
+      });
     }
   },
   { title: '场次', key: 'session_count', width: 60, align: 'center' as const },

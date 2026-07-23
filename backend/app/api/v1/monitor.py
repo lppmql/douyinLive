@@ -41,13 +41,18 @@ async def start_monitor(db: Session = Depends(get_db)):
         ScraperTask.status == TaskStatus.RUNNING,
     ).first()
     if not settings.monitor_mock_enabled and not running_collect:
-        context, is_valid, message = await browser_manager.get_logged_in_context()
+        context, is_valid, message = await scheduler_manager.run_serialized_browser_operation(
+            browser_manager.get_logged_in_context
+        )
         if not is_valid or not context:
             raise HTTPException(409, message or "采集账号登录状态不可用，请重新扫码")
     await scheduler_manager.start()
     message = "监控已启动"
     if running_collect:
-        message = f"监控已启动；刷新任务 #{running_collect.id} 期间由全量采集接管，完成后自动恢复实时轮询"
+        message = (
+            f"监控已启动；全部场次数据补齐刷新任务 #{running_collect.id} 正在接管浏览器，"
+            "完成后自动恢复实时轮询"
+        )
     return MonitorActionResponse(success=True, message=message)
 
 

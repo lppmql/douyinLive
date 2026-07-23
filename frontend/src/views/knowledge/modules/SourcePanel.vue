@@ -1,6 +1,7 @@
 <!-- 知识库 — 引用来源面板（Naive UI 组件替代手写 HTML） -->
 <script setup lang="ts">
 import { NCard, NEmpty, NScrollbar, NSpace, NTag } from 'naive-ui';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import { getSourceTypeLabel, getSourceTypeColor } from '../adapters/knowledge-adapter';
 
 defineOptions({ name: 'KnowledgeSourcePanel' });
@@ -43,10 +44,17 @@ defineProps<{
             </NSpace>
           </template>
           <div class="source-card__title">{{ source.title || '未命名来源' }}</div>
-          <div v-if="source.anchor_name" class="source-card__anchor">
-            <SvgIcon icon="mdi:account-circle-outline" class="text-13px" />
-            {{ source.anchor_name }}
-          </div>
+          <AnchorIdentity
+            v-if="source.anchor_name"
+            class="source-card__anchor"
+            :session-id="source.session_id"
+            :avatar-url="source.anchor_avatar_url"
+            :name="source.anchor_name"
+            :nickname="source.anchor_nickname"
+            :douyin-id="source.douyin_id"
+            :size="30"
+            dense
+          />
           <div v-if="source.excerpt" class="source-card__excerpt">
             {{ source.excerpt }}
           </div>

@@ -4,9 +4,11 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import datetime, timezone
+from logging.handlers import RotatingFileHandler
 
 from prometheus_client import Counter, Gauge, Histogram
 from sqlalchemy import func, or_
@@ -100,7 +102,17 @@ class TraceFilter(logging.Filter):
 def configure_logging() -> None:
     root = logging.getLogger()
     root.setLevel(logging.DEBUG if settings.DEBUG else logging.INFO)
-    handler = logging.StreamHandler()
+    worker_log_path = os.getenv("ASR_WORKER_LOG_PATH", "").strip()
+    if worker_log_path:
+        # ASR 是长期运行的独立进程，固定轮转可防止一份日志再次占满本机磁盘。
+        handler = RotatingFileHandler(
+            worker_log_path,
+            maxBytes=20 * 1024 * 1024,
+            backupCount=3,
+            encoding="utf-8",
+        )
+    else:
+        handler = logging.StreamHandler()
     handler.addFilter(TraceFilter())
     if settings.LOG_FORMAT.lower() == "json":
         handler.setFormatter(JsonFormatter())
@@ -114,6 +126,9 @@ def configure_logging() -> None:
 
     # WebSocket 音频帧和逐条 SQL 会让长场次日志快速膨胀，只保留业务进度与异常。
     logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
     logging.getLogger("sqlalchemy.engine").setLevel(
         logging.INFO if settings.DATABASE_ECHO else logging.WARNING
     )

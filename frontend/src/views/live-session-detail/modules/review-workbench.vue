@@ -1,21 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useReviewStore } from '@/store/modules/review';
 import {
-  createScriptAsset,
   fetchLiveSessionPage,
   fetchReviewWorkbench,
   generateSessionReview,
-  updateReviewFindingStatus,
-  updateScriptAsset
+  updateReviewFindingStatus
 } from '@/service/api/douyin';
 import { unwrapServiceData } from '@/utils/service';
 import MetricsChart from './metrics-chart.vue';
 import ReviewVideoPlayer from './review-video-player.vue';
 import ReviewTimeline from './review-timeline.vue';
 import SessionComparison from './session-comparison.vue';
-import ScriptAssetsPanel from './script-assets-panel.vue';
 import AiPanel from './ai-panel.vue';
 
 defineOptions({ name: 'LiveReviewWorkbench' });
@@ -27,29 +24,8 @@ const loading = ref(false);
 const generating = ref(false);
 const workbench = ref<Api.Douyin.ReviewWorkbench | null>(null);
 const sessions = ref<Api.Douyin.LiveSessionListItem[]>([]);
-const assetModalVisible = ref(false);
-const assetSaving = ref(false);
-const updatingAssetId = ref<number | null>(null);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-const assetForm = reactive<{
-  transcript_segment_id: number | null;
-  category: string;
-  title: string;
-  content: string;
-  start_seconds: number | null;
-  end_seconds: number | null;
-  performance_note: string;
-}>({
-  transcript_segment_id: null,
-  category: '选址避坑',
-  title: '',
-  content: '',
-  start_seconds: null,
-  end_seconds: null,
-  performance_note: ''
-});
-const assetCategories = ['开场留人', '选址避坑', '预算测算', '品牌判断', '供应链', '毛利损耗', '资料钩子', '私信承接'];
 const openFindingCount = computed(() => workbench.value?.findings.filter(item => item.status === 'open').length || 0);
 const criticalCount = computed(
   () =>
@@ -95,59 +71,6 @@ async function updateFinding(item: Api.Douyin.ReviewFinding, status: Api.Douyin.
     message.success('复盘发现状态已更新');
   } catch {
     message.error('状态更新失败');
-  }
-}
-
-function openAssetModal(segment: Api.Douyin.ReviewTranscriptSegment) {
-  assetForm.transcript_segment_id = segment.id;
-  assetForm.category = assetCategories.includes(segment.segment_type || '') ? segment.segment_type! : '选址避坑';
-  assetForm.title = `${assetForm.category}话术 · ${Math.floor(segment.segment_start / 60)}分${Math.floor(segment.segment_start % 60)}秒`;
-  assetForm.content = segment.text_content || '';
-  assetForm.start_seconds = segment.segment_start;
-  assetForm.end_seconds = segment.segment_end;
-  assetForm.performance_note = '';
-  assetModalVisible.value = true;
-}
-
-async function saveAsset() {
-  if (!assetForm.title.trim() || !assetForm.content.trim()) return message.warning('话术标题和原文不能为空');
-  assetSaving.value = true;
-  try {
-    const newAsset = unwrapServiceData(await createScriptAsset(props.sessionId, {
-      transcript_segment_id: assetForm.transcript_segment_id,
-      category: assetForm.category,
-      title: assetForm.title.trim(),
-      content: assetForm.content.trim(),
-      start_seconds: assetForm.start_seconds,
-      end_seconds: assetForm.end_seconds,
-      performance_note: assetForm.performance_note.trim() || null
-    }), '话术收录失败');
-    if (workbench.value) workbench.value.script_assets.unshift(newAsset);
-    assetModalVisible.value = false;
-    message.success('真实话术已加入候选资产');
-  } catch (error) {
-    message.error((error as { message?: string }).message || '话术收录失败');
-  } finally {
-    assetSaving.value = false;
-  }
-}
-
-async function changeAssetStatus(item: Api.Douyin.ScriptAsset, status: Api.Douyin.ScriptAsset['status']) {
-  updatingAssetId.value = item.id;
-  try {
-    const updatedAsset = unwrapServiceData(
-      await updateScriptAsset(props.sessionId, item.id, { status }),
-      '话术资产状态更新失败'
-    );
-    if (workbench.value) {
-      const index = workbench.value.script_assets.findIndex(asset => asset.id === item.id);
-      if (index >= 0) workbench.value.script_assets[index] = updatedAsset;
-    }
-    message.success('话术资产状态已更新');
-  } catch {
-    message.error('话术资产更新失败');
-  } finally {
-    updatingAssetId.value = null;
   }
 }
 
@@ -250,7 +173,6 @@ onBeforeUnmount(() => {
                 :segments="workbench.transcript_segments || []"
                 :findings="workbench.findings || []"
                 :alerts="workbench.live_alerts || []"
-                @create-asset="openAssetModal"
                 @update-finding="updateFinding"
               />
             </NTabPane>
@@ -264,62 +186,11 @@ onBeforeUnmount(() => {
         </NCard>
       </div>
 
-      <NCard :bordered="false" class="card-wrapper">
-        <NTabs type="line" animated>
-          <NTabPane name="comparison" tab="跨场对比" display-directive="if">
-            <SessionComparison :session-id="sessionId" :sessions="sessions" />
-          </NTabPane>
-          <NTabPane name="assets" :tab="`话术资产与合规 (${workbench.script_assets.length})`" display-directive="if">
-            <ScriptAssetsPanel
-              :assets="workbench.script_assets || []"
-              :coverage="workbench.domain_coverage || []"
-              :findings="workbench.findings || []"
-              :updating-id="updatingAssetId"
-              @update-asset="changeAssetStatus"
-            />
-          </NTabPane>
-        </NTabs>
+      <NCard title="跨场对比" :bordered="false" class="card-wrapper">
+        <SessionComparison :session-id="sessionId" :sessions="sessions" />
       </NCard>
     </NSpace>
 
     <NResult v-else status="info" title="复盘工作台正在准备" description="请稍候，系统正在读取真实场次数据。" />
-
-    <NModal
-      v-model:show="assetModalVisible"
-      preset="card"
-      title="收录真实话术"
-      class="w-680px max-w-[calc(100vw-32px)]"
-    >
-      <NForm label-placement="top">
-        <NGrid :x-gap="12" cols="1 s:2" responsive="screen">
-          <NGi>
-            <NFormItem label="话术分类">
-              <NSelect
-                v-model:value="assetForm.category"
-                :options="assetCategories.map(item => ({ label: item, value: item }))"
-              />
-            </NFormItem>
-          </NGi>
-          <NGi>
-            <NFormItem label="资产标题"><NInput v-model:value="assetForm.title" /></NFormItem>
-          </NGi>
-        </NGrid>
-        <NFormItem label="真实话术原文（来自 ASR，不可修改）">
-          <NInput v-model:value="assetForm.content" type="textarea" :rows="5" readonly />
-        </NFormItem>
-        <NFormItem label="效果说明">
-          <NInput
-            v-model:value="assetForm.performance_note"
-            placeholder="例如：该时间点后出现3条预算问题，需人工核对"
-          />
-        </NFormItem>
-      </NForm>
-      <template #footer>
-        <div class="flex justify-end gap-10px">
-          <NButton @click="assetModalVisible = false">取消</NButton>
-          <NButton type="primary" :loading="assetSaving" @click="saveAsset">加入候选库</NButton>
-        </div>
-      </template>
-    </NModal>
   </NSpin>
 </template>

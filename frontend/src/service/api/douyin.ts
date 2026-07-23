@@ -78,6 +78,14 @@ export function getLiveSessionAvatarUrl(id: number) {
   return `${backendBaseUrl}${API_PREFIX}/live-sessions/${id}/avatar`;
 }
 
+/** 获取同源代理的评论用户头像，只有平台返回真实头像时才会成功。 */
+export function getCommentUserAvatarUrl(sessionId: number, commentId: number) {
+  const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
+  const { otherBaseURL } = getServiceBaseURL(import.meta.env, isHttpProxy);
+  const backendBaseUrl = otherBaseURL.backend || window.location.origin;
+  return `${backendBaseUrl}${API_PREFIX}/live-sessions/${sessionId}/comments/${commentId}/avatar`;
+}
+
 /** 获取低开销封装 MP4 的下载地址，开发环境自动复用 Vite 后端代理 */
 export function getLiveSessionVideoDownloadUrl(id: number) {
   const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
@@ -99,6 +107,51 @@ export function getLiveSessionPlaybackUrl(id: number, startSeconds = 0) {
 /** 获取采集器状态 */
 export function fetchCollectorStatus() {
   return backendRequest<Api.Douyin.CollectorStatus>({ url: `${API_PREFIX}/collector/status` });
+}
+
+/** 获取采集按钮、长期服务、自动同步和任务队列概况 */
+export function fetchCollectorControlCenter() {
+  return backendRequest<Api.Douyin.CollectorControlCenter>({ url: `${API_PREFIX}/collector/control-center` });
+}
+
+/** 获取采集与 ASR 的统一任务队列 */
+export function fetchCollectorTaskQueue(limit = 100) {
+  return backendRequest<Api.Douyin.UnifiedCollectorTask[]>({
+    url: `${API_PREFIX}/collector/task-queue`,
+    params: { limit: Math.min(300, Math.max(1, limit)) }
+  });
+}
+
+/** 开启直播监控或 ASR 长期服务，或发起全部场次补齐刷新 */
+export function startCollectorModule(moduleKey: Api.Douyin.CollectorModuleKey) {
+  return backendRequest<Api.Douyin.CollectorTaskAction>({
+    url: `${API_PREFIX}/collector/modules/${moduleKey}/start`,
+    method: 'POST'
+  });
+}
+
+/** 关闭常驻服务，或安全停止当前同类任务 */
+export function stopCollectorModule(moduleKey: Api.Douyin.CollectorModuleKey) {
+  return backendRequest<Api.Douyin.CollectorTaskAction>({
+    url: `${API_PREFIX}/collector/modules/${moduleKey}/stop`,
+    method: 'POST'
+  });
+}
+
+/** 停止任务队列中的指定任务 */
+export function stopCollectorQueueTask(task: Api.Douyin.UnifiedCollectorTask) {
+  return backendRequest<Api.Douyin.CollectorTaskAction>({
+    url: `${API_PREFIX}/collector/task-queue/${task.source}/${task.id}/stop`,
+    method: 'POST'
+  });
+}
+
+/** 从断点重试失败或已停止任务 */
+export function retryCollectorQueueTask(task: Api.Douyin.UnifiedCollectorTask) {
+  return backendRequest<Api.Douyin.CollectorTaskAction>({
+    url: `${API_PREFIX}/collector/task-queue/${task.source}/${task.id}/retry`,
+    method: 'POST'
+  });
 }
 
 /** 获取采集账号列表 */

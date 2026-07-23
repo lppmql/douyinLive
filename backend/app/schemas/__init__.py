@@ -207,6 +207,8 @@ class LiveSessionDetailResponse(BaseModel):
 class CommentBase(BaseModel):
     session_id: int = Field(gt=0, description="场次 ID")
     user_nickname: Optional[str] = Field(default=None, max_length=200, description="用户昵称")
+    user_avatar_url: Optional[str] = Field(default=None, max_length=1000, description="用户头像 URL")
+    user_douyin_id: Optional[str] = Field(default=None, max_length=100, description="用户公开抖音号")
     user_sec_uid: Optional[str] = Field(default=None, max_length=200, description="用户 sec_uid")
     webcast_uid: Optional[str] = Field(default=None, max_length=200, description="直播间 UID")
     comment_content: Optional[str] = Field(default=None, max_length=5000, description="评论内容")

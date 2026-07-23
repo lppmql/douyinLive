@@ -10,12 +10,10 @@
  * onMounted(wb.initializePage);
  * ```
  */
-import { computed, h, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useIntervalFn } from '@vueuse/core';
-import type { SelectOption } from 'naive-ui';
 import { useMessage } from 'naive-ui';
-import AnchorAvatar from '@/components/business/anchor-avatar.vue';
 
 import {
   fetchLiveSessions,
@@ -23,7 +21,6 @@ import {
   fetchTranscriptSegments,
   fetchTranscriptTasks,
   fetchTranscriptTaskStatus,
-  getLiveSessionAvatarUrl,
   queueTranscript,
   queueTranscriptsByAnchor,
   runTranscriptAiPipeline
@@ -35,8 +32,7 @@ import { formatTime } from '@/utils/transcriptHelpers';
 import {
   buildCategoryStats,
   buildSessionOptions,
-  buildTaskStatusCards,
-  type SessionSelectOption
+  buildTaskStatusCards
 } from '@/adapters/transcript-adapter';
 
 import { useTranscriptRealtime } from './useTranscriptRealtime';
@@ -49,6 +45,7 @@ type TaskStatus = Api.Douyin.TranscriptTask['status'];
 
 export function useTranscriptWorkbench() {
   const router = useRouter();
+  const route = useRoute();
   const message = useMessage();
 
   // ── 响应式状态 ──
@@ -176,34 +173,10 @@ export function useTranscriptWorkbench() {
       : tasks.value.filter(item => item.status === taskFilter.value)
   );
 
-  /** 当前选中场次的主播头像 URL */
-  const selectedSessionAvatarUrl = computed(() => {
-    if (!selectedSession.value) return undefined;
-    return selectedSession.value.anchor_avatar_url
-      ? getLiveSessionAvatarUrl(selectedSession.value.id)
-      : undefined;
-  });
-
   /** 是否有话术内容（控制复制按钮等 UI 状态） */
   const hasContent = computed(() =>
     segments.value.length > 0 || Boolean(fullText.value)
   );
-
-  // ── UI 渲染辅助 ──
-
-  /** 渲染场次下拉选项（带主播头像） */
-  function renderSessionLabel(option: SelectOption) {
-    const sessionOption = option as SessionSelectOption;
-    return h('div', { class: 'flex min-w-0 items-center gap-8px' }, [
-      h(AnchorAvatar, { size: 26, src: sessionOption.avatarUrl || undefined, name: sessionOption.anchorName }),
-      h('span', { class: 'min-w-0 flex-1 truncate' }, String(sessionOption.label || ''))
-    ]);
-  }
-
-  /** 获取场次主播头像 URL */
-  function getSessionAvatarUrl(session: Api.Douyin.LiveSession) {
-    return session.anchor_avatar_url ? getLiveSessionAvatarUrl(session.id) : undefined;
-  }
 
   // ── 异步操作 ──
 
@@ -226,6 +199,9 @@ export function useTranscriptWorkbench() {
   /** 加载单个场次的话术数据（分段 + 全文） */
   async function loadTranscript(sessionId: number, silent = false) {
     selectedSessionId.value = sessionId;
+    if (String(route.query.sessionId || '') !== String(sessionId)) {
+      void router.replace({ query: { ...route.query, sessionId: String(sessionId) } });
+    }
     if (!silent) loading.value = true;
     livePreview.value = '';
     try {
@@ -250,8 +226,11 @@ export function useTranscriptWorkbench() {
     loadError.value = '';
     try {
       await Promise.all([loadSessions(), loadTaskData()]);
-      const latestSession = sessions.value[0];
-      if (latestSession) await loadTranscript(latestSession.id);
+      const rawSessionId = Array.isArray(route.query.sessionId) ? route.query.sessionId[0] : route.query.sessionId;
+      const requestedSessionId = Number(rawSessionId);
+      const requestedSession = sessions.value.find(item => item.id === requestedSessionId);
+      const initialSession = requestedSession || sessions.value[0];
+      if (initialSession) await loadTranscript(initialSession.id);
     } catch (error) {
       loadError.value = error instanceof Error ? error.message : '主播话术页面加载失败';
       message.error(loadError.value);
@@ -447,11 +426,7 @@ export function useTranscriptWorkbench() {
     coveragePercent,
     averageAiScore,
     wsConnected,
-    selectedSessionAvatarUrl,
     hasContent,
-    // 渲染辅助
-    renderSessionLabel,
-    getSessionAvatarUrl,
     // 操作
     initializePage,
     loadTranscript,

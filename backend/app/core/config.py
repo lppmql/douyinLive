@@ -42,8 +42,9 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_API_URL: str = "https://api.deepseek.com"
 
-    # ASR 并发
+    # ASR 并发。旧固定值仅保留环境兼容，真实 Worker 使用资源自适应上限。
     MAX_REALTIME_ASR_TASKS: int = 1
+    ASR_DYNAMIC_MAX_TASKS: int = 4
     ASR_WORKER_MODE: bool = False
     SAVE_AUDIO: bool = False
     SAVE_VIDEO: bool = False
@@ -77,11 +78,29 @@ class Settings(BaseSettings):
     COMMENT_COLLECT_INTERVAL: int = 60
     PROFILE_COLLECT_INTERVAL: int = 120
 
+    # 数据采集控制中心调度。0 表示自动同步一次处理全部待补齐场次。
+    COLLECTOR_SERVICE_TICK_SECONDS: int = 10
+    DATA_REFRESH_INTERVAL_SECONDS: int = 600
+    AI_REVIEW_INTERVAL_SECONDS: int = 120
+    KNOWLEDGE_SYNC_INTERVAL_SECONDS: int = 120
+    DATAEASE_SYNC_INTERVAL_SECONDS: int = 30
+    # 0 表示每次处理全部待同步场次；执行器仍逐场顺序写入，不会并发冲击 MySQL。
+    CONTINUOUS_TASK_BATCH_SIZE: int = 0
+
+    # 电脑资源保护。达到高压力后只延后新任务，不终止正在提交的数据。
+    RESOURCE_SAMPLE_INTERVAL_SECONDS: int = 5
+    RESOURCE_HIGH_CPU_PERCENT: int = 85
+    RESOURCE_HIGH_MEMORY_PERCENT: int = 88
+    RESOURCE_CRITICAL_MEMORY_PERCENT: int = 94
+    RESOURCE_BACKOFF_MULTIPLIER: int = 3
+
     # Phase 8: JWT 认证
     JWT_SECRET_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 小时
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # 原生图片、视频标签不能添加 Authorization 请求头，因此使用短时只读媒体 Cookie。
+    MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
     # 跨域与部署
     CORS_ORIGINS: str = "http://localhost:9527,http://127.0.0.1:9527"
@@ -126,13 +145,23 @@ class Settings(BaseSettings):
             errors.append("ASR_CHUNK_SECONDS_TOO_SMALL")
         if self.ASR_MAX_QUEUED < 1:
             errors.append("ASR_QUEUE_LIMIT_INVALID")
+        if not 1 <= self.ASR_DYNAMIC_MAX_TASKS <= 16:
+            errors.append("ASR_DYNAMIC_MAX_TASKS_INVALID")
         if self.MONITOR_CHECK_INTERVAL < 10:
             errors.append("MONITOR_INTERVAL_TOO_SMALL")
+        if self.COLLECTOR_SERVICE_TICK_SECONDS < 5:
+            errors.append("COLLECTOR_SERVICE_TICK_TOO_SMALL")
+        if self.CONTINUOUS_TASK_BATCH_SIZE < 0:
+            errors.append("CONTINUOUS_TASK_BATCH_INVALID")
+        if not 50 <= self.RESOURCE_HIGH_MEMORY_PERCENT < self.RESOURCE_CRITICAL_MEMORY_PERCENT <= 99:
+            errors.append("RESOURCE_MEMORY_THRESHOLD_INVALID")
         if not self.DEBUG and (
             len(self.JWT_SECRET_KEY) < 32
             or self.JWT_SECRET_KEY in {"replace-with-a-long-random-secret", "douyin-live-jwt-secret-change-in-prod"}
         ):
             errors.append("JWT_SECRET_INSECURE")
+        if not 1 <= self.MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES <= 120:
+            errors.append("MEDIA_ACCESS_TOKEN_EXPIRE_INVALID")
 
         if self.DB_USER.lower() == "root":
             warnings.append("DATABASE_ROOT_USER")

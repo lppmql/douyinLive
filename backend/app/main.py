@@ -1,7 +1,6 @@
 """
 零食店避坑直播运营复盘系统 - FastAPI 入口
 """
-import asyncio
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -16,9 +15,10 @@ from app.models.scraper_tasks import ScraperTask
 from app.api.v1 import v1_router
 from app.api.v1.auth import router as auth_router
 from app.services.collector.scheduler import scheduler_manager
-from app.services.collector.browser import browser_manager
-from app.services.asr.control import start_asr_runtime
 from app.services.tasks.runtime import publish_task_event, touch_task
+from app.services.tasks.control import CONTROL_TASK_TYPES, collector_task_control
+from app.services.tasks.module_service import collector_module_service
+from app.services.ai.seed_prompts import seed_prompts
 from app.api.v1.ws import transcript_ws
 from app.core.observability import (
     new_trace_id,
@@ -34,7 +34,10 @@ def recover_interrupted_collector_tasks() -> int:
     """进程重启后关闭无法继续执行的遗留采集任务。"""
     db = SessionLocal()
     try:
-        tasks = db.query(ScraperTask).filter(ScraperTask.status == TaskStatus.RUNNING).all()
+        tasks = db.query(ScraperTask).filter(
+            ScraperTask.status == TaskStatus.RUNNING,
+            ~ScraperTask.task_type.in_(CONTROL_TASK_TYPES),
+        ).all()
         for task in tasks:
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.utcnow()
@@ -71,39 +74,36 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  数据库连接失败: {e}")
 
     try:
+        db = SessionLocal()
+        seed_prompts(db)
+    except Exception as exc:
+        logger.warning("默认 AI 提示词检查失败，不阻塞服务启动: %s", exc)
+    finally:
+        if "db" in locals():
+            db.close()
+
+    try:
+        requeued_tasks = collector_task_control.recover_interrupted_tasks()
+        if requeued_tasks:
+            logger.warning("已重新排队 %s 个可断点执行的控制任务", requeued_tasks)
         recovered_tasks = recover_interrupted_collector_tasks()
         if recovered_tasks:
             logger.warning("已回收 %s 个服务重启前遗留的采集任务", recovered_tasks)
     except Exception as exc:
         logger.warning("遗留采集任务恢复失败，不阻塞服务启动: %s", exc)
 
-    if settings.ASR_AUTO_START:
-        try:
-            runtime = await asyncio.to_thread(start_asr_runtime)
-            logger.info(
-                "✅ ASR 默认启动: engine=%s worker=%s 并发=%s 队列=%s",
-                runtime["engine_running"],
-                runtime["worker_running"],
-                settings.MAX_REALTIME_ASR_TASKS,
-                settings.ASR_MAX_QUEUED,
-            )
-        except Exception as exc:
-            logger.warning("ASR 自动启动失败，不阻塞数据采集: %s", exc)
-    else:
-        logger.info("⏸️  ASR 自动启动已关闭 (ASR_AUTO_START=false)")
-
-    # 自动启动监控调度器
-    if settings.MONITOR_ENABLED:
-        await scheduler_manager.start()
-        logger.info("✅ 采集调度器已自动启动")
-    else:
-        logger.info("⏸️  采集调度器未启用 (MONITOR_ENABLED=false)")
+    await collector_task_control.start()
+    await collector_module_service.start()
+    logger.info("✅ 数据采集控制中心已恢复监控、ASR 与后台自动同步状态")
 
     yield
 
-    if scheduler_manager.running:
-        await scheduler_manager.stop()
-    await browser_manager.close()
+    # 先关掉所有“任务生产者”，再等待控制任务和实时页面完成，避免停机期间又创建浏览器。
+    await collector_module_service.stop_scheduling()
+    scheduler_manager.pause_scheduling()
+    await collector_task_control.stop()
+    await scheduler_manager.stop()
+    await collector_module_service.release_runtime_resources()
     logger.info("🛑 应用关闭")
 
 

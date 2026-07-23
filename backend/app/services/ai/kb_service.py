@@ -4,6 +4,7 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.knowledge_base import KnowledgeBase
@@ -14,6 +15,7 @@ from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.review import ReviewFinding
+from app.prompts import get_system_prompt
 from app.services.ai.deepseek_client import chat
 from app.services.ai.prompt_service import get_prompt_template
 from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices
@@ -31,11 +33,20 @@ def search_knowledge(
     q = db.query(KnowledgeBase)
     if category:
         q = q.filter(KnowledgeBase.category == category)
-    candidates = q.order_by(KnowledgeBase.updated_at.desc()).limit(300).all()
     if not keyword:
-        return candidates[:limit]
+        return q.order_by(KnowledgeBase.updated_at.desc()).limit(limit).all()
 
     terms = _query_terms(keyword)
+    # LONGTEXT 里保存的是完整话术和评论。先让 MySQL 用较长关键词筛出候选，
+    # 再在 Python 中精排，避免每次问答把数百场完整正文全部读进电脑内存。
+    lookup_terms = terms[:12]
+    conditions = []
+    for term in lookup_terms:
+        pattern = f"%{term}%"
+        conditions.extend((KnowledgeBase.title.like(pattern), KnowledgeBase.content.like(pattern)))
+    if conditions:
+        q = q.filter(or_(*conditions))
+    candidates = q.order_by(KnowledgeBase.updated_at.desc()).limit(120).all()
     ranked = []
     for item in candidates:
         title = (item.title or "").lower()
@@ -90,6 +101,33 @@ def _format_conversation(history: list[dict[str, str]] | None = None) -> str:
     labels = {"user": "用户", "assistant": "助手"}
     lines = [f"{labels[item['role']]}：{item['content']}" for item in normalized]
     return "历史对话（仅用于理解连续追问）：\n" + "\n".join(lines)
+
+
+def _enrich_source_anchor_profiles(db: Session, sources: list[dict[str, Any]]) -> None:
+    """一次查询补齐引用来源的主播身份，避免前端再逐条请求或猜测。"""
+    session_ids = sorted({source.get("session_id") for source in sources if source.get("session_id")})
+    if not session_ids:
+        return
+    rows = (
+        db.query(
+            LiveSession.id,
+            LiveSession.anchor_name,
+            LiveSession.anchor_nickname,
+            LiveSession.anchor_avatar_url,
+            LiveSession.douyin_id,
+        )
+        .filter(LiveSession.id.in_(session_ids))
+        .all()
+    )
+    profiles = {row.id: row for row in rows}
+    for source in sources:
+        profile = profiles.get(source.get("session_id"))
+        if not profile:
+            continue
+        source["anchor_name"] = source.get("anchor_name") or profile.anchor_name
+        source["anchor_nickname"] = profile.anchor_nickname
+        source["anchor_avatar_url"] = profile.anchor_avatar_url
+        source["douyin_id"] = profile.douyin_id
 
 
 def qa_search(
@@ -158,6 +196,8 @@ def qa_search(
             "session_id": item.session_id,
         })
 
+    _enrich_source_anchor_profiles(db, sources)
+
     knowledge_context = "\n\n---\n\n".join(context_parts)
 
     # 3. 用 QA 提示词调用 DeepSeek
@@ -174,10 +214,7 @@ def qa_search(
 
     try:
         answer = chat(
-            system_prompt=(
-                "你是零食店避坑直播运营复盘助手。只能依据本次提供的真实知识库证据回答，"
-                "需要理解历史对话中的连续追问；证据不足时必须明确说明，不得编造主播、评论、话术或指标。"
-            ),
+            system_prompt=get_system_prompt("knowledge_qa"),
             user_message=user_message,
             temperature=0.5,
             max_tokens=2048,
@@ -211,14 +248,14 @@ def _upsert_kb_item(
     if existing:
         existing.category = category
         existing.title = title[:200]
-        existing.content = content[:60000]
+        existing.content = content
         db.commit()
         return 0
     db.add(KnowledgeBase(
         session_id=session_id,
         category=category,
         title=title[:200],
-        content=content[:60000],
+        content=content,
         source_type=source_type,
     ))
     db.commit()
@@ -237,6 +274,27 @@ def save_session_data_to_kb(db: Session, session_id: int) -> int:
     ) or "暂无"
     peak_metric_online = max((row.online_count or 0 for row in metrics), default=0)
     metric_comments = sum(row.comment_count or 0 for row in metrics)
+    # 不把 m3u8、后台地址、头像和 UID 等敏感/易过期字段放进问答知识，
+    # 其余真实场次字段完整保留，方便后续问到冷门经营指标时也能回答。
+    excluded_session_fields = {"dashboard_url", "stream_url", "anchor_avatar_url", "douyin_uid"}
+    complete_session_fields = {
+        column.name: getattr(session, column.name)
+        for column in session.__table__.columns
+        if column.name not in excluded_session_fields
+    }
+    metric_lines = [
+        json.dumps(
+            {
+                column.name: getattr(row, column.name)
+                for column in row.__table__.columns
+                if column.name not in {"created_at", "updated_at"}
+            },
+            ensure_ascii=False,
+            default=str,
+            sort_keys=True,
+        )
+        for row in metrics
+    ]
     content = "\n".join((
         f"场次ID：{session.id}",
         f"主播：{session.anchor_name or session.anchor_nickname or '未知'}；抖音号：{session.douyin_id or '未获取'}",
@@ -248,6 +306,8 @@ def save_session_data_to_kb(db: Session, session_id: int) -> int:
         f"比率数据：进入率{float(session.exposure_enter_rate or 0):.2%}，关注率{float(session.follow_rate or 0):.2%}，评论率{float(session.comment_rate or 0):.2%}，互动率{float(session.interaction_rate or 0):.2%}，线索转化率{float(session.scene_lead_conversion_rate or 0):.2%}",
         f"分钟趋势：共{len(metrics)}个采样点；分钟在线峰值{peak_metric_online}人；分钟评论合计{metric_comments}条",
         f"观众画像：{profile_text}",
+        "完整场次字段：" + json.dumps(complete_session_fields, ensure_ascii=False, default=str, sort_keys=True),
+        "逐分钟指标：\n" + ("\n".join(metric_lines) if metric_lines else "暂无"),
     ))
     anchor = session.anchor_name or session.anchor_nickname or "未知主播"
     return _upsert_kb_item(db, session_id, "live_data", "直播数据", f"直播数据 - {anchor} - 场次{session_id}", content)
@@ -265,7 +325,10 @@ def save_comments_to_kb(db: Session, session_id: int) -> int:
     for row in comments:
         timestamp = row.comment_time.strftime("%Y-%m-%d %H:%M:%S") if row.comment_time else "时间未知"
         intent = " [高意向]" if row.is_high_intent else ""
-        lines.append(f"{timestamp} {row.user_nickname or '匿名用户'}{intent}：{row.comment_content or ''}")
+        public_id = f"（抖音号：{row.user_douyin_id}）" if row.user_douyin_id else ""
+        lines.append(
+            f"{timestamp} {row.user_nickname or '匿名用户'}{public_id}{intent}：{row.comment_content or ''}"
+        )
     anchor = session.anchor_name or session.anchor_nickname or "未知主播"
     header = f"场次ID：{session_id}\n主播：{anchor}\n标题：{session.session_title or '未命名直播'}\n评论总数：{len(comments)}\n"
     return _upsert_kb_item(db, session_id, "comments", "互动评论", f"直播评论 - {anchor} - 场次{session_id}", header + "\n".join(lines))
@@ -339,7 +402,7 @@ def save_analysis_to_kb(db: Session, session_id: int) -> int:
         if not content:
             continue
         title = r.report_title or f"分析 - 场次{session_id}"
-        normalized_content = str(content)[:5000]
+        normalized_content = str(content)
         existing = db.query(KnowledgeBase).filter(
             KnowledgeBase.session_id == session_id,
             KnowledgeBase.source_type == "ai_analysis",

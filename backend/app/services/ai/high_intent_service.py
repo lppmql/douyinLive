@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.comments import Comment
 from app.models.high_intent_users import HighIntentUser
+from app.prompts import get_system_prompt
 from app.services.ai.deepseek_client import chat_json
 from app.services.ai.prompt_service import get_prompt_template
 
@@ -58,11 +59,7 @@ def identify_high_intent(session_id: int, db: Session | None = None) -> list[dic
 
         try:
             result = chat_json(
-                system_prompt=(
-                    "你是零食店开店避坑知识科普直播的意向分析员。"
-                    "只根据真实评论识别选址、预算、品牌、供应链、毛利损耗、证照或资料领取意向，"
-                    "不得猜测联系方式，请按JSON格式输出。"
-                ),
+                system_prompt=get_system_prompt("high_intent"),
                 user_message=prompt_template.content.replace("{comments}", comments_text),
                 temperature=0.3,
                 operation="high_intent_detection",

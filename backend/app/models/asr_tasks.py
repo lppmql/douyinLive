@@ -22,6 +22,7 @@ class AsrTask(Base, TimestampMixin):
     started_at = Column(DateTime, nullable=True, comment="开始时间")
     completed_at = Column(DateTime, nullable=True, comment="完成时间")
     error_message = Column(Text, nullable=True, comment="错误信息")
+    cancel_requested_at = Column(DateTime, nullable=True, comment="用户请求安全停止转写的时间")
     idempotency_key = Column(String(100), nullable=True, comment="幂等键，防止重复转写")
     trace_id = Column(String(64), nullable=True, comment="任务链路追踪ID")
     worker_id = Column(String(100), nullable=True, comment="当前执行Worker")

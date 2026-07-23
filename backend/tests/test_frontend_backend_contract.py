@@ -105,14 +105,22 @@ def test_frontend_request_layer_does_not_bundle_fixed_api_tokens():
 
 
 def test_transcript_websocket_uses_backend_service_and_vite_ws_proxy():
-    view_source = (PROJECT_ROOT / "frontend" / "src" / "views" / "transcripts" / "index.vue").read_text(
-        encoding="utf-8"
+    realtime_source = (
+        PROJECT_ROOT
+        / "frontend"
+        / "src"
+        / "views"
+        / "transcripts"
+        / "composables"
+        / "useTranscriptRealtime.ts"
+    ).read_text(
+        encoding="utf-8",
     )
     proxy_source = (PROJECT_ROOT / "frontend" / "build" / "config" / "proxy.ts").read_text(encoding="utf-8")
 
-    assert "getServiceBaseURL" in view_source
-    assert "otherBaseURL.backend" in view_source
-    assert "VITE_SERVICE_BASE_URL" not in view_source
+    assert "getServiceBaseURL" in realtime_source
+    assert "otherBaseURL.backend" in realtime_source
+    assert "VITE_SERVICE_BASE_URL" not in realtime_source
     assert "ws: true" in proxy_source
 
 

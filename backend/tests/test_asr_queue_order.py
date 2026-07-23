@@ -70,9 +70,28 @@ def test_auto_queue_and_worker_default_to_latest_real_session(monkeypatch):
         sessions.append(session)
     db.commit()
 
+    live_session = LiveSession(
+        room_id=room.id,
+        anchor_name="正在开播主播",
+        live_start_time=datetime(2026, 7, 14, 18, 0),
+        live_status="live",
+        detail_collection_status="pending",
+    )
+    db.add(live_session)
+    db.flush()
+    db.add(
+        StreamSource(
+            session_id=live_session.id,
+            m3u8_url=f"https://example.invalid/{live_session.id}.m3u8",
+            status="active",
+            fetched_at=datetime(2026, 7, 14, 18, 0),
+        )
+    )
+    db.commit()
+
     result = queue_auto_transcriptions(db, limit=2)
 
-    assert result["session_ids"] == [sessions[2].id, sessions[1].id]
+    assert result["session_ids"] == [live_session.id, sessions[2].id]
 
     oldest_task, created = queue_session_transcription(db, sessions[0])
     assert created is True
@@ -80,8 +99,8 @@ def test_auto_queue_and_worker_default_to_latest_real_session(monkeypatch):
     db.commit()
 
     queued_ids = list_queued_task_ids_latest_first(db, 3)
+    live_task = db.query(AsrTask).filter(AsrTask.session_id == live_session.id).one()
     latest_task = db.query(AsrTask).filter(AsrTask.session_id == sessions[2].id).one()
-    middle_task = db.query(AsrTask).filter(AsrTask.session_id == sessions[1].id).one()
 
-    assert queued_ids == [oldest_task.id, latest_task.id, middle_task.id]
+    assert queued_ids == [live_task.id, oldest_task.id, latest_task.id]
     db.close()

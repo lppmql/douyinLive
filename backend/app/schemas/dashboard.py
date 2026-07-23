@@ -28,6 +28,7 @@ class AnchorSummaryItem(BaseModel):
     douyin_id: str = ""
     anchor_name: str = ""
     anchor_avatar_url: str = ""
+    anchor_avatar_session_id: int | None = None
     session_count: int = 0
     total_viewers: int = 0
     total_comments: int = 0

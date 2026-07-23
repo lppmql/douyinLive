@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
+from app.prompts import get_system_prompt
 from app.services.ai.deepseek_client import chat
 from app.services.ai.prompt_service import get_prompt_template
 from app.services.ai.scoring import score_session_transcript, batch_score_recent
@@ -75,7 +76,7 @@ def test_connection():
     """测试 DeepSeek API 连通性"""
     try:
         reply = chat(
-            system_prompt="你是一个AI助手。只回复'连接成功'这四个字即可。",
+            system_prompt=get_system_prompt("connection_test"),
             user_message="请回复连接成功",
             max_tokens=20,
             operation="connection_test",
@@ -211,12 +212,7 @@ def optimize_session(session_id: int, db: Session = Depends(get_db)):
 
     from app.services.ai.deepseek_client import chat_json
     result = chat_json(
-        system_prompt=(
-            "你是零食店开店避坑知识科普直播的运营复盘专家。"
-            "业务目标是通过真实知识解答和资料钩子，引导有筹备意向的用户主动站内私信。"
-            "不得建议虚假稀缺、抽奖促单、夸大收益或站外导流；每条结论必须引用提供的真实证据。"
-            "请按JSON格式输出。"
-        ),
+        system_prompt=get_system_prompt("optimization"),
         user_message=user_message,
         temperature=0.3,
         operation="session_optimization",

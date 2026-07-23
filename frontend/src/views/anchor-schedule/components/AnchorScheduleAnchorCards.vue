@@ -9,7 +9,8 @@
  * - 点击卡片可筛选下方班次表格
  */
 import dayjs from 'dayjs';
-import { NAvatar, NTag, NTooltip } from 'naive-ui';
+import { NTag, NTooltip } from 'naive-ui';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import {
   getAnchorAvatarUrl,
   formatMissingSummary,
@@ -53,18 +54,13 @@ defineEmits<{
           @click="$emit('toggleAnchor', anchor.source_anchor_name)"
         >
           <!-- 头像 + 主播信息 -->
-          <div class="flex items-center gap-10px">
-            <NAvatar v-if="getAnchorAvatarUrl(anchor)" round :size="40" :src="getAnchorAvatarUrl(anchor)" />
-            <NAvatar v-else round :size="40">
-              {{ anchor.source_anchor_name.slice(0, 1) }}
-            </NAvatar>
-            <div class="min-w-0 text-left">
-              <div class="truncate text-14px font-700">{{ anchor.display_name }}</div>
-              <div class="mt-2px truncate text-11px text-gray-400">
-                {{ anchor.room_name }} · {{ anchor.network_name }}
-              </div>
-            </div>
-          </div>
+          <AnchorIdentity
+            :avatar-url="getAnchorAvatarUrl(anchor)"
+            :name="anchor.display_name"
+            :description="[anchor.room_name, anchor.network_name].filter(Boolean).join(' · ')"
+            :size="40"
+            :show-douyin-id="false"
+          />
           <!-- 完成度数字 + 提醒标签 -->
           <div class="mt-13px flex items-end justify-between">
             <div>

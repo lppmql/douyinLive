@@ -4,7 +4,8 @@
  * 职责：管理对话消息、发送问题、清空对话、复制文本。
  * 滚动逻辑由 ChatPanel 子组件自行管理。
  */
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { useMessage } from 'naive-ui';
 import { unwrapServiceData } from '@/utils/service';
 import { askKnowledge } from '@/service/api/douyin';
@@ -19,12 +20,18 @@ export type ChatMessage = {
 
 export function useKnowledgeChat() {
   const message = useMessage();
+  const route = useRoute();
 
   /* ===== 状态 ===== */
   const question = ref('');
   const chatting = ref(false);
   const messages = ref<ChatMessage[]>([]);
   let messageId = 0;
+  const contextSessionId = computed(() => {
+    const raw = Array.isArray(route.query.sessionId) ? route.query.sessionId[0] : route.query.sessionId;
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : null;
+  });
 
   /** 右侧引用面板：默认显示最后一条有来源的 AI 消息 */
   const activeSources = ref<Api.Douyin.KnowledgeSource[]>([]);
@@ -55,7 +62,10 @@ export function useKnowledgeChat() {
     chatting.value = true;
 
     try {
-      const response = await askKnowledge(content);
+      const knowledgeQuestion = contextSessionId.value
+        ? `请只结合直播场次 ${contextSessionId.value} 的真实资料回答：${content}`
+        : content;
+      const response = await askKnowledge(knowledgeQuestion);
       const answer = unwrapServiceData(response, '知识检索请求失败');
       const aiMsg: ChatMessage = {
         id: ++messageId,
@@ -104,6 +114,7 @@ export function useKnowledgeChat() {
   return {
     // 状态
     question,
+    contextSessionId,
     chatting,
     messages,
     activeSources,

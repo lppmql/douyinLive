@@ -9,6 +9,7 @@ from app.core.database import SessionLocal
 from app.models.transcript_segments import TranscriptSegment
 from app.models.analysis_reports import AnalysisReport
 from app.models.de_tables import DeAnchorTranscriptSummary
+from app.prompts import get_system_prompt
 from app.services.ai.deepseek_client import chat_json
 from app.services.ai.prompt_service import get_prompt_template
 
@@ -60,10 +61,7 @@ def score_session_transcript(session_id: int, db: Session | None = None) -> dict
         user_message = prompt_template.content.replace("{transcript}", full_text[:8000])  # 限制长度
         try:
             result = chat_json(
-                system_prompt=(
-                    "你是零食店开店避坑知识科普直播的复盘专家。"
-                    "只依据真实话术证据评分，并严格返回JSON；不得把本业务当成零食带货。"
-                ),
+                system_prompt=get_system_prompt("speech_score"),
                 user_message=user_message,
                 temperature=0.3,
                 operation="speech_score",

@@ -24,7 +24,6 @@ onErrorCaptured((err, _instance, info) => {
   errorStack.value = err instanceof Error ? (err.stack || '') : '';
 
   // 输出到浏览器控制台，方便开发者排查
-  // eslint-disable-next-line no-console
   console.error(
     `[ErrorBoundary] 捕获到组件崩溃:\n  组件: ${info}\n  错误: ${errorMessage.value}\n  堆栈: ${errorStack.value}`
   );

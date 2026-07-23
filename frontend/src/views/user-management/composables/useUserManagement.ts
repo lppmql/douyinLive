@@ -182,6 +182,15 @@ export function useUserManagement() {
 
   const saving = ref(false);
 
+  /** 接收编辑抽屉的字段更新，所有表单状态只由这一层维护。 */
+  function updateFormField(field: keyof typeof formData, value: string | string[]) {
+    if (field === 'roles') {
+      formData.roles = Array.isArray(value) ? value : [value];
+      return;
+    }
+    formData[field] = Array.isArray(value) ? (value[0] || '') : value;
+  }
+
   function openCreate() {
     operateType.value = 'add';
     editingId.value = null;
@@ -287,6 +296,7 @@ export function useUserManagement() {
     openEdit,
     handleSave,
     handleDelete,
+    updateFormField,
     setColumns
   };
 }

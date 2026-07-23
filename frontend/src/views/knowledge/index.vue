@@ -7,6 +7,7 @@
 import ChatPanel from './modules/ChatPanel.vue';
 import SourcePanel from './modules/SourcePanel.vue';
 import { useKnowledgeChat } from './composables/useKnowledgeChat';
+import SessionWorkflowNav from '@/components/business/session-workflow-nav.vue';
 
 defineOptions({ name: 'Knowledge' });
 
@@ -14,30 +15,42 @@ const chat = useKnowledgeChat();
 </script>
 
 <template>
-  <div class="knowledge-chat-page">
-    <!-- 左侧：聊天窗口 -->
-    <ChatPanel
-      :messages="chat.messages.value"
-      :question="chat.question.value"
-      :chatting="chat.chatting.value"
-      :active-source-msg-id="chat.activeSourceMsgId.value"
-      @update:question="(v: string) => chat.question.value = v"
-      @send="chat.sendQuestion"
-      @keydown="chat.handleQuestionKeydown"
-      @select-sources="chat.selectSources"
-      @copy-text="chat.copyText"
-      @clear-conversation="chat.clearConversation"
-    />
+  <div class="knowledge-page">
+    <SessionWorkflowNav :session-id="chat.contextSessionId.value" active="knowledge" />
+    <div class="knowledge-chat-page">
+      <!-- 左侧：聊天窗口 -->
+      <ChatPanel
+        :messages="chat.messages.value"
+        :question="chat.question.value"
+        :chatting="chat.chatting.value"
+        :active-source-msg-id="chat.activeSourceMsgId.value"
+        @update:question="(v: string) => chat.question.value = v"
+        @send="chat.sendQuestion"
+        @keydown="chat.handleQuestionKeydown"
+        @select-sources="chat.selectSources"
+        @copy-text="chat.copyText"
+        @clear-conversation="chat.clearConversation"
+      />
 
-    <!-- 右侧：引用来源 -->
-    <SourcePanel :sources="chat.activeSources.value" />
+      <!-- 右侧：引用来源 -->
+      <SourcePanel :sources="chat.activeSources.value" />
+    </div>
   </div>
 </template>
 
 <style>
+.knowledge-page {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .knowledge-chat-page {
   position: relative;
-  height: 100%;
+  min-height: 0;
+  flex: 1;
   overflow: hidden;
   display: flex;
   background: #fff;

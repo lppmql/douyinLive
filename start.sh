@@ -7,23 +7,76 @@ set -e
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
+START_LOCK_DIR="$ROOT_DIR/.runtime/start.lock"
+
+# 同一项目只能运行一个一键启动编排器。重复启动会先杀掉旧后端，可能在
+# 采集过程中关闭 BrowserContext；使用原子目录锁可以在碰业务进程前直接拦住。
+acquire_start_lock() {
+  mkdir -p "$ROOT_DIR/.runtime"
+  if mkdir "$START_LOCK_DIR" 2>/dev/null; then
+    printf '%s\n' "$$" > "$START_LOCK_DIR/pid"
+    return 0
+  fi
+
+  local EXISTING_PID=""
+  EXISTING_PID=$(cat "$START_LOCK_DIR/pid" 2>/dev/null || true)
+  if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
+    echo "已有一键启动任务正在运行（PID: $EXISTING_PID），本次不重复启动。"
+    echo "如需重启，请先在原启动终端按 Ctrl+C，等待采集任务安全停止后再执行。"
+    exit 1
+  fi
+
+  # 上次异常退出可能留下空锁；只清理本项目固定目录中的单个 PID 文件。
+  find "$START_LOCK_DIR" -maxdepth 1 -type f -name pid -delete 2>/dev/null || true
+  rmdir "$START_LOCK_DIR" 2>/dev/null || true
+  if ! mkdir "$START_LOCK_DIR" 2>/dev/null; then
+    echo "无法取得启动锁，请检查 $START_LOCK_DIR"
+    exit 1
+  fi
+  printf '%s\n' "$$" > "$START_LOCK_DIR/pid"
+}
+
+release_start_lock() {
+  find "$START_LOCK_DIR" -maxdepth 1 -type f -name pid -delete 2>/dev/null || true
+  rmdir "$START_LOCK_DIR" 2>/dev/null || true
+}
+
+# 后端、前端各自使用独立进程组。这样终端 Ctrl+C 只通知本脚本，
+# 再由 cleanup 按“调度器 → 浏览器 → 前端”的顺序发送 SIGTERM。
+start_in_own_session() {
+  "$BACKEND_DIR/.venv/bin/python" -c \
+    'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+    "$@" &
+  DETACHED_PID=$!
+}
+
+acquire_start_lock
+trap release_start_lock EXIT
 
 echo "========================================"
 echo "  抖音留资直播分析系统 — 启动"
 echo "========================================"
 
-# 清理旧进程：杀掉正在占用目标端口的进程
+# 清理旧进程：先给后端和前端足够时间安全退出，再在确实卡死时强制结束。
 clean_port() {
   local PORT=$1
   local PIDS
+  local WAITED=0
   PIDS=$(lsof -ti ":$PORT" 2>/dev/null || true)
   if [ -n "$PIDS" ]; then
     echo "  ⚠️  端口 $PORT 被占用 (PID: $(echo "$PIDS" | tr '\n' ' '))，正在释放..."
     kill $PIDS 2>/dev/null || true
-    sleep 1
-    # 如果没杀死，强制杀
+    while [ "$WAITED" -lt 60 ]; do
+      PIDS=$(lsof -ti ":$PORT" 2>/dev/null || true)
+      [ -z "$PIDS" ] && break
+      sleep 1
+      WAITED=$((WAITED + 1))
+    done
     PIDS=$(lsof -ti ":$PORT" 2>/dev/null || true)
-    [ -n "$PIDS" ] && kill -9 $PIDS 2>/dev/null || true
+    if [ -n "$PIDS" ]; then
+      echo "  ⚠️  等待 60 秒后进程仍未退出，执行最终强制清理"
+      kill -9 $PIDS 2>/dev/null || true
+    fi
     echo "  ✅ 端口 $PORT 已释放"
   fi
 }
@@ -102,7 +155,7 @@ docker compose --profile dataease up -d mysql redis dataease
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
 echo "  ⏳ DataEase 正在启动，8GB 电脑首次初始化可能需要 3-10 分钟"
-echo "  ℹ️  FunASR 将由后端自动启动：单任务并发、队列上限 5"
+echo "  ℹ️  FunASR 由后端按页面开关管理，并根据电脑资源实时调节并发"
 if ! wait_for_dataease; then
   exit 1
 fi
@@ -142,13 +195,13 @@ echo "  ✅ 数据库迁移已更新到最新版本"
 python -m scripts.configure_dataease_reader
 echo "  ✅ DataEase 专用只读账号已配置"
 if [ "${BACKEND_RELOAD:-false}" = "true" ]; then
-  uvicorn app.main:app --reload --port 8000 &
+  start_in_own_session "$BACKEND_DIR/.venv/bin/uvicorn" app.main:app --reload --port 8000
   echo "  ℹ️  已开启后端开发热更新"
 else
-  uvicorn app.main:app --port 8000 &
+  start_in_own_session "$BACKEND_DIR/.venv/bin/uvicorn" app.main:app --port 8000
   echo "  ℹ️  后端使用稳定单进程模式；开发时可设置 BACKEND_RELOAD=true"
 fi
-BACKEND_PID=$!
+BACKEND_PID=$DETACHED_PID
 if ! wait_for_backend; then
   exit 1
 fi
@@ -168,15 +221,16 @@ echo "     设置 MONITOR_ENABLED=true 启用自动采集"
 echo ""
 echo "[5/6] ASR 话术服务由后端统一管理..."
 ASR_PID=""
-echo "  ✅ 默认开启，限制 2 核 / 1.8GB / 单任务并发，可在采集页面关闭"
+echo "  ✅ 是否运行以采集页 ASR 开关为准；并发会随 CPU 和内存压力自动升降"
 
 # 6. 启动前端（先清理 9527 端口）
 echo ""
 echo "[6/6] 启动前端..."
 clean_port 9527
 cd "$FRONTEND_DIR"
-pnpm dev &
-FRONTEND_PID=$!
+# 直接记录 Vite 进程 PID，避免只停止 pnpm 外壳后留下占用 9527 的子进程。
+start_in_own_session "$FRONTEND_DIR/node_modules/.bin/vite" --mode test
+FRONTEND_PID=$DETACHED_PID
 echo "  ✅ 前端: http://localhost:9527"
 
 echo ""

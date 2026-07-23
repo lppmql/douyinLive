@@ -8,7 +8,7 @@
 
 import { h } from 'vue';
 import type { SelectOption } from 'naive-ui';
-import AnchorAvatar from '@/components/business/anchor-avatar.vue';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import {
   readinessTagType,
   formatFullDateTime,
@@ -19,8 +19,12 @@ import {
 defineOptions({ name: 'AnalysisSessionControl' });
 
 export interface SessionSelectOption extends SelectOption {
+  sessionId: number;
   anchorName: string;
+  anchorNickname: string | null;
+  douyinId: string | null;
   avatarUrl: string | null;
+  metaLabel: string;
 }
 
 defineProps<{
@@ -35,8 +39,6 @@ defineProps<{
   analysisReady: boolean;
   scoreResult: Api.Douyin.AiScoreResult | null;
   workbench: Api.Douyin.ReviewWorkbench | null;
-  /** 当前选中场次的主播头像 URL（已由 composable 调用 API 构造） */
-  selectedSessionAvatarUrl: string | undefined;
 }>();
 
 defineEmits<{
@@ -47,9 +49,18 @@ defineEmits<{
 /** 渲染场次下拉选项（带主播头像），下拉选项中的 avatarUrl 是 API URL */
 function renderSessionLabel(option: SelectOption) {
   const sessionOption = option as SessionSelectOption;
-  return h('div', { class: 'flex min-w-0 items-center gap-8px' }, [
-    h(AnchorAvatar, { size: 26, src: sessionOption.avatarUrl || undefined, name: sessionOption.anchorName }),
-    h('span', { class: 'min-w-0 flex-1 truncate' }, String(sessionOption.label || ''))
+  return h('div', { class: 'flex min-w-0 items-center justify-between gap-12px py-2px' }, [
+    h(AnchorIdentity, {
+      class: 'min-w-0 max-w-180px flex-1',
+      sessionId: sessionOption.sessionId,
+      avatarUrl: sessionOption.avatarUrl,
+      name: sessionOption.anchorName,
+      nickname: sessionOption.anchorNickname,
+      douyinId: sessionOption.douyinId,
+      size: 28,
+      dense: true
+    }),
+    h('span', { class: 'shrink-0 text-11px text-gray-400' }, sessionOption.metaLabel)
   ]);
 }
 </script>
@@ -78,15 +89,18 @@ function renderSessionLabel(option: SelectOption) {
           @update:value="(val: number | null) => $emit('update:selectedSessionId', val)"
         />
         <div v-if="selectedSession" class="mt-14px flex min-w-0 items-center gap-12px">
-          <AnchorAvatar
+          <AnchorIdentity
+            class="max-w-220px"
+            :session-id="selectedSession.id"
+            :avatar-url="selectedSession.anchor_avatar_url"
+            :name="selectedSession.anchor_name"
+            :nickname="selectedSession.anchor_nickname"
+            :douyin-id="selectedSession.douyin_id"
             :size="42"
-            :src="selectedSessionAvatarUrl"
-            :name="selectedSession.anchor_name || '未知主播'"
           />
           <div class="min-w-0 flex-1">
             <div class="truncate text-14px font-700">{{ selectedSession.session_title || '未命名直播场次' }}</div>
             <div class="mt-4px flex flex-wrap items-center gap-x-12px gap-y-4px text-12px text-gray-500">
-              <span>{{ selectedSession.anchor_name }}</span>
               <span>{{ formatFullDateTime(selectedSession.live_start_time) }}</span>
               <span>{{ formatDuration(selectedSession.live_duration_seconds) }}</span>
             </div>

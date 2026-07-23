@@ -21,6 +21,26 @@ def test_scheduler_stop_keeps_shared_browser_alive(monkeypatch):
     assert scheduler_manager.running is False
 
 
+def test_pause_scheduling_prevents_new_jobs_without_cancelling_current_one():
+    """停机第一步只暂停新调度，不能直接关闭共享浏览器。"""
+
+    class FakeScheduler:
+        running = True
+        paused = False
+
+        def pause(self):
+            self.paused = True
+
+    original = scheduler_manager._scheduler
+    fake_scheduler = FakeScheduler()
+    try:
+        scheduler_manager._scheduler = fake_scheduler
+        scheduler_manager.pause_scheduling()
+        assert fake_scheduler.paused is True
+    finally:
+        scheduler_manager._scheduler = original
+
+
 def test_collection_completion_wakes_monitor_immediately():
     class FakeJob:
         next_run_time = None
@@ -79,7 +99,7 @@ def test_monitor_can_start_while_full_collection_is_running():
         response = asyncio.run(start_monitor(FakeDb()))
 
     assert response.success is True
-    assert "全量采集接管" in response.message
+    assert "全部场次数据补齐刷新" in response.message
     start.assert_awaited_once()
     login_check.assert_not_awaited()
 
@@ -151,6 +171,9 @@ def test_account_health_check_queues_behind_monitor_instead_of_requiring_stop():
     class FakeDb:
         def query(self, *_args):
             return FakeQuery()
+
+        def get(self, _model, _account_id):
+            return account
 
         def commit(self):
             return None

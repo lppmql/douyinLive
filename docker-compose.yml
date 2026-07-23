@@ -37,7 +37,8 @@ services:
     image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.13
     container_name: douyin_live_funasr
     restart: unless-stopped
-    # 8GB Mac 上限制识别容器资源，避免话术生成期间占满整机。
+    # 项目转写的是已结束场次回放，只加载离线模型；不再额外加载在线模型，
+    # 这样 8GB Mac 也能把真实 ASR 与数据采集同时保持开启。
     cpus: 2.0
     mem_limit: 1800m
     ports:
@@ -47,7 +48,7 @@ services:
     working_dir: /workspace/FunASR/runtime
     entrypoint: ["/bin/bash", "-lc"]
     command:
-      - "bash run_server_2pass.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --lm-dir '' --hotword /workspace/models/hotwords.txt; while pgrep -f '/funasr-wss-server-2pass' >/dev/null; do sleep 5; done; exit 1"
+      - "bash run_server.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --lm-dir '' --hotword /workspace/models/hotwords.txt; while pgrep -f '/funasr-wss-server' >/dev/null; do sleep 5; done; exit 1"
     profiles:
       - funasr
 

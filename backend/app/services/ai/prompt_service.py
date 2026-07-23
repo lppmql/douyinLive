@@ -5,6 +5,7 @@ from typing import List
 from sqlalchemy.orm import Session
 
 from app.models.prompt_templates import PromptTemplate
+from app.prompts import get_default_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,14 @@ def get_prompt_template(db: Session, type: str, version: int | None = None) -> P
         q = q.order_by(PromptTemplate.version.desc())
     template = q.first()
     if not template:
+        definition = get_default_prompt(type)
+        if definition and (version is None or version == definition.version):
+            logger.warning(
+                "数据库缺少提示词，使用代码默认版本: type=%s, version=%s",
+                type,
+                definition.version,
+            )
+            return PromptTemplate(**definition.to_record())
         logger.warning("未找到提示词模板: type=%s, version=%s", type, version)
     return template
 

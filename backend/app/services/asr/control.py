@@ -1,16 +1,32 @@
 """本地 ASR 服务启停控制，供管理页面按需释放模型资源。"""
+import gzip
 import os
 import shlex
 import shutil
 import signal
+import socket
 import subprocess
+import time
 from pathlib import Path
 
 from app.core.config import PROJECT_ROOT
+from app.core.config import settings
 
 
 BACKEND_DIR = PROJECT_ROOT / "backend"
 ASR_LOG_PATH = PROJECT_ROOT / "data" / "logs" / "asr_worker.log"
+ASR_LOG_ARCHIVE_PATH = PROJECT_ROOT / "data" / "logs" / "asr_worker.legacy.log.gz"
+
+
+def _archive_oversized_log() -> None:
+    """首次启用轮转前压缩旧大日志，既保留排障记录，也立即释放磁盘。"""
+    if not ASR_LOG_PATH.exists() or ASR_LOG_PATH.stat().st_size <= 20 * 1024 * 1024:
+        return
+    temporary_path = ASR_LOG_ARCHIVE_PATH.with_suffix(".gz.tmp")
+    with ASR_LOG_PATH.open("rb") as source, gzip.open(temporary_path, "wb", compresslevel=6) as target:
+        shutil.copyfileobj(source, target, length=1024 * 1024)
+    temporary_path.replace(ASR_LOG_ARCHIVE_PATH)
+    ASR_LOG_PATH.unlink(missing_ok=True)
 
 
 def _docker_bin() -> str:
@@ -51,13 +67,12 @@ def _worker_pids() -> list[int]:
 
 
 def _engine_running() -> bool:
-    result = subprocess.run(
-        [_docker_bin(), "inspect", "-f", "{{.State.Running}}", "douyin_live_funasr"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.returncode == 0 and result.stdout.strip() == "true"
+    """用实际服务端口判断模型是否可访问，避免页面轮询每次启动 Docker CLI。"""
+    try:
+        with socket.create_connection((settings.FUNASR_HOST, settings.FUNASR_PORT), timeout=0.3):
+            return True
+    except OSError:
+        return False
 
 
 def get_asr_runtime_status() -> dict:
@@ -80,18 +95,21 @@ def start_asr_runtime() -> dict:
     )
     if not _worker_pids():
         ASR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _archive_oversized_log()
         worker_command = [str(BACKEND_DIR / ".venv" / "bin" / "python"), "-m", "workers.asr_worker"]
         nice = shutil.which("nice")
         if nice:
             worker_command = [nice, "-n", "10", *worker_command]
-        with ASR_LOG_PATH.open("ab") as log_file:
-            subprocess.Popen(
-                worker_command,
-                cwd=BACKEND_DIR,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
+        worker_env = os.environ.copy()
+        worker_env["ASR_WORKER_LOG_PATH"] = str(ASR_LOG_PATH)
+        subprocess.Popen(
+            worker_command,
+            cwd=BACKEND_DIR,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            env=worker_env,
+            start_new_session=True,
+        )
     return get_asr_runtime_status()
 
 
@@ -101,5 +119,8 @@ def stop_asr_runtime() -> dict:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
+    deadline = time.monotonic() + 8
+    while _worker_pids() and time.monotonic() < deadline:
+        time.sleep(0.2)
     subprocess.run([_docker_bin(), "stop", "douyin_live_funasr"], check=False, capture_output=True)
     return get_asr_runtime_status()

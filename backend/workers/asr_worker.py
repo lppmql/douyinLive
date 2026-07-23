@@ -9,7 +9,7 @@ ASR Worker 进程 — 独立运行的话术转写服务
 
 环境变量:
     ASR_WORKER_MODE=true
-    MAX_REALTIME_ASR_TASKS=1
+    ASR_DYNAMIC_MAX_TASKS=4
 """
 import asyncio
 import hashlib
@@ -22,6 +22,7 @@ from sqlalchemy.exc import DataError
 from app.core.config import settings
 from app.core.logger import logger
 from app.core.database import SessionLocal
+from app.core.status import TaskStatus
 from app.models.asr_tasks import AsrTask
 from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.transcript_segments import TranscriptSegment
@@ -34,12 +35,15 @@ from app.services.asr.funasr_client import FunasrClient
 from app.services.asr.queue import list_queued_task_ids_latest_first, queue_auto_transcriptions
 from app.services.asr.websocket_manager import ws_manager
 from app.services.ai.post_collection import process_session_post_collection
+from app.services.resources.asr_policy import AsrResourcePlan, build_asr_resource_plan
+from app.services.resources.system_usage import get_system_usage
 from app.services.tasks.runtime import (
     current_worker_id,
     ensure_task_identity,
     publish_task_event,
     touch_task,
 )
+from app.services.tasks.exceptions import TaskCancellationRequested
 
 
 def build_chunk_ranges(duration_seconds: int, chunk_seconds: int) -> list[tuple[float, float | None]]:
@@ -63,9 +67,12 @@ class AsrWorker:
     """ASR 转写 Worker"""
 
     def __init__(self):
-        self._semaphore = asyncio.Semaphore(settings.MAX_REALTIME_ASR_TASKS or 1)
+        self._semaphore = asyncio.Semaphore(max(1, settings.ASR_DYNAMIC_MAX_TASKS))
         self._active_tasks: set[asyncio.Task] = set()
         self._active_task_ids: set[int] = set()
+        self._active_chunk_task_ids: set[int] = set()
+        self._resource_slot_lock = asyncio.Lock()
+        self._last_resource_message = ""
         self._active_postprocess_tasks: set[asyncio.Task] = set()
         self._active_postprocess_ids: set[int] = set()
         self._running = False
@@ -75,13 +82,13 @@ class AsrWorker:
     async def run(self):
         """主循环"""
         self._running = True
-        logger.info(f"ASR Worker 启动 (并发上限: {settings.MAX_REALTIME_ASR_TASKS})")
+        logger.info("ASR Worker 启动（资源自适应并发，安全上限: %s）", settings.ASR_DYNAMIC_MAX_TASKS)
         self._recover_stale_tasks(recover_all=True)
 
         while self._running:
             try:
                 await self._poll_tasks()
-                await self._poll_postprocess_tasks()
+                # AI 复盘由详情页手动生成，知识库和 DataEase 由后台自动同步。
                 await asyncio.sleep(self._poll_interval)
             except asyncio.CancelledError:
                 break
@@ -147,16 +154,25 @@ class AsrWorker:
         """轮询 queued 任务"""
         # Worker 未重启但协程被中断时，也要自动回收数据库中的旧执行状态。
         self._recover_stale_tasks()
-        max_tasks = settings.MAX_REALTIME_ASR_TASKS or 1
-        available_slots = max(0, max_tasks - len(self._active_tasks))
+        plan = await asyncio.to_thread(self._current_resource_plan)
+        if plan.message != self._last_resource_message:
+            logger.info(plan.message)
+            self._last_resource_message = plan.message
+        available_slots = max(0, plan.target_concurrency - len(self._active_tasks))
         if available_slots == 0:
             return
 
         db = SessionLocal()
         try:
+            # 开关保持开启时持续发现最新可转写场次，不再依赖一次采集任务顺带排队。
+            queue_auto_transcriptions(
+                db,
+                limit=plan.queue_capacity,
+                queue_capacity=plan.queue_capacity,
+            )
             queued_ids = list_queued_task_ids_latest_first(
                 db,
-                min(settings.ASR_MAX_QUEUED, available_slots),
+                min(plan.queue_capacity, available_slots),
             )
 
             for task_id in queued_ids:
@@ -164,6 +180,7 @@ class AsrWorker:
                 claimed = db.query(AsrTask).filter(
                     AsrTask.id == task_id,
                     AsrTask.status == "queued",
+                    AsrTask.cancel_requested_at.is_(None),
                 ).update(
                     {
                         AsrTask.status: "processing",
@@ -334,10 +351,23 @@ class AsrWorker:
                 chunks = self._prepare_chunks(db, task, session, m3u8_url)
 
                 for chunk in chunks:
+                    self._ensure_task_running(db, task)
                     if chunk.status == "completed":
                         continue
                     while chunk.status != "completed" and chunk.retry_count < chunk.max_retries:
-                        await self._process_chunk(db, task, chunk, m3u8_url, headers)
+                        self._ensure_task_running(db, task)
+                        await self._wait_for_resource_slot(db, task)
+                        try:
+                            await self._process_chunk(
+                                db,
+                                task,
+                                chunk,
+                                m3u8_url,
+                                headers,
+                                is_live=session.live_status == "live",
+                            )
+                        finally:
+                            await self._release_resource_slot(task.id)
                         db.refresh(chunk)
                     if chunk.status != "completed":
                         raise RuntimeError(
@@ -364,6 +394,17 @@ class AsrWorker:
                 publish_task_event("asr", task, "completed", {"segment_count": segment_count, "chunk_count": len(chunks)})
                 logger.info("任务 %s 完成: %s 个分片，%s 个话术片段", task_id, len(chunks), segment_count)
 
+            except TaskCancellationRequested as exc:
+                db.rollback()
+                task = db.get(AsrTask, task_id)
+                if task:
+                    task.status = TaskStatus.CANCELLED
+                    task.error_message = str(exc)[:500]
+                    task.completed_at = datetime.utcnow()
+                    touch_task(task, self._worker_id)
+                    db.commit()
+                    publish_task_event("asr", task, "cancelled", {"message": task.error_message})
+                logger.info("任务 %s 已按用户要求安全停止", task_id)
             except Exception as exc:
                 logger.error("任务 %s 失败: %s", task_id, exc)
                 # flush/commit 失败后 Session 会进入回滚状态，必须先恢复再记录任务结果。
@@ -382,11 +423,58 @@ class AsrWorker:
                     logger.exception("任务 %s 失败状态保存异常: %s", task_id, persist_exc)
             finally:
                 try:
-                    queue_auto_transcriptions(db, limit=1)
+                    plan = await asyncio.to_thread(self._current_resource_plan)
+                    queue_auto_transcriptions(
+                        db,
+                        limit=max(0, plan.queue_capacity),
+                        queue_capacity=plan.queue_capacity,
+                    )
                 except Exception as queue_exc:
                     db.rollback()
                     logger.warning("任务 %s 完成后补充 ASR 队列失败: %s", task_id, queue_exc)
                 db.close()
+
+    @staticmethod
+    def _current_resource_plan() -> AsrResourcePlan:
+        """读取系统总资源，而不是只看 ASR 自己的进程。"""
+        return build_asr_resource_plan(get_system_usage())
+
+    async def _wait_for_resource_slot(self, db, task: AsrTask) -> None:
+        """在每个音频分片边界按最新资源计划领取动态执行槽位。"""
+        while self._running:
+            self._ensure_task_running(db, task)
+            plan = await asyncio.to_thread(self._current_resource_plan)
+            acquired = False
+            async with self._resource_slot_lock:
+                if (
+                    task.id in self._active_chunk_task_ids
+                    or len(self._active_chunk_task_ids) < plan.target_concurrency
+                ):
+                    self._active_chunk_task_ids.add(task.id)
+                    acquired = True
+            if acquired:
+                return
+
+            # 暂停等待也持续写心跳，避免可靠任务回收器误判 Worker 已死亡。
+            touch_task(task, self._worker_id)
+            db.commit()
+            if plan.message != self._last_resource_message:
+                logger.info(plan.message)
+                self._last_resource_message = plan.message
+            await asyncio.sleep(max(2, settings.RESOURCE_SAMPLE_INTERVAL_SECONDS))
+        raise TaskCancellationRequested("ASR Worker 正在停止，已保存完成分片")
+
+    async def _release_resource_slot(self, task_id: int) -> None:
+        """一个分片结束后释放动态槽位，让下一任务按最新资源重新竞争。"""
+        async with self._resource_slot_lock:
+            self._active_chunk_task_ids.discard(task_id)
+
+    @staticmethod
+    def _ensure_task_running(db, task: AsrTask) -> None:
+        """每个安全检查点都读取停止标记，避免把用户停止误记成失败。"""
+        db.refresh(task)
+        if task.cancel_requested_at or task.status == TaskStatus.CANCELLED:
+            raise TaskCancellationRequested("用户已停止 ASR 转写，已完成分片会保留")
 
     def _prepare_chunks(self, db, task: AsrTask, session: LiveSession, m3u8_url: str) -> list[AsrAudioChunk]:
         """按真实场次时长幂等创建分片，首次切换时清理旧的无分片中间产物。"""
@@ -431,7 +519,7 @@ class AsrWorker:
         publish_task_event("asr", task, "chunks_created", {"chunk_count": len(chunks), "duration_seconds": duration})
         return chunks
 
-    async def _process_chunk(self, db, task, chunk, m3u8_url, headers) -> None:
+    async def _process_chunk(self, db, task, chunk, m3u8_url, headers, *, is_live: bool = False) -> None:
         """执行单个真实音频分片；失败只回滚本分片的话术。"""
         client = FunasrClient()
         duration_seconds = (
@@ -480,10 +568,15 @@ class AsrWorker:
                 settings.ASR_TASK_TIMEOUT_SECONDS,
                 int((duration_seconds or 0) * 1.5) + 120,
             )
-            segment_count = await asyncio.wait_for(
-                self._consume_transcription(db, task, chunk, client, pipe),
-                timeout=timeout,
-            )
+            if is_live and chunk.end_seconds is None:
+                # 正在开播的 m3u8 是持续流，不能沿用离线场次的 10 分钟超时；
+                # 流结束、用户关闭 ASR 或 Worker 停止时再从安全点退出。
+                segment_count = await self._consume_transcription(db, task, chunk, client, pipe)
+            else:
+                segment_count = await asyncio.wait_for(
+                    self._consume_transcription(db, task, chunk, client, pipe),
+                    timeout=timeout,
+                )
             chunk.status = "completed"
             chunk.segment_count = segment_count
             chunk.completed_at = datetime.utcnow()
@@ -496,6 +589,18 @@ class AsrWorker:
                 "chunk_completed",
                 {"chunk_index": chunk.chunk_index, "segment_count": segment_count},
             )
+        except TaskCancellationRequested:
+            # 停止不是失败，当前分片恢复为待处理，后续重试可继续使用已完成分片。
+            db.rollback()
+            chunk = db.get(AsrAudioChunk, chunk.id)
+            task = db.get(AsrTask, task.id)
+            if chunk and task:
+                chunk.status = TaskStatus.PENDING
+                chunk.error_message = "用户停止任务，等待下次断点续传"
+                chunk.completed_at = None
+                touch_task(task, self._worker_id)
+                db.commit()
+            raise
         except Exception as exc:
             # 分片写入若触发数据库异常，先恢复事务再保存可重试状态。
             db.rollback()
@@ -568,6 +673,7 @@ class AsrWorker:
         segment_count = 0
         offset = float(chunk.start_seconds or 0)
         async for result in client.transcribe(task.session_id, pipe.read_frames()):
+            self._ensure_task_running(db, task)
             absolute_result = dict(result)
             absolute_result["segment_start"] = offset + float(result.get("segment_start") or 0)
             absolute_result["segment_end"] = offset + float(result.get("segment_end") or 0)

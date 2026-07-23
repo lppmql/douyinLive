@@ -8,7 +8,7 @@ DataEase 同步主入口
     sync_session(db, 1)   # 单场同步（下播时触发）
 """
 from app.core.logger import logger
-from sqlalchemy import exists, or_, select
+from sqlalchemy import case, exists, func, or_, select
 
 from app.models.analysis_reports import AnalysisReport
 from app.models.comments import Comment
@@ -89,26 +89,57 @@ def source_data_outdated_condition():
     )
 
 
-def pending_complete_session_ids(db, limit: int | None = 100, force: bool = False) -> list[int]:
-    """选择已完整但尚未同步或业务数据比宽表更新的场次。"""
+def _pending_complete_session_query(db, force: bool, include_live: bool):
+    """构造待同步查询，让列表和数量使用完全相同的筛选规则。"""
+    eligible = LiveSession.detail_collection_status == "complete"
+    if include_live:
+        eligible = or_(eligible, LiveSession.live_status == "live")
     query = db.query(LiveSession.id).outerjoin(
         DeLiveSessionAnchorSummary,
         DeLiveSessionAnchorSummary.session_id == LiveSession.id,
-    ).filter(LiveSession.detail_collection_status == "complete")
+    ).filter(eligible)
     if not force:
         query = query.filter(or_(
             DeLiveSessionAnchorSummary.id.is_(None),
             source_data_outdated_condition(),
         ))
-    query = query.order_by(LiveSession.updated_at.desc(), LiveSession.id.desc())
+    return query
+
+
+def pending_complete_session_ids(
+    db,
+    limit: int | None = 100,
+    force: bool = False,
+    include_live: bool = False,
+) -> list[int]:
+    """选择待同步场次；持续服务可把正在直播的最新场次放在最前面。"""
+    query = _pending_complete_session_query(db, force, include_live)
+    query = query.order_by(
+        case((LiveSession.live_status == "live", 0), else_=1),
+        LiveSession.live_start_time.desc(),
+        LiveSession.updated_at.desc(),
+        LiveSession.id.desc(),
+    )
     if limit is not None:
         query = query.limit(limit)
     return [row[0] for row in query.all()]
 
 
+def pending_complete_session_count(
+    db,
+    force: bool = False,
+    include_live: bool = False,
+) -> int:
+    """让数据库直接返回待同步数量，避免状态轮询加载几百个场次编号。"""
+    query = _pending_complete_session_query(db, force, include_live)
+    return int(query.order_by(None).with_entities(func.count(LiveSession.id)).scalar() or 0)
+
+
 def cleanup_stale_dataease_rows(db) -> int:
-    """删除不再属于完整场次的宽表行，避免 DataEase 继续统计历史脏数据。"""
-    valid_ids = select(LiveSession.id).where(LiveSession.detail_collection_status == "complete")
+    """保留完整场次和正在直播场次，清理其余历史脏宽表。"""
+    valid_ids = select(LiveSession.id).where(
+        or_(LiveSession.detail_collection_status == "complete", LiveSession.live_status == "live")
+    )
     removed = 0
     for model in (
         DeAnchorAiAnalysisSummary,

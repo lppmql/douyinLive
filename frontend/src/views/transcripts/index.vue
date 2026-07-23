@@ -11,6 +11,7 @@ import TranscriptSessionControl from './components/TranscriptSessionControl.vue'
 import TranscriptStatCards from './components/TranscriptStatCards.vue';
 import TranscriptContentPanel from './components/TranscriptContentPanel.vue';
 import TranscriptTaskDrawer from './components/TranscriptTaskDrawer.vue';
+import SessionWorkflowNav from '@/components/business/session-workflow-nav.vue';
 
 defineOptions({ name: 'Transcripts' });
 
@@ -36,7 +37,6 @@ const {
   aiLoading,
   livePreview,
   wsConnected,
-  selectedSessionAvatarUrl,
   // 统计卡片
   segments,
   totalCharacters,
@@ -74,6 +74,8 @@ const {
 
 <template>
   <NSpace vertical :size="16" class="business-page">
+    <SessionWorkflowNav :session-id="selectedSessionId" active="transcripts" />
+
     <!-- 加载错误 -->
     <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
       主播话术数据未能完整更新：{{ loadError }}
@@ -100,7 +102,6 @@ const {
       :ai-loading="aiLoading"
       :live-preview="livePreview"
       :ws-connected="wsConnected"
-      :selected-session-avatar-url="selectedSessionAvatarUrl"
       @update:selected-session-id="(val: number) => loadTranscript(val)"
       @start-transcription="startTranscription"
       @run-ai-pipeline="runAiPipeline"

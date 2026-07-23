@@ -1,9 +1,8 @@
-<!-- 采集日志表格 — 从 collector/index.vue 拆分 -->
 <script setup lang="ts">
 import { h } from 'vue';
-import { NButton, NCard, NDataTable, NTag, NRadioGroup, NRadioButton, NSpace } from 'naive-ui';
-import { $t } from '@/locales';
-import { formatLogTime, formatFullTime, getStageLabel, getLogPayload, getLogSummary } from '../utils/collectorHelpers';
+import { NButton, NCard, NDataTable, NRadioButton, NRadioGroup, NSpace, NTag } from 'naive-ui';
+import { getCollectorLogDetailPreview } from '../adapters/collector-log-adapter';
+import { formatFullTime, formatLogTime, getStageLabel } from '../utils/collectorHelpers';
 
 defineOptions({ name: 'CollectorLogTable' });
 
@@ -14,7 +13,6 @@ const props = defineProps<{
   logs: Api.Douyin.CollectorLog[];
   logLevel: string;
   logTaskId: number | null;
-  /** 当前毫秒时间戳，驱动相对时间显示（"刚刚"/"X 分钟前"） */
   now: number;
 }>();
 
@@ -23,74 +21,86 @@ const emit = defineEmits<{
   (e: 'clear'): void;
   (e: 'filter', level: string): void;
   (e: 'clearTaskFilter'): void;
-  /** 点击"查看"按钮打开日志详情弹窗 */
   (e: 'openDetail', log: Api.Douyin.CollectorLog): void;
 }>();
 
-function getLogRowKey(row: Api.Douyin.CollectorLog) {
-  return row.id;
+function levelInfo(level: string) {
+  const states: Record<string, { label: string; type: 'info' | 'warning' | 'error' }> = {
+    info: { label: '信息', type: 'info' },
+    warn: { label: '警告', type: 'warning' },
+    error: { label: '异常', type: 'error' }
+  };
+  return states[level] || states.info;
 }
-
-/* ===== 表格列定义（原来在父组件 index.vue 中，搬到这里管理） ===== */
 
 const logColumns = [
   {
-    title: () => $t('page.collector.logTime'),
+    title: '产生时间',
     key: 'created_at',
-    width: 150,
+    width: 145,
     render(row: Api.Douyin.CollectorLog) {
       return h('span', { title: formatFullTime(row.created_at) }, formatLogTime(row.created_at, props.now));
     }
   },
   {
-    title: '任务',
-    key: 'task_id',
-    width: 90,
+    title: '主播 / 直播场次',
+    key: 'anchor_name',
+    width: 230,
     render(row: Api.Douyin.CollectorLog) {
-      return row.task_id ? `#${row.task_id}` : '-';
+      if (!row.anchor_name && !row.session_id) return '-';
+      return h('div', { class: 'min-w-0' }, [
+        h('div', { class: 'truncate text-12px font-600', title: row.anchor_name || '' }, row.anchor_name || '未知主播'),
+        h(
+          'div',
+          { class: 'mt-3px truncate text-11px text-gray-400', title: row.session_title || '' },
+          row.session_title || (row.session_id ? `场次 #${row.session_id}` : '-')
+        )
+      ]);
     }
   },
   {
-    title: '阶段',
+    title: '任务 / 阶段',
     key: 'stage',
-    width: 100,
+    width: 145,
     render(row: Api.Douyin.CollectorLog) {
-      return getStageLabel(getLogPayload(row).stage);
+      return h('div', { class: 'text-11px' }, [
+        h('div', {}, row.task_id ? `任务 #${row.task_id}` : row.task_type || '系统日志'),
+        h('div', { class: 'mt-3px text-gray-400' }, getStageLabel(row.stage))
+      ]);
     }
   },
   {
-    title: () => $t('page.collector.logLevel'),
+    title: '级别',
     key: 'level',
-    width: 80,
-    render(row: { level: string }) {
-      const typeMap: Record<string, 'success' | 'warning' | 'error' | 'info'> = {
-        info: 'info',
-        warn: 'warning',
-        error: 'error'
-      };
-      return h(NTag, { type: typeMap[row.level] || 'info', size: 'small' }, { default: () => row.level.toUpperCase() });
-    }
-  },
-  { title: () => $t('page.collector.logMessage'), key: 'message', minWidth: 300, ellipsis: { tooltip: true } },
-  {
-    title: '数据摘要',
-    key: 'summary',
-    minWidth: 240,
-    ellipsis: { tooltip: true },
+    width: 78,
     render(row: Api.Douyin.CollectorLog) {
-      return getLogSummary(row);
+      const state = levelInfo(row.level);
+      return h(NTag, { type: state.type, size: 'small', bordered: false }, { default: () => state.label });
     }
   },
   {
-    title: '详情',
+    title: '采集消息',
+    key: 'message',
+    minWidth: 330,
+    ellipsis: { tooltip: true }
+  },
+  {
+    title: '数据详情',
+    key: 'data_details',
+    minWidth: 320,
+    ellipsis: { tooltip: true },
+    render: (row: Api.Douyin.CollectorLog) => getCollectorLogDetailPreview(row)
+  },
+  {
+    title: '操作',
     key: 'detail',
-    width: 70,
+    width: 92,
     fixed: 'right' as const,
     render(row: Api.Douyin.CollectorLog) {
       return h(
         NButton,
-        { text: true, type: 'primary', size: 'tiny', onClick: () => emit('openDetail', row) },
-        { default: () => '查看' }
+        { text: true, type: 'primary', size: 'small', onClick: () => emit('openDetail', row) },
+        { default: () => '查看详情' }
       );
     }
   }
@@ -98,13 +108,13 @@ const logColumns = [
 </script>
 
 <template>
-  <NCard :bordered="false" class="card-wrapper" :title="$t('page.collector.logTitle')">
+  <NCard :bordered="false" class="card-wrapper" title="采集日志">
     <template #header-extra>
-      <NSpace wrap>
-        <NTag v-if="logTaskId" type="primary" closable @close="emit('clearTaskFilter')">
+      <NSpace align="center" wrap>
+        <NTag v-if="logTaskId" type="primary" closable :bordered="false" @close="emit('clearTaskFilter')">
           仅任务 #{{ logTaskId }}
         </NTag>
-        <NRadioGroup :value="logLevel" size="small" @update:value="(v: string) => emit('filter', v)">
+        <NRadioGroup :value="logLevel" size="small" @update:value="value => emit('filter', value)">
           <NRadioButton value="all">全部</NRadioButton>
           <NRadioButton value="info">信息</NRadioButton>
           <NRadioButton value="warn">警告</NRadioButton>
@@ -112,7 +122,7 @@ const logColumns = [
         </NRadioGroup>
         <NButton size="small" :loading="loading || silentRefreshing" @click="emit('refresh')">
           <template #icon><SvgIcon icon="mdi:refresh" /></template>
-          {{ $t('common.refresh') }}
+          刷新
         </NButton>
         <NButton size="small" type="error" secondary :loading="clearLogsLoading" @click="emit('clear')">
           <template #icon><SvgIcon icon="mdi:delete-sweep-outline" /></template>
@@ -126,22 +136,19 @@ const logColumns = [
         :loading="loading"
         :columns="logColumns"
         :data="logs"
-        :row-key="getLogRowKey"
-        :scroll-x="1260"
+        :row-key="row => row.id"
+        :scroll-x="1370"
         flex-height
         :bordered="false"
+        :single-line="false"
         size="small"
+        striped
+        empty-text="暂无符合条件的采集日志"
       />
     </div>
   </NCard>
 </template>
 
-<!--
-  样式说明：NDataTable 使用 flex-height 模式，高度由容器决定。
-  这个 scoped CSS 必须写在子组件自己这里，不能依赖父组件 index.vue 的 scoped 样式，
-  因为 Vue 3 的 scoped CSS 不会穿透到子组件内部元素。
-  （父组件的 data-v-xxx 属性只加到子组件根元素 NCard 上）
--->
 <style scoped>
 .collector-log-table {
   height: 420px;

@@ -5,7 +5,6 @@
  * 职责：组合子组件，不写业务逻辑。
  * 所有状态、计算属性、异步操作都在 useAnchorSchedule 中管理。
  */
-import BusinessPageHeader from '@/components/business/page-header.vue';
 import { useAnchorSchedule } from './composables/useAnchorSchedule';
 import AnchorScheduleStatCards from './components/AnchorScheduleStatCards.vue';
 import AnchorScheduleAnchorCards from './components/AnchorScheduleAnchorCards.vue';
@@ -43,37 +42,35 @@ const {
 
 <template>
   <NSpace vertical :size="16" class="business-page">
-    <!-- 页面头部：标题 + 日期控件 + 规则说明 -->
-    <BusinessPageHeader
-      title="主播排班"
-      description="依据真实排班表核对每天的开播场次、有效时长和开播整点；提醒只使用已采集直播场次，不会用模拟数据补齐。"
-      icon="mdi:calendar-clock-outline"
-      :status="
-        dashboard
-          ? `${dashboard.source_name} · ${dashboard.day_count} 天 · ${dashboard.summary.planned_count} 场计划`
-          : '正在读取排班'
-      "
-      :status-type="dashboard ? 'success' : 'info'"
-    >
-      <template #actions>
-        <NButtonGroup>
-          <NButton secondary @click="setDateOffset(-1)">昨天</NButton>
-          <NButton secondary @click="setDateOffset(0)">今天</NButton>
-          <NButton secondary @click="setRecentDays(7)">近 7 天</NButton>
-        </NButtonGroup>
-        <NDatePicker
-          :value="selectedRange"
-          type="daterange"
-          :clearable="false"
-          class="w-260px"
-          @update:value="handleDateChange"
-        />
-        <NButton type="primary" :loading="loading" @click="loadSchedule()">
-          <template #icon><SvgIcon icon="mdi:refresh" /></template>
-          刷新核对
-        </NButton>
-      </template>
-      <div class="flex flex-wrap items-center gap-x-18px gap-y-6px text-12px text-gray-500">
+    <NCard :bordered="false" size="small" class="card-wrapper">
+      <div class="business-toolbar">
+        <div class="business-toolbar__filters">
+          <NButtonGroup>
+            <NButton secondary @click="setDateOffset(-1)">昨天</NButton>
+            <NButton secondary @click="setDateOffset(0)">今天</NButton>
+            <NButton secondary @click="setRecentDays(7)">近 7 天</NButton>
+          </NButtonGroup>
+          <NDatePicker
+            :value="selectedRange"
+            type="daterange"
+            :clearable="false"
+            class="w-260px"
+            @update:value="handleDateChange"
+          />
+          <NButton type="primary" :loading="loading" @click="loadSchedule()">
+            <template #icon><SvgIcon icon="mdi:refresh" /></template>
+            刷新核对
+          </NButton>
+        </div>
+        <NTag :type="dashboard ? 'success' : 'info'" :bordered="false" round>
+          {{
+            dashboard
+              ? `${dashboard.source_name} · ${dashboard.day_count} 天 · ${dashboard.summary.planned_count} 场计划`
+              : '正在读取排班'
+          }}
+        </NTag>
+      </div>
+      <div class="mt-12px flex flex-wrap items-center gap-x-18px gap-y-6px border-t border-gray-100 pt-10px text-12px text-gray-500 dark:border-white/8">
         <span>标准时长：{{ dashboard?.rule.expected_duration_minutes || 80 }} 分钟/场</span>
         <span>有效门槛：已结束场次至少 {{ dashboard?.rule.minimum_valid_duration_minutes || 45 }} 分钟</span>
         <span>文豪、大全：每天 4 场</span>
@@ -84,7 +81,7 @@ const {
           }}
         </span>
       </div>
-    </BusinessPageHeader>
+    </NCard>
 
     <!-- 加载错误 -->
     <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>

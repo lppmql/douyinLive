@@ -1,7 +1,7 @@
 """ASR 转写任务排队，供接口、采集完成和下播处理共用。"""
 from datetime import datetime
 
-from sqlalchemy import exists, or_
+from sqlalchemy import case, exists, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -29,6 +29,7 @@ def reset_failed_task_for_retry(task: AsrTask, failed_chunks: list[AsrAudioChunk
     task.completed_at = None
     task.worker_id = None
     task.heartbeat_at = None
+    task.cancel_requested_at = None
     task.postprocess_status = TaskStatus.PENDING
     task.postprocess_started_at = None
     task.postprocess_completed_at = None
@@ -66,7 +67,7 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
         .first()
     )
     if existing:
-        if existing.status == "failed":
+        if existing.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
             failed_chunks = db.query(AsrAudioChunk).filter(
                 AsrAudioChunk.task_id == existing.id,
                 AsrAudioChunk.status == "failed",
@@ -90,9 +91,13 @@ def list_queued_task_ids_latest_first(db: Session, limit: int) -> list[int]:
         for row in (
             db.query(AsrTask)
             .join(LiveSession, LiveSession.id == AsrTask.session_id)
-            .filter(AsrTask.status == TaskStatus.QUEUED)
+            .filter(
+                AsrTask.status == TaskStatus.QUEUED,
+                AsrTask.cancel_requested_at.is_(None),
+            )
             .with_entities(AsrTask.id)
             .order_by(
+                case((LiveSession.live_status == "live", 0), else_=1),
                 AsrTask.priority.asc(),
                 LiveSession.live_start_time.desc(),
                 LiveSession.id.desc(),
@@ -108,9 +113,14 @@ def queue_auto_transcriptions(
     db: Session,
     limit: int | None = None,
     session_ids: list[int] | None = None,
+    queue_capacity: int | None = None,
 ) -> dict:
-    """在全局容量内为可安全离线处理的真实场次自动排队。"""
-    capacity = max(1, settings.ASR_MAX_QUEUED)
+    """按本轮资源计划为可安全离线处理的真实场次自动排队。"""
+    capacity = (
+        max(0, int(queue_capacity))
+        if queue_capacity is not None
+        else max(1, settings.ASR_MAX_QUEUED)
+    )
     active_count = db.query(AsrTask).filter(AsrTask.status.in_([TaskStatus.QUEUED, "processing"])).count()
     available = max(0, capacity - active_count)
     if limit is not None:
@@ -125,34 +135,70 @@ def queue_auto_transcriptions(
             StreamSource.status == "active",
         ),
     )
+
+    # 模块关闭产生的 cancelled 任务不是人工放弃；重新开启后优先从已完成分片继续。
+    resumable_query = (
+        db.query(LiveSession)
+        .join(AsrTask, AsrTask.session_id == LiveSession.id)
+        .filter(
+            AsrTask.status == TaskStatus.CANCELLED,
+            AsrTask.error_message.like("ASR 开关已关闭%"),
+            has_stream,
+        )
+        .order_by(
+            case((LiveSession.live_status == "live", 0), else_=1),
+            LiveSession.live_start_time.desc(),
+            LiveSession.id.desc(),
+        )
+    )
+    if session_ids is not None:
+        resumable_query = resumable_query.filter(LiveSession.id.in_(session_ids))
+    resumed_session_ids = []
+    for session in resumable_query.limit(available).all():
+        try:
+            _task, resumed = queue_session_transcription(db, session)
+        except ValueError:
+            continue
+        if resumed:
+            resumed_session_ids.append(session.id)
+    available = max(0, available - len(resumed_session_ids))
+
     has_any_task = exists().where(AsrTask.session_id == LiveSession.id)
     query = db.query(LiveSession).filter(
-            LiveSession.detail_collection_status == "complete",
-            LiveSession.live_status != "live",
+            or_(
+                LiveSession.live_status == "live",
+                LiveSession.detail_collection_status == "complete",
+            ),
             has_stream,
             ~has_any_task,
         )
     if session_ids is not None:
         query = query.filter(LiveSession.id.in_(session_ids))
-    sessions = (
-        query
-        .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
-        .limit(available)
-        .all()
-    )
+    sessions = []
+    if available:
+        sessions = (
+            query
+            .order_by(
+                case((LiveSession.live_status == "live", 0), else_=1),
+                LiveSession.live_start_time.desc(),
+                LiveSession.id.desc(),
+            )
+            .limit(available)
+            .all()
+        )
 
-    session_ids = []
+    created_session_ids = list(resumed_session_ids)
     for session in sessions:
         try:
             _task, created = queue_session_transcription(db, session)
         except ValueError:
             continue
         if created:
-            session_ids.append(session.id)
+            created_session_ids.append(session.id)
     db.commit()
     return {
-        "created_count": len(session_ids),
-        "active_count": active_count + len(session_ids),
+        "created_count": len(created_session_ids),
+        "active_count": active_count + len(created_session_ids),
         "capacity": capacity,
-        "session_ids": session_ids,
+        "session_ids": created_session_ids,
     }

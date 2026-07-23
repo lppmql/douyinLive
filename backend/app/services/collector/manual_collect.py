@@ -20,17 +20,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.database import SessionLocal
 from app.core.logger import logger
-from app.models.asr_tasks import AsrTask
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_logs import ScraperLog
 
 # 拆分后的领域模块
-from app.services.asr.control import get_asr_runtime_status
-from app.services.asr.queue import queue_auto_transcriptions
 from app.services.collector.browser import browser_manager
 from app.services.collector.comments import _save_comments, _scrape_comments
 from app.services.collector.enterprise import _sync_enterprise_anchor_sessions as _do_enterprise_sync
@@ -48,7 +44,7 @@ from app.services.collector.room import (
 )
 from app.services.collector.session import _get_or_create_session, _repair_session_comment_integrity
 from app.services.collector.utils import _is_context_closed_message
-from app.services.sync import sync_pending_complete_sessions
+from app.services.tasks.exceptions import TaskCancellationRequested
 
 # ==================== 公共常量（本模块专用） ====================
 
@@ -57,6 +53,7 @@ CONTEXT_RECOVERY_ATTEMPTS = 2
 COLLECTOR_ERROR_MAX_LENGTH = 500
 
 ProgressCallback = Callable[[str, int, int, int, str, Optional[dict[str, Any]]], None]
+CancellationCallback = Callable[[], bool]
 
 
 # ==================== 错误处理工具 ====================
@@ -98,15 +95,6 @@ def _record_room_failure(
         )
     )
     db.commit()
-
-
-def _sync_pending_dataease(limit: Optional[int]) -> dict:
-    """使用线程专属数据库会话同步 DataEase；limit=None 表示同步全部待处理场次。"""
-    sync_db = SessionLocal()
-    try:
-        return sync_pending_complete_sessions(sync_db, limit=limit)
-    finally:
-        sync_db.close()
 
 
 # ==================== 向后兼容重导出 ====================
@@ -357,6 +345,7 @@ async def collect_all(
     db: Session,
     task_id: Optional[int] = None,
     progress_callback: Optional[ProgressCallback] = None,
+    cancellation_callback: Optional[CancellationCallback] = None,
 ) -> dict:
     """
     刷新采集所有房间、主播和直播场次的数据
@@ -366,7 +355,12 @@ async def collect_all(
         if progress_callback:
             progress_callback(stage, percent, current, total, message, details)
 
+    def ensure_running() -> None:
+        if cancellation_callback and cancellation_callback():
+            raise TaskCancellationRequested("用户已停止全部数据刷新")
+
     report("prepare", 3, 0, 0, "正在查找可用采集账号")
+    ensure_running()
     # 1. 获取已登录账号
     account = db.query(ScraperAccount).filter(
         ScraperAccount.login_status == "logged_in"
@@ -427,6 +421,7 @@ async def collect_all(
     try:
         results = []
         for index, room in enumerate(rooms, start=1):
+            ensure_running()
             report(
                 "room_collection",
                 10 + int(index / max(len(rooms), 1) * 25),
@@ -514,6 +509,7 @@ async def collect_all(
             )
 
         # 历史接口负责保证场次总量完整，企业接口负责补充主播映射。
+        ensure_running()
         report("enterprise_sync", 40, 0, 0, "正在同步全部企业主播及所属场次")
         enterprise_sync = await _do_enterprise_sync(
             db, context, rooms[0], task_id=task_id, sanitize_error=_sanitize_collector_error,
@@ -558,6 +554,7 @@ async def collect_all(
             enterprise_sync,
         )
         report("history_sync", 65, 0, 0, "正在同步账号历史直播场次")
+        ensure_running()
         history_sync = await _do_history_sync(db, account, rooms[0])
         report("history_sync", 75, history_sync, history_sync, f"历史场次同步完成，本次新增 {history_sync} 场")
 
@@ -583,6 +580,7 @@ async def collect_all(
         history_detail_progress = await _do_enrich_history(
             db, context, account, rooms[0],
             progress_callback=report_detail_progress,
+            cancellation_callback=cancellation_callback,
             sanitize_error=_sanitize_collector_error,
         )
         report(
@@ -596,40 +594,9 @@ async def collect_all(
         )
 
         # 采集完成后刷新持久化 Cookie
+        ensure_running()
         report("cookie_refresh", 97, 0, 0, "正在保存最新 Cookie 与浏览器指纹")
         await browser_manager.refresh_logged_in_state()
-
-        report("dataease_sync", 98, 0, 0, "正在增量同步 DataEase 分析宽表")
-        db.commit()
-        dataease_sync = await asyncio.to_thread(_sync_pending_dataease, None)
-        db.expire_all()
-
-        report("asr_queue", 99, 0, settings.ASR_MAX_QUEUED, "正在按安全容量补充话术转写队列")
-        asr_runtime = await asyncio.to_thread(get_asr_runtime_status)
-        asr_queue = (
-            queue_auto_transcriptions(db, limit=settings.ASR_MAX_QUEUED)
-            if asr_runtime["enabled"]
-            else {"created_count": 0, "active_count": 0, "capacity": settings.ASR_MAX_QUEUED, "session_ids": []}
-        )
-        postprocess_counts = {
-            status: db.query(AsrTask).filter(
-                AsrTask.status == "completed",
-                AsrTask.postprocess_status == status,
-            ).count()
-            for status in ("pending", "processing", "completed", "failed")
-        }
-        report(
-            "post_collection",
-            99,
-            postprocess_counts["completed"],
-            sum(postprocess_counts.values()),
-            (
-                "话术转写完成后将自动生成 AI 复盘并同步知识库："
-                f"待处理 {postprocess_counts['pending']}，处理中 {postprocess_counts['processing']}，"
-                f"已完成 {postprocess_counts['completed']}，失败 {postprocess_counts['failed']}"
-            ),
-            postprocess_counts,
-        )
 
         collected = sum(1 for r in results if r.get("error") is None)
         final_result = {
@@ -646,16 +613,18 @@ async def collect_all(
             "history_detail_remaining_count": history_detail_progress["remaining_count"],
             "history_detail_batch_size": history_detail_progress["batch_size"],
             "history_detail_failed_count": history_detail_progress["failed_count"],
-            "dataease_synced_count": dataease_sync["synced_count"],
-            "dataease_failed_count": dataease_sync["failed_count"],
-            "asr_queued_count": asr_queue["created_count"],
-            "asr_active_count": asr_queue["active_count"],
-            "asr_queue_capacity": asr_queue["capacity"],
-            "postprocess_pending_count": postprocess_counts["pending"],
-            "postprocess_processing_count": postprocess_counts["processing"],
-            "postprocess_completed_count": postprocess_counts["completed"],
-            "postprocess_failed_count": postprocess_counts["failed"],
+            # 补齐刷新不冒充执行下游任务；ASR按开关运行，知识库和DataEase在后台自动同步。
+            "dataease_synced_count": 0,
+            "dataease_failed_count": 0,
+            "asr_queued_count": 0,
+            "asr_active_count": 0,
+            "asr_queue_capacity": 0,
+            "postprocess_pending_count": 0,
+            "postprocess_processing_count": 0,
+            "postprocess_completed_count": 0,
+            "postprocess_failed_count": 0,
             "results": results,
+            "message": "全部场次真实数据已补齐刷新；ASR按开关运行，知识库和DataEase会自动同步，AI复盘请在场次详情手动生成",
         }
         report("completed", 100, collected, len(rooms), "刷新数据采集完成", final_result)
         return final_result

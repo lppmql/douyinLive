@@ -1,17 +1,20 @@
 """Phase 8: 认证 API — 登录 / 获取用户信息 / 刷新 Token"""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.response import ok_response
 from app.core.security import (
     verify_password,
     create_access_token,
+    create_media_access_token,
     create_refresh_token,
     decode_token,
     get_current_user,
+    MEDIA_ACCESS_COOKIE,
 )
 from app.models.user import User
 from app.schemas.auth import LoginRequest, SoybeanResponse, TokenData, UserInfoData
@@ -19,8 +22,23 @@ from app.schemas.auth import LoginRequest, SoybeanResponse, TokenData, UserInfoD
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 
+def _set_media_access_cookie(response: Response, user_id: int) -> None:
+    """给浏览器原生图片和视频标签签发短时、只读、不可被 JS 读取的凭证。"""
+    max_age = settings.MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    response.set_cookie(
+        key=MEDIA_ACCESS_COOKIE,
+        value=create_media_access_token(user_id),
+        max_age=max_age,
+        expires=max_age,
+        path="/",
+        secure=not settings.DEBUG,
+        httponly=True,
+        samesite="lax",
+    )
+
+
 @router.post("/login", response_model=SoybeanResponse[TokenData])
-def login(req: LoginRequest, db: Session = Depends(get_db)):
+def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
     """用户登录 → 返回 JWT Token"""
     user = db.query(User).filter(User.username == req.username).first()
     if not user or not verify_password(req.password, user.password_hash):
@@ -39,6 +57,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     db.commit()
 
     token_data = {"sub": str(user.id)}
+    _set_media_access_cookie(response, user.id)
     return ok_response(
         TokenData(
             token=create_access_token(token_data),
@@ -48,7 +67,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/refreshToken", response_model=SoybeanResponse[TokenData])
-def refresh_token(req: dict, db: Session = Depends(get_db)):
+def refresh_token(req: dict, response: Response, db: Session = Depends(get_db)):
     """刷新 Token"""
     refresh_token_str = req.get("refreshToken", "")
     payload = decode_token(refresh_token_str)
@@ -73,6 +92,7 @@ def refresh_token(req: dict, db: Session = Depends(get_db)):
         )
 
     token_data = {"sub": str(user.id)}
+    _set_media_access_cookie(response, user.id)
     return ok_response(
         TokenData(
             token=create_access_token(token_data),
@@ -82,8 +102,10 @@ def refresh_token(req: dict, db: Session = Depends(get_db)):
 
 
 @router.get("/getUserInfo", response_model=SoybeanResponse[UserInfoData])
-def get_user_info(current_user: User = Depends(get_current_user)):
+def get_user_info(response: Response, current_user: User = Depends(get_current_user)):
     """获取当前登录用户信息（Soybean Admin 兼容格式）"""
+    # 老登录会话刷新页面时也会经过此接口，因此无需用户退出重登即可补发媒体 Cookie。
+    _set_media_access_cookie(response, current_user.id)
     return ok_response(
         UserInfoData(
             userId=str(current_user.id),

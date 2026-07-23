@@ -4,7 +4,8 @@ import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { fetchLiveSessionData, getLiveSessionVideoDownloadUrl } from '@/service/api/douyin';
 import { unwrapServiceData } from '@/utils/service';
-import BusinessPageHeader from '@/components/business/page-header.vue';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
+import SessionWorkflowNav from '@/components/business/session-workflow-nav.vue';
 import CommentGroups from './modules/comment-groups.vue';
 import ReviewWorkbench from './modules/review-workbench.vue';
 
@@ -17,16 +18,6 @@ const videoDownloading = ref(false);
 const detail = ref<Api.Douyin.LiveSessionDetail | null>(null);
 const loadError = ref('');
 const session = computed(() => detail.value?.session);
-const headerStatus = computed(() => {
-  if (loading.value && !session.value) return '读取中';
-  if (loadError.value) return '加载失败';
-  return session.value?.live_status === 'live' ? '直播中' : '已结束';
-});
-const headerStatusType = computed(() => {
-  if (loadError.value) return 'error';
-  if (loading.value && !session.value) return 'info';
-  return session.value?.live_status === 'live' ? 'success' : 'default';
-});
 
 const profilesColumns: NaiveUI.TableColumn<Api.Douyin.LiveAudienceProfile>[] = [
   { title: '画像维度', key: 'dimension_type', width: 140 },
@@ -121,24 +112,32 @@ onMounted(load);
 
 <template>
   <NSpace vertical :size="16" class="business-page" :aria-busy="loading">
-    <BusinessPageHeader
-      :title="session?.anchor_name || '直播场次详情'"
-      :description="session?.session_title || loadError || '正在读取真实场次信息，请稍候'"
-      icon="mdi:video-vintage"
-      eyebrow="场次详情与 AI 分析"
-      :status="headerStatus"
-      :status-type="headerStatusType"
-    >
-      <template #actions>
-        <NButton @click="router.push({ name: 'live-sessions' })">返回列表</NButton>
-      </template>
-      <div class="flex flex-wrap items-center gap-12px text-12px text-gray-500">
-        <NAvatar v-if="session" round :size="28" :src="session.anchor_avatar_url || undefined" />
-        <span v-if="session">抖音号 {{ session.douyin_id || '未获取' }}</span>
+    <div class="flex flex-wrap items-center justify-between gap-10px">
+      <div class="flex min-w-0 flex-wrap items-center gap-10px text-12px text-gray-500">
+        <NButton size="small" secondary @click="router.push({ name: 'live-sessions' })">
+          <template #icon><SvgIcon icon="mdi:arrow-left" /></template>
+          返回列表
+        </NButton>
+        <AnchorIdentity
+          v-if="session"
+          class="max-w-240px"
+          :session-id="Number(id)"
+          :avatar-url="session.anchor_avatar_url"
+          :name="session.anchor_name"
+          :nickname="session.anchor_nickname"
+          :douyin-id="session.douyin_id"
+          :size="30"
+          dense
+        />
         <span>场次 #{{ id }}</span>
         <span>详情状态：{{ session?.detail_collection_status || (loading ? '读取中' : '-') }}</span>
       </div>
-    </BusinessPageHeader>
+      <NTag v-if="session" :type="session.live_status === 'live' ? 'success' : 'default'" :bordered="false" round>
+        {{ session.live_status === 'live' ? '直播中' : '已结束' }}
+      </NTag>
+    </div>
+
+    <SessionWorkflowNav :session-id="Number(id)" active="detail" />
 
     <NCard v-if="loading && !detail" :bordered="false" class="business-loading-panel card-wrapper">
       <NSkeleton text :repeat="2" />

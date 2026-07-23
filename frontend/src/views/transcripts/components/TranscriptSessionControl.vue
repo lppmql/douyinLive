@@ -10,7 +10,7 @@
  */
 import { h } from 'vue';
 import type { SelectOption } from 'naive-ui';
-import AnchorAvatar from '@/components/business/anchor-avatar.vue';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import {
   formatDate,
   formatDuration,
@@ -44,8 +44,6 @@ defineProps<{
   livePreview: string;
   /** WebSocket 是否已连接 */
   wsConnected: boolean;
-  /** 当前场次主播头像 URL */
-  selectedSessionAvatarUrl: string | undefined;
 }>();
 
 defineEmits<{
@@ -61,9 +59,18 @@ defineEmits<{
 /** 渲染场次下拉选项（带主播头像） */
 function renderSessionLabel(option: SelectOption) {
   const sessionOption = option as SessionSelectOption;
-  return h('div', { class: 'flex min-w-0 items-center gap-8px' }, [
-    h(AnchorAvatar, { size: 26, src: sessionOption.avatarUrl || undefined, name: sessionOption.anchorName }),
-    h('span', { class: 'min-w-0 flex-1 truncate' }, String(sessionOption.label || ''))
+  return h('div', { class: 'flex min-w-0 items-center justify-between gap-12px py-2px' }, [
+    h(AnchorIdentity, {
+      class: 'min-w-0 max-w-180px flex-1',
+      sessionId: sessionOption.sessionId,
+      avatarUrl: sessionOption.avatarUrl,
+      name: sessionOption.anchorName,
+      nickname: sessionOption.anchorNickname,
+      douyinId: sessionOption.douyinId,
+      size: 28,
+      dense: true
+    }),
+    h('span', { class: 'shrink-0 text-11px text-gray-400' }, sessionOption.metaLabel)
   ]);
 }
 </script>
@@ -90,12 +97,16 @@ function renderSessionLabel(option: SelectOption) {
         />
         <!-- 当前场次信息 -->
         <div v-if="selectedSession" class="mt-10px flex flex-wrap items-center gap-8px text-12px text-gray-500">
-          <AnchorAvatar
-            :size="28"
-            :src="selectedSessionAvatarUrl"
+          <AnchorIdentity
+            class="max-w-220px"
+            :session-id="selectedSession.id"
+            :avatar-url="selectedSession.anchor_avatar_url"
             :name="selectedSession.anchor_name || '未知主播'"
+            :nickname="selectedSession.anchor_nickname"
+            :douyin-id="selectedSession.douyin_id"
+            :size="30"
+            dense
           />
-          <strong class="text-gray-700 dark:text-gray-200">{{ selectedSession.anchor_name || '未知主播' }}</strong>
           <span>{{ formatDate(selectedSession.live_start_time) }}</span>
           <span>{{ formatDuration(selectedSession.live_duration_seconds) }}</span>
           <NTag size="small" :type="getStatusType(selectedTask?.status)" :bordered="false">

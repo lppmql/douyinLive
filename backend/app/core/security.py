@@ -1,10 +1,11 @@
-"""JWT Token 签发/验证 + 密码哈希 + 当前用户依赖"""
+"""JWT Token 签发/验证 + 密码哈希 + 当前用户依赖。"""
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
@@ -12,7 +13,13 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.models.user import User
 
-security = HTTPBearer()
+MEDIA_ACCESS_COOKIE = "douyin_media_access"
+_MEDIA_PATH_PATTERN = re.compile(
+    r"^/api/v1/live-sessions/\d+/(?:avatar|video|playback|comments/\d+/avatar)$"
+)
+
+# auto_error=False 让依赖有机会读取只用于原生媒体标签的 HttpOnly Cookie。
+security = HTTPBearer(auto_error=False)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -49,6 +56,13 @@ def create_refresh_token(data: dict) -> str:
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+def create_media_access_token(user_id: int) -> str:
+    """创建仅允许读取头像、回放和下载地址的短时 Token。"""
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES)
+    payload = {"sub": str(user_id), "exp": expire, "type": "media"}
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
 def decode_token(token: str) -> Optional[dict]:
     """解码并验证 JWT token，失败返回 None"""
     try:
@@ -59,12 +73,25 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
-    """FastAPI 依赖：从 Bearer token 解析当前用户"""
-    payload = decode_token(credentials.credentials)
-    if payload is None:
+    """解析当前用户；短时媒体 Cookie 只能用于明确的只读媒体路径。"""
+    expected_type = "access"
+    token = credentials.credentials if credentials else None
+    if token is None and request.method == "GET" and _MEDIA_PATH_PATTERN.fullmatch(request.url.path):
+        token = request.cookies.get(MEDIA_ACCESS_COOKIE)
+        expected_type = "media"
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="请先登录",
+        )
+
+    payload = decode_token(token)
+    if payload is None or payload.get("type") != expected_type:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token 无效或已过期",
