@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { getLiveSessionPlaybackUrl } from '@/service/api/douyin';
+import mpegts from 'mpegts.js';
+import { getStreamUrl } from '@/service/api/douyin';
 import { useReviewStore } from '@/store/modules/review';
 
 defineOptions({ name: 'ReviewVideoPlayer' });
@@ -19,19 +20,19 @@ const videoRef = ref<HTMLVideoElement | null>(null);
 const progressRef = ref<HTMLElement | null>(null);
 const started = ref(false);
 const loading = ref(false);
-const playbackOffset = ref(0);
 const errorMessage = ref('');
 const isPlaying = ref(false);
 const reviewStore = useReviewStore();
 const { seekToken } = storeToRefs(reviewStore);
-let loadingTimer: ReturnType<typeof setTimeout> | undefined;
 
-// ── 播放进度节流：timeupdate 每秒触发 4-10 次，节流到 ~4fps (250ms) 避免卡顿 ──
+// ── mpegts.js 实例 ──
+let player: mpegts.Player | null = null;
+/** 当前 ffmpeg 流的起始秒数（video 的 currentTime 从 0 开始，实际时间 = streamStart + currentTime） */
+let streamStartSeconds = 0;
+
+// ── 播放进度节流（每 250ms 同步一次）──
 let lastSyncTime = 0;
 const SYNC_INTERVAL_MS = 250;
-let rafId: ReturnType<typeof requestAnimationFrame> | undefined;
-
-const playbackUrl = computed(() => getLiveSessionPlaybackUrl(props.sessionId, playbackOffset.value));
 
 /** 当前播放位置（秒），用于进度条 */
 const currentTime = computed(() => reviewStore.currentSecond);
@@ -49,7 +50,7 @@ const progressPercent = computed(() => {
   return Math.min(100, (currentTime.value / totalDuration.value) * 100);
 });
 
-/** 在进度条上值得标记的复盘发现（有 start_seconds 的） */
+/** 复盘发现标记点 */
 const progressMarkers = computed(() =>
   props.findings
     .filter(f => f.start_seconds != null && f.start_seconds >= 0)
@@ -61,55 +62,75 @@ const progressMarkers = computed(() =>
     }))
 );
 
-function clearLoadingTimer() {
-  if (loadingTimer) clearTimeout(loadingTimer);
-  loadingTimer = undefined;
-}
+// ── 播放器管理 ──
 
-function beginLoading() {
-  clearLoadingTimer();
-  loading.value = true;
-  loadingTimer = setTimeout(() => {
-    loading.value = false;
-    started.value = false;
-    releaseVideo();
-    errorMessage.value = '兼容画面生成超时，旧播放连接已释放，请重新播放。';
-  }, 30_000);
-}
-
-function releaseVideo() {
+/** 销毁 mpegts.js player 并重置 video 元素 */
+function releasePlayer() {
+  if (player) {
+    try { player.destroy(); } catch { /* 忽略 */ }
+    player = null;
+  }
   const video = videoRef.value;
-  if (!video) return;
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
+  if (video) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+  }
 }
 
-function loadAndPlay() {
-  const video = videoRef.value;
-  if (!video) return;
-  video.src = playbackUrl.value;
-  video.load();
-  void video.play().catch(() => {});
-}
-
+/** 启动 mpegts.js 播放。
+ *  后端输出 H.264 MPEG-TS 流（VideoToolbox 硬编），所有浏览器通用。 */
 function startPlayback() {
   if (!props.streamUrl) return;
+  const video = videoRef.value;
+  if (!video) return;
+
   errorMessage.value = '';
-  beginLoading();
+  loading.value = true;
   started.value = true;
-  loadAndPlay();
+
+  // 构建绝对 URL（mpegts.js Web Worker 在 blob:// 上下文中运行，必须用绝对路径）
+  const url = getStreamUrl(props.sessionId, streamStartSeconds);
+
+  // isLive: true → 连续拉流模式，不发 Range 请求（pipe 输出不支持 Range）
+  // enableWorker: true → Web Worker 解复用，不卡主线程
+  player = mpegts.createPlayer(
+    { type: 'mpegts', isLive: true, url },
+    {
+      enableWorker: true,
+      autoCleanupSourceBuffer: true,
+      stashInitialSize: 128,
+      enableStashBuffer: false,
+      liveBufferLatencyChasing: false,
+    },
+  );
+
+  player.attachMediaElement(video);
+  player.load();
+
+  // 媒体信息就绪 → 开始播放
+  let ready = false;
+  const onReady = () => {
+    if (ready) return;
+    ready = true;
+    loading.value = false;
+    void video.play().catch(() => {});
+  };
+  player.on(mpegts.Events.MEDIA_INFO, onReady);
+  // 兜底：5 秒后强制开始
+  setTimeout(onReady, 5000);
+
+  // 错误处理
+  player.on(mpegts.Events.ERROR, (_type, info) => {
+    console.error('[mpegts.js] 播放错误:', _type, info);
+    loading.value = false;
+    errorMessage.value = '播放失败，请刷新后重试';
+    releasePlayer();
+  });
 }
 
-function restartAt(second: number) {
-  playbackOffset.value = Math.max(0, second);
-  if (!started.value) return;
-  beginLoading();
-  errorMessage.value = '';
-  loadAndPlay();
-}
+// ── 播放/暂停 ──
 
-/** 视频播放/暂停切换 */
 function togglePlay() {
   const video = videoRef.value;
   if (!video) return;
@@ -120,55 +141,68 @@ function togglePlay() {
   }
 }
 
-/** 点击进度条跳转到对应位置 */
+// ── 进度条点击 seek ──
+// mpegts.js 无法对连续流做原生 seek，策略：销毁 → 重建（带新 start_seconds）
+
 function seekByProgress(event: MouseEvent) {
   const bar = progressRef.value;
   if (!bar || !totalDuration.value) return;
   const rect = bar.getBoundingClientRect();
   const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
   const targetSecond = Math.round(ratio * totalDuration.value);
-  // 还没开始播放：直接从该位置启动
+
   if (!started.value) {
-    playbackOffset.value = targetSecond;
-    startPlayback();
+    streamStartSeconds = targetSecond;
+    reviewStore.seekTo(targetSecond);
+    nextTick(() => startPlayback());
     return;
   }
+
+  streamStartSeconds = targetSecond;
   reviewStore.seekTo(targetSecond);
+  releasePlayer();
+  nextTick(() => startPlayback());
 }
 
-/** 节流的播放进度同步：用时间间隔 + requestAnimationFrame 避免高频触发重渲染 */
+// ── 播放进度同步 ──
+// video.currentTime 从 0 开始，实际位置 = streamStartSeconds + video.currentTime
+
 function updatePlayback() {
   const video = videoRef.value;
   if (!video) return;
   const now = Date.now();
-  // 距上次同步不到 250ms 且播放状态没变 → 跳过
   const playing = !video.paused;
   if (now - lastSyncTime < SYNC_INTERVAL_MS && isPlaying.value === playing) return;
   lastSyncTime = now;
   if (isPlaying.value !== playing) isPlaying.value = playing;
 
-  if (rafId) cancelAnimationFrame(rafId);
-  rafId = requestAnimationFrame(() => {
-    const v = videoRef.value;
-    if (!v) return;
-    reviewStore.updatePlayback(playbackOffset.value + v.currentTime, !v.paused);
-  });
+  const realTime = streamStartSeconds + video.currentTime;
+  if (realTime > 0) {
+    reviewStore.updatePlayback(realTime, playing);
+  }
 }
 
-function handleLoaded() {
-  clearLoadingTimer();
-  loading.value = false;
-  errorMessage.value = '';
-  updatePlayback();
-}
+// ── 外部 seek（时间轴点击触发）──
 
-function handlePlaybackError() {
-  clearLoadingTimer();
-  loading.value = false;
-  isPlaying.value = false;
-  const mediaError = videoRef.value?.error;
-  errorMessage.value = mediaError?.message || '兼容回放启动失败，请刷新采集后重试。';
-}
+watch(seekToken, () => {
+  const target = reviewStore.currentSecond;
+  if (!started.value) {
+    streamStartSeconds = target;
+    nextTick(() => startPlayback());
+    return;
+  }
+  streamStartSeconds = target;
+  releasePlayer();
+  nextTick(() => startPlayback());
+});
+
+// ── 生命周期 ──
+
+onBeforeUnmount(() => {
+  releasePlayer();
+});
+
+// ── 时间格式化 ──
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
@@ -177,14 +211,6 @@ function formatTime(seconds: number): string {
   const s = Math.floor(seconds % 60);
   return h ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}` : `${m}:${String(s).padStart(2, '0')}`;
 }
-
-watch(seekToken, () => restartAt(reviewStore.currentSecond));
-
-onBeforeUnmount(() => {
-  clearLoadingTimer();
-  if (rafId) cancelAnimationFrame(rafId);
-  releaseVideo();
-});
 </script>
 
 <template>
@@ -199,10 +225,6 @@ onBeforeUnmount(() => {
         playsinline
         preload="none"
         :aria-label="`${title} 直播回放`"
-        @loadeddata="handleLoaded"
-        @canplay="handleLoaded"
-        @waiting="loading = true"
-        @error="handlePlaybackError"
         @timeupdate="updatePlayback"
         @play="updatePlayback"
         @pause="updatePlayback"
@@ -212,22 +234,20 @@ onBeforeUnmount(() => {
       <!-- 未播放状态 -->
       <div v-if="!started" class="absolute max-w-360px px-20px text-center text-13px leading-22px text-gray-300">
         <SvgIcon icon="mdi:video-outline" class="mb-10px text-42px text-gray-400" />
-        <div v-if="streamUrl">该回放是 H.265，需转换为浏览器兼容画面。仅在播放期间占用一路硬件转码。</div>
+        <div v-if="streamUrl">
+          H.264 实时转码流，mpegts.js 秒开播放。
+        </div>
         <div v-else>该场次尚未采集到可回放的 m3u8 地址。</div>
         <NButton v-if="streamUrl" class="mt-14px" type="primary" secondary @click="startPlayback">
           <template #icon><SvgIcon icon="mdi:play-circle-outline" /></template>
-          {{
-            playbackOffset
-              ? `从 ${formatTime(playbackOffset)} 播放`
-              : '播放兼容回放'
-          }}
+          播放回放
         </NButton>
       </div>
 
       <!-- 加载中 -->
       <div v-if="started && loading" class="pointer-events-none absolute flex flex-col items-center text-white">
         <NSpin size="large" stroke="#fff" />
-        <span class="mt-10px text-12px">正在准备 H.264 兼容画面...</span>
+        <span class="mt-10px text-12px">正在连接直播流...</span>
       </div>
     </div>
 
@@ -252,14 +272,11 @@ onBeforeUnmount(() => {
         @keydown.left.prevent="reviewStore.seekTo(Math.max(0, currentTime - 10))"
         @keydown.right.prevent="reviewStore.seekTo(Math.min(totalDuration, currentTime + 10))"
       >
-        <!-- 进度条底色 -->
         <div class="absolute bottom-7px h-5px w-full rounded-full bg-white/15"></div>
-        <!-- 已播放进度（GPU 合成层：transform scaleX 不触发 Reflow） -->
         <div
           class="absolute bottom-7px h-5px w-full origin-left rounded-full bg-primary"
           :style="{ transform: `scaleX(${progressPercent / 100})` }"
         ></div>
-        <!-- 拖拽圆点 -->
         <div
           class="absolute bottom-1px z-10 h-17px w-17px -translate-x-1/2 rounded-full bg-white shadow-md shadow-black/30"
           :style="{ left: `${progressPercent}%` }"
@@ -280,7 +297,6 @@ onBeforeUnmount(() => {
       <!-- 控制按钮行 -->
       <div class="flex items-center justify-between gap-8px text-12px text-gray-300">
         <div class="flex items-center gap-8px">
-          <!-- 播放/暂停 -->
           <button
             type="button"
             class="flex-center h-30px w-30px rounded-full text-white transition hover:bg-white/10"
@@ -289,7 +305,6 @@ onBeforeUnmount(() => {
           >
             <SvgIcon :icon="isPlaying ? 'mdi:pause' : 'mdi:play'" class="text-20px" />
           </button>
-          <!-- 时间显示 -->
           <span class="font-mono tabular-nums">
             {{ formatTime(currentTime) }}
             <span class="mx-1 text-gray-500">/</span>
@@ -298,7 +313,7 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="flex items-center gap-8px">
-          <NTag size="small" type="success" :bordered="false">9:16 · H.264</NTag>
+          <NTag size="small" type="success" :bordered="false">9:16 · H.264 TS</NTag>
           <span class="hidden sm:inline">{{ title }}</span>
         </div>
       </div>
@@ -322,7 +337,6 @@ onBeforeUnmount(() => {
   outline-offset: 2px;
 }
 
-/* GPU 合成层：进度条 scaleX 动画走 Composite 阶段，不触发 Reflow/Repaint */
 .session-progress-bar .origin-left {
   will-change: transform;
 }

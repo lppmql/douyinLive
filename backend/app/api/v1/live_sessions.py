@@ -1,4 +1,5 @@
 """直播场次 CRUD API"""
+import asyncio
 from urllib.parse import urlparse
 
 import httpx
@@ -14,8 +15,10 @@ from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.services.collector.video_download import (
+    _safe_ffmpeg_headers,
     build_video_download_command,
     build_browser_playback_command,
+    select_browser_h264_encoder,
     stream_browser_playback,
     stream_video_as_mp4,
     video_download_semaphore,
@@ -254,6 +257,119 @@ def download_session_video(session_id: int, db: Session = Depends(get_db)):
         media_type="video/mp4",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── mpegts.js 兼容流：H.265 → H.264（硬件加速）→ MPEG-TS ──
+# mpegts.js 通过 MSE 解码 H.264，所有浏览器通用，不依赖 HEVC 硬解
+
+def _validate_stream_url(stream_url: str) -> None:
+    """快速校验流地址格式，避免构建完整命令的开销。"""
+    if urlparse(stream_url).scheme not in {"http", "https"}:
+        raise HTTPException(400, "直播流地址不可用")
+
+
+def _build_stream_h264_command(stream_url: str, headers: dict | None, start_seconds: float = 0) -> list[str]:
+    """构建 H.264 MPEG-TS 转码命令。VideoToolbox 硬件编码（macOS），输出流式 TS。"""
+    if urlparse(stream_url).scheme not in {"http", "https"}:
+        raise ValueError("直播流地址不可用")
+
+    # 选编码器：复用已有缓存函数（@lru_cache），避免每次请求都跑子进程
+    encoder = select_browser_h264_encoder()
+
+    command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error",
+        "-fflags", "+genpts",
+        "-rw_timeout", "15000000",
+        "-protocol_whitelist", "https,http,tcp,tls,crypto",
+    ]
+    safe_headers = _safe_ffmpeg_headers(headers)
+    if safe_headers:
+        command.extend(["-headers", "\r\n".join(safe_headers) + "\r\n"])
+    if start_seconds > 0:
+        command.extend(["-ss", f"{start_seconds:.3f}"])
+    command.extend([
+        "-re", "-i", stream_url,
+        "-map", "0:v:0?", "-map", "0:a:0?",
+        "-c:v", encoder,
+    ])
+    if encoder == "h264_videotoolbox":
+        command.extend([
+            "-b:v", "2500k", "-maxrate", "3500k", "-bufsize", "5000k",
+            "-realtime", "true",
+        ])
+    else:
+        command.extend(["-preset", "ultrafast", "-tune", "zerolatency", "-crf", "25", "-threads", "1"])
+    command.extend([
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k",
+        "-avoid_negative_ts", "make_zero",
+        "-f", "mpegts",
+        "-mpegts_flags", "+resend_headers",
+        "pipe:1",
+    ])
+    return command
+
+
+async def _stream_h264(stream_url: str, headers: dict | None, start_seconds: float = 0) -> bytes:
+    """启动 ffmpeg 子进程，逐块输出 H.264 MPEG-TS 流。"""
+    command = _build_stream_h264_command(stream_url, headers, start_seconds)
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        while True:
+            chunk = await process.stdout.read(256 * 1024)
+            if not chunk:
+                break
+            yield chunk
+        return_code = await process.wait()
+        if return_code:
+            stderr = (await process.stderr.read()).decode(errors="ignore").strip()
+            from app.core.logger import logger
+            logger.warning("mpegts 流转码异常 code=%s: %s", return_code, stderr[:500])
+    finally:
+        if process.returncode is None:
+            process.terminate()
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+
+
+@stream_router.get("/live-sessions/{session_id}/stream")
+async def stream_session_video(
+    session_id: int,
+    start_seconds: float = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """H.264 MPEG-TS 流——前端 mpegts.js 通过 MSE 解码。
+    VideoToolbox 硬件编码 H.265→H.264，所有浏览器通用。"""
+    session = db.get(LiveSession, session_id)
+    if not session:
+        raise HTTPException(404, "直播场次不存在")
+    source = (
+        db.query(StreamSource)
+        .filter(StreamSource.session_id == session_id)
+        .order_by((StreamSource.status == "active").desc(), StreamSource.fetched_at.desc(), StreamSource.id.desc())
+        .first()
+    )
+    stream_url = (source.m3u8_url if source else None) or session.stream_url
+    if not stream_url:
+        raise HTTPException(404, "该场次暂无可回放地址，请先刷新采集")
+    headers = dict(source.headers_json or {}) if source else {}
+    _validate_stream_url(stream_url)
+
+    return StreamingResponse(
+        _stream_h264(stream_url, headers, start_seconds),
+        media_type="video/mp2t",
+        headers={
+            "Cache-Control": "no-store",
             "X-Accel-Buffering": "no",
         },
     )

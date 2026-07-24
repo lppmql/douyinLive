@@ -5,6 +5,12 @@
  */
 declare namespace Api {
   namespace Douyin {
+    /** 验证码登录响应（对应后端 TokenData） */
+    interface TokenResponse {
+      token: string;
+      refreshToken: string;
+    }
+
     interface DashboardSummary {
       anchor_count: number;
       session_count: number;

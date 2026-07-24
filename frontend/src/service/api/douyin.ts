@@ -94,6 +94,19 @@ export function getLiveSessionVideoDownloadUrl(id: number) {
   return `${backendBaseUrl}${API_PREFIX}/live-sessions/${id}/video`;
 }
 
+/** 获取 H.264 MPEG-TS 流地址（mpegts.js 播放，返回绝对 URL）。
+ *  mpegts.js Web Worker 在 blob:// 上下文中运行，相对 URL 无法解析，必须用绝对路径。 */
+export function getStreamUrl(id: number, startSeconds = 0) {
+  const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
+  const { otherBaseURL } = getServiceBaseURL(import.meta.env, isHttpProxy);
+  let backendBaseUrl = otherBaseURL.backend || window.location.origin;
+  // 确保是绝对 URL（mpegts.js Web Worker 要求）
+  if (backendBaseUrl.startsWith('/')) {
+    backendBaseUrl = window.location.origin + backendBaseUrl;
+  }
+  return `${backendBaseUrl}${API_PREFIX}/live-sessions/${id}/stream?start_seconds=${Math.max(0, startSeconds).toFixed(3)}`;
+}
+
 /** 获取浏览器兼容的 H.264 回放流，按需从指定时间点开始。 */
 export function getLiveSessionPlaybackUrl(id: number, startSeconds = 0) {
   const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
