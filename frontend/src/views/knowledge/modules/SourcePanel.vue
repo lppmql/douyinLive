@@ -1,5 +1,6 @@
 <!-- 知识库 — 引用来源面板（Naive UI 组件替代手写 HTML） -->
 <script setup lang="ts">
+import { useRouter } from 'vue-router';
 import { NCard, NEmpty, NScrollbar, NSpace, NTag } from 'naive-ui';
 import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import { getSourceTypeLabel, getSourceTypeColor } from '../adapters/knowledge-adapter';
@@ -9,6 +10,19 @@ defineOptions({ name: 'KnowledgeSourcePanel' });
 defineProps<{
   sources: Api.Douyin.KnowledgeSource[];
 }>();
+
+const router = useRouter();
+
+/** 点击来源卡片 → 跳转到对应场次详情页并定位到视频时间轴 */
+function handleSourceClick(source: Api.Douyin.KnowledgeSource) {
+  if (!source.session_id) return;
+  const seekSeconds = source.slice_start_seconds ?? 0;
+  void router.push({
+    name: 'live-session-detail',
+    params: { id: String(source.session_id) },
+    query: { seek: String(seekSeconds) },
+  });
+}
 </script>
 
 <template>
@@ -34,6 +48,8 @@ defineProps<{
           size="small"
           :bordered="true"
           class="source-card"
+          :class="{ 'source-card--clickable': !!source.session_id }"
+          @click="handleSourceClick(source)"
         >
           <template #header>
             <NSpace align="center" justify="space-between">
@@ -61,6 +77,11 @@ defineProps<{
           <div v-if="source.time_range" class="source-card__time">
             <SvgIcon icon="mdi:clock-outline" class="text-12px" />
             {{ source.time_range }}
+          </div>
+          <!-- 可跳转卡片：点击查看直播回放 -->
+          <div v-if="source.session_id" class="source-card__jump">
+            <SvgIcon icon="mdi:play-circle-outline" class="text-13px" />
+            <span>点击查看回放</span>
           </div>
         </NCard>
       </div>
@@ -131,6 +152,17 @@ defineProps<{
   --n-title-font-size: 13px;
 }
 
+/* 可点击卡片：有 session_id 的来源可以跳转到场次详情页 */
+.source-card--clickable {
+  cursor: pointer;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+
+.source-card--clickable:hover {
+  box-shadow: 0 2px 10px rgb(var(--primary-color) / 10%);
+  transform: translateY(-1px);
+}
+
 .source-card__title {
   font-size: 13px;
   font-weight: 600;
@@ -165,6 +197,22 @@ defineProps<{
   margin-top: 6px;
   font-size: 11px;
   color: #aaa;
+}
+
+.source-card__jump {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(0 0 0 / 5%);
+  font-size: 12px;
+  color: rgb(var(--primary-color));
+  opacity: 0.8;
+}
+
+.source-card--clickable:hover .source-card__jump {
+  opacity: 1;
 }
 
 /* ── 响应式 ── */

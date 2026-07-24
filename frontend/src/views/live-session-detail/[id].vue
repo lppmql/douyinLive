@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useMessage } from 'naive-ui';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 import { fetchLiveSessionData, getLiveSessionVideoDownloadUrl } from '@/service/api/douyin';
 import { unwrapServiceData } from '@/utils/service';
+import { useReviewStore } from '@/store/modules/review';
 import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import SessionWorkflowNav from '@/components/business/session-workflow-nav.vue';
 import CommentGroups from './modules/comment-groups.vue';
@@ -12,7 +13,9 @@ import ReviewWorkbench from './modules/review-workbench.vue';
 defineOptions({ name: 'LiveSessionDetail' });
 const props = defineProps<{ id: string }>();
 const router = useRouter();
+const route = useRoute();
 const message = useMessage();
+const reviewStore = useReviewStore();
 const loading = ref(false);
 const videoDownloading = ref(false);
 const detail = ref<Api.Douyin.LiveSessionDetail | null>(null);
@@ -100,6 +103,16 @@ async function load() {
   loadError.value = '';
   try {
     detail.value = unwrapServiceData(await fetchLiveSessionData(Number(props.id)), '后台没有返回该场次的详情数据。');
+    // 如果 URL 带了 ?seek= 参数（从知识库来源卡片跳转过来的），自动定位播放
+    const seekParam = route.query.seek;
+    if (seekParam) {
+      const seekSeconds = Number(seekParam);
+      if (Number.isFinite(seekSeconds) && seekSeconds >= 0) {
+        // nextTick 确保播放器子组件已挂载、seekToken 的 watch 已激活
+        await nextTick();
+        reviewStore.seekTo(seekSeconds);
+      }
+    }
   } catch (error) {
     loadError.value = error instanceof Error ? error.message : '直播场次详情加载失败';
     message.error(loadError.value);
