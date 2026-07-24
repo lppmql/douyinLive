@@ -6,6 +6,20 @@
 
 ## [2026-07-24]
 
+### Added
+- **知识库问答支持流式输出（打字机效果）**：
+  - 后端新增 `/api/v1/ai/qa/stream` 流式端点（SSE），逐 token 推送 AI 回答
+  - kb_service.py 重构：提取 `_prepare_qa_context()` 公共检索逻辑，新增 `qa_search_stream()` 生成器
+  - 前端用 `fetch + ReadableStream` 消费 SSE 流，替代原来的一次性等待
+  - 修复 Vue 响应式 Bug：通过 `messages.value.find()` 获取代理引用，确保 token 追加能被 Vue 追踪
+- **知识库问答 UI 优化**：
+  - 流式打字过程中不再自动滚动，用户可自由阅读已输出内容
+  - 用户消息气泡下方显示发送时间戳
+  - AI 检索阶段显示「正在查找知识库…」替代骨架屏
+  - 重新设计 4 个推荐问题，覆盖留资诊断、内容选题、评论转化、开场承接
+  - 系统提示词禁止 Markdown 格式输出，AI 回答使用纯文本
+- 新增 ADR 0016：《知识库问答流式输出与 UI 布局方案》
+
 ### Fixed
 - **视频回放彻底修复——再也不报格式错误了**：
   - 直播场次详情页的视频播放从 EasyPlayer.js（npm 包损坏，无法使用）换成 mpegts.js，通过浏览器原生 MediaSource 解码 H.264 TS 流
