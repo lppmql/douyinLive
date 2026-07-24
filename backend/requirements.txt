@@ -19,3 +19,4 @@ pytest-cov==5.0.0
 prometheus-client==0.25.0
 psutil==6.1.1
 tencentcloud-sdk-python>=3.1.139
+qdrant-client==1.13.0

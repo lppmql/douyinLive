@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import re
 from collections import defaultdict
@@ -19,6 +20,8 @@ from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
 from app.core.config import settings
 from app.core.observability import KNOWLEDGE_SEARCH_TOTAL, KNOWLEDGE_SYNC_TOTAL
+
+logger = logging.getLogger(__name__)
 
 PARSER_VERSION = "time-slice-v1"
 DEFAULT_SLICE_SECONDS = settings.KNOWLEDGE_SLICE_SECONDS
@@ -229,6 +232,10 @@ def sync_session_time_slices(
         db.delete(row)
         counts["deleted_count"] += 1
     db.commit()
+
+    # Phase 36: 同步向量到 Qdrant（新创建或内容变更的时间片）
+    _sync_time_slice_vectors(db, session_id, slice_count)
+
     for result_name in ("created_count", "updated_count", "unchanged_count", "deleted_count"):
         if counts[result_name]:
             KNOWLEDGE_SYNC_TOTAL.labels(result=result_name.removesuffix("_count")).inc(counts[result_name])
@@ -299,3 +306,47 @@ def search_time_slices(db: Session, question: str, limit: int = 8) -> list[dict[
         })
     KNOWLEDGE_SEARCH_TOTAL.labels(result="hit" if results else "miss").inc()
     return results
+
+
+def _sync_time_slice_vectors(db: Session, session_id: int, _slice_count: int) -> None:
+    """把一场直播的所有时间片向量同步到 Qdrant。
+
+    在 MySQL 同步完成后调用。批量生成 embedding 并写入 Qdrant，
+    减少 API 调用次数。
+
+    失败不影响 MySQL 数据（独立的事务边界）。
+    """
+    try:
+        from app.services.ai.embedding_service import embed_batch
+        from app.services.ai.vector_store import upsert_time_slice, delete_time_slice
+    except ImportError:
+        return
+
+    slices = (
+        db.query(KnowledgeTimeSlice)
+        .filter(KnowledgeTimeSlice.session_id == session_id)
+        .order_by(KnowledgeTimeSlice.slice_index)
+        .all()
+    )
+    if not slices:
+        return
+
+    # 批量生成 embedding
+    texts = [(row.search_text or row.transcript_text or row.comments_text or "") for row in slices]
+    vectors = embed_batch(texts)
+
+    synced = 0
+    for row, vector in zip(slices, vectors):
+        if vector is None:
+            continue
+        if upsert_time_slice(
+            slice_id=row.id,
+            session_id=row.session_id,
+            anchor_name=row.anchor_name or "",
+            search_text=row.search_text or "",
+            vector=vector,
+        ):
+            synced += 1
+
+    if synced:
+        logger.info("场次 %d 的 %d/%d 个时间片已同步到 Qdrant", session_id, synced, len(slices))

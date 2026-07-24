@@ -97,6 +97,19 @@ async def lifespan(app: FastAPI):
     await collector_module_service.start()
     logger.info("✅ 数据采集控制中心已恢复监控、ASR 与后台自动同步状态")
 
+    # Phase 36: 初始化 Qdrant 向量集合（知识库 RAG 语义检索）
+    try:
+        from app.services.ai.vector_store import ensure_collections
+
+        qdrant_status = ensure_collections()
+        for collection, ok in qdrant_status.items():
+            if ok:
+                logger.info("✅ Qdrant 集合 '%s' 就绪", collection)
+            else:
+                logger.warning("⚠️  Qdrant 集合 '%s' 初始化失败，向量搜索将降级", collection)
+    except Exception as exc:
+        logger.warning("⚠️  Qdrant 初始化跳过（服务未启动或不可用）: %s", exc)
+
     yield
 
     # 先关掉所有“任务生产者”，再等待控制任务和实时页面完成，避免停机期间又创建浏览器。

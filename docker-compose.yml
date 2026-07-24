@@ -33,6 +33,21 @@ services:
       - ./data/redis:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?请在 .env 设置 REDIS_PASSWORD}
 
+  # Phase 36: Qdrant 向量数据库 — 知识库 RAG 语义检索
+  qdrant:
+    image: qdrant/qdrant:v1.13.5
+    container_name: douyin_live_qdrant
+    restart: unless-stopped
+    cpus: 1.0
+    mem_limit: 512m
+    ports:
+      - "127.0.0.1:6333:6333"   # HTTP API（Python 客户端用）
+      - "127.0.0.1:6334:6334"   # gRPC（可选）
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__GRPC_PORT: 6334
+
   funasr:
     image: registry.cn-hangzhou.aliyuncs.com/funasr_repo/funasr:funasr-runtime-sdk-online-cpu-0.1.13
     container_name: douyin_live_funasr
