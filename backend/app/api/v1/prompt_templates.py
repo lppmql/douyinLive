@@ -19,6 +19,11 @@ class PromptCreate(BaseModel):
     description: str | None = None
 
 
+class PromptTestRequest(BaseModel):
+    type: str
+    content: str
+
+
 class PromptResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -29,6 +34,140 @@ class PromptResponse(BaseModel):
     version: int
     description: str | None
     created_at: datetime | None = None
+
+@router.post("/test")
+def test_prompt(
+    data: PromptTestRequest,
+    db: Session = Depends(get_db),
+):
+    """用最近真实场次数据测试提示词效果"""
+    from app.models.live_sessions import LiveSession
+    from app.models.transcript_segments import TranscriptSegment
+    from app.models.comments import Comment
+    from app.prompts import get_system_prompt
+    from app.services.ai.deepseek_client import chat_json
+
+    # 找最近一场有完整数据的已结束场次
+    recent = (
+        db.query(LiveSession)
+        .filter(
+            LiveSession.live_status == "ended",
+            LiveSession.detail_collection_status == "completed",
+        )
+        .order_by(LiveSession.live_end_time.desc())
+        .first()
+    )
+    if not recent:
+        raise HTTPException(400, "没有已结束的场次数据供测试")
+
+    filled = data.content
+    session_info = (
+        f"场次ID: {recent.id}\n"
+        f"主播: {recent.anchor_name or '未知'}\n"
+        f"开播: {recent.live_start_time}\n"
+        f"下播: {recent.live_end_time}\n"
+        f"最高在线: {recent.peak_online_count or 0}\n"
+        f"评论数: {recent.comments_count or 0}\n"
+        f"新增关注: {recent.new_followers or 0}"
+    )
+
+    # 替换已知变量
+    filled = filled.replace("{session_data}", session_info)
+
+    if "{sessions_data}" in filled:
+        sessions = (
+            db.query(LiveSession)
+            .filter(LiveSession.live_status == "ended")
+            .order_by(LiveSession.live_start_time.desc())
+            .limit(5)
+            .all()
+        )
+        import json
+        sessions_list = []
+        for s in sessions:
+            sessions_list.append({
+                "id": s.id, "anchor": s.anchor_name or "",
+                "peak_online": s.peak_online_count or 0,
+                "comments": s.comments_count or 0,
+                "followers": s.new_followers or 0,
+            })
+        filled = filled.replace(
+            "{sessions_data}", json.dumps(sessions_list, ensure_ascii=False, indent=2)
+        )
+
+    if "{history_data}" in filled:
+        import json
+        history = (
+            db.query(LiveSession)
+            .filter(LiveSession.live_status == "ended", LiveSession.id != recent.id)
+            .order_by(LiveSession.live_start_time.desc())
+            .limit(10)
+            .all()
+        )
+        hlist = [
+            {"id": s.id, "peak_online": s.peak_online_count or 0, "comments": s.comments_count or 0}
+            for s in history
+        ]
+        filled = filled.replace("{history_data}", json.dumps(hlist, ensure_ascii=False, indent=2))
+
+    if "{transcript}" in filled:
+        segs = (
+            db.query(TranscriptSegment)
+            .filter(
+                TranscriptSegment.session_id == recent.id,
+                TranscriptSegment.asr_status == "completed",
+            )
+            .order_by(TranscriptSegment.segment_start.asc())
+            .limit(30)
+            .all()
+        )
+        txt = "\n".join(
+            f"[{s.segment_start:.1f}s] {s.text_content or ''}" for s in segs if s.text_content
+        )
+        filled = filled.replace("{transcript}", txt or "[暂无话术数据]")
+
+    if "{comments}" in filled:
+        comments = (
+            db.query(Comment)
+            .filter(Comment.session_id == recent.id)
+            .order_by(Comment.comment_time.asc())
+            .limit(30)
+            .all()
+        )
+        clist = "\n".join(
+            f"{c.user_nickname}: {c.comment_content or ''}" for c in comments
+        )
+        filled = filled.replace("{comments}", clist or "[暂无评论数据]")
+
+    if "{knowledge_context}" in filled:
+        from app.models.knowledge_base import KnowledgeBase
+        kb = (
+            db.query(KnowledgeBase)
+            .filter(KnowledgeBase.session_id == recent.id)
+            .order_by(KnowledgeBase.id.desc())
+            .limit(5)
+            .all()
+        )
+        ktxt = "\n".join(f"[{k.category}] {k.content or ''}" for k in kb)
+        filled = filled.replace("{knowledge_context}", ktxt or "[暂无知识库数据]")
+
+    filled = filled.replace("{question}", "测试：最近一场直播的数据表现如何？")
+    filled = filled.replace("{speech_data}", "[测试模式：话术评分数据已省略]")
+    filled = filled.replace("{session_id}", str(recent.id))
+
+    try:
+        system = get_system_prompt(data.type)
+        result = chat_json(
+            system_prompt=system,
+            user_message=filled,
+            temperature=0.3,
+            operation="prompt_test",
+        )
+    except Exception as e:
+        return {"filled_prompt": filled[:2000], "error": str(e)}
+
+    return {"filled_prompt": filled[:2000], "result": result}
+
 
 @router.get("/", response_model=list[PromptResponse])
 def list_prompt_templates(
