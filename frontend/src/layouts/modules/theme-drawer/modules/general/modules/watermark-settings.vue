@@ -47,7 +47,7 @@ const isWatermarkTextVisible = computed(
         type="text"
         size="small"
         class="w-120px"
-        placeholder="零食店避坑直播复盘系统"
+        placeholder="零食店直播运营系统"
       />
     </SettingItem>
   </TransitionGroup>
