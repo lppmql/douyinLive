@@ -4,6 +4,25 @@
 
 ---
 
+## [2026-07-24]
+
+### Fixed
+- **视频回放彻底修复——再也不报格式错误了**：
+  - 直播场次详情页的视频播放从 EasyPlayer.js（npm 包损坏，无法使用）换成 mpegts.js，通过浏览器原生 MediaSource 解码 H.264 TS 流
+  - 修复 JWT 鉴权导致 `MEDIA_ELEMENT_ERROR: Format error`：视频流端点单独部署在不需登录的公开路由上
+  - 后端用 macOS 自带的 VideoToolbox 硬件加速把抖音的 H.265 流转成 H.264，首帧 2-5 秒就出画面
+  - 播放进度条支持拖拽跳转（seek），复盘发现标记点照常显示
+  - 补充了短信验证码登录缺失的类型定义
+
+### Added
+- 新增 ADR 0015：《浏览器视频播放方案选择——mpegts.js + H.264 TS》
+
+### Changed
+- 视频流编码器检测改为复用已有缓存函数，不再每次请求都跑子进程
+- 清理了废弃的 `@easydarwin/easyplayer` npm 依赖
+
+---
+
 ## [2026-07-23]
 
 ### Changed
