@@ -17,7 +17,20 @@ from app.core.security import (
     MEDIA_ACCESS_COOKIE,
 )
 from app.models.user import User
+from pydantic import BaseModel
 from app.schemas.auth import LoginRequest, SoybeanResponse, TokenData, UserInfoData
+
+
+class SendCodeRequest(BaseModel):
+    """发送验证码请求"""
+    phone: str
+
+
+class CodeLoginRequest(BaseModel):
+    """验证码登录请求"""
+    phone: str
+    code: str
+from app.services.sms import send_sms_code, verify_sms_code, TencentSmsError
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -112,5 +125,51 @@ def get_user_info(response: Response, current_user: User = Depends(get_current_u
             userName=current_user.username,
             roles=current_user.roles or ["R_USER"],
             buttons=[],
+        ).model_dump()
+    )
+
+
+@router.post("/send-code", response_model=SoybeanResponse)
+def send_sms_code_endpoint(req: SendCodeRequest):
+    """发送短信验证码"""
+    try:
+        import asyncio
+        result = asyncio.run(send_sms_code(req.phone))
+        return ok_response(result)
+    except TencentSmsError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/code-login", response_model=SoybeanResponse[TokenData])
+def code_login(req: CodeLoginRequest, response: Response, db: Session = Depends(get_db)):
+    """手机号 + 验证码登录"""
+    if not verify_sms_code(req.phone, req.code):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="验证码错误或已过期",
+        )
+
+    from app.models.user import User
+    user = db.query(User).filter(User.phone == req.phone).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="该手机号未注册，请先联系管理员创建账号",
+        )
+    if user.status != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已被禁用",
+        )
+
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+
+    token_data = {"sub": str(user.id)}
+    _set_media_access_cookie(response, user.id)
+    return ok_response(
+        TokenData(
+            token=create_access_token(token_data),
+            refreshToken=create_refresh_token(token_data),
         ).model_dump()
     )

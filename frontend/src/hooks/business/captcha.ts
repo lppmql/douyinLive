@@ -2,10 +2,12 @@ import { computed } from 'vue';
 import { useCountDown, useLoading } from '@sa/hooks';
 import { REG_PHONE } from '@/constants/reg';
 import { $t } from '@/locales';
+import { sendSmsCode } from '@/service/api/douyin';
+import { getServiceErrorMessage } from '@/utils/service';
 
 export function useCaptcha() {
   const { loading, startLoading, endLoading } = useLoading();
-  const { count, start, stop, isCounting } = useCountDown(10);
+  const { count, start, stop, isCounting } = useCountDown(60);
 
   const label = computed(() => {
     let text = $t('page.login.codeLogin.getCode');
@@ -26,13 +28,11 @@ export function useCaptcha() {
   function isPhoneValid(phone: string) {
     if (phone.trim() === '') {
       window.$message?.error?.($t('form.phone.required'));
-
       return false;
     }
 
     if (!REG_PHONE.test(phone)) {
       window.$message?.error?.($t('form.phone.invalid'));
-
       return false;
     }
 
@@ -48,16 +48,15 @@ export function useCaptcha() {
 
     startLoading();
 
-    // request
-    await new Promise(resolve => {
-      setTimeout(resolve, 500);
-    });
-
-    window.$message?.success?.($t('page.login.codeLogin.sendCodeSuccess'));
-
-    start();
-
-    endLoading();
+    try {
+      await sendSmsCode(phone);
+      window.$message?.success?.($t('page.login.codeLogin.sendCodeSuccess'));
+      start();
+    } catch (err: unknown) {
+      window.$message?.error?.(getServiceErrorMessage(err, '验证码发送失败'));
+    } finally {
+      endLoading();
+    }
   }
 
   return {

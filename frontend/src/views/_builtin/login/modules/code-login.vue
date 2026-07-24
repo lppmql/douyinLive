@@ -3,12 +3,14 @@ import { computed, reactive } from 'vue';
 import { useRouterPush } from '@/hooks/common/router';
 import { useFormRules, useNaiveForm } from '@/hooks/common/form';
 import { useCaptcha } from '@/hooks/business/captcha';
+import { useAuthStore } from '@/store/modules/auth';
 import { $t } from '@/locales';
 
 defineOptions({
   name: 'CodeLogin'
 });
 
+const authStore = useAuthStore();
 const { toggleLoginModule } = useRouterPush();
 const { formRef, validate } = useNaiveForm();
 const { label, isCounting, loading, getCaptcha } = useCaptcha();
@@ -34,8 +36,7 @@ const rules = computed<Record<keyof FormModel, App.Global.FormRule[]>>(() => {
 
 async function handleSubmit() {
   await validate();
-  // request
-  window.$message?.success($t('page.login.common.validateSuccess'));
+  await authStore.codeLogin(model.phone, model.code);
 }
 </script>
 
@@ -53,7 +54,7 @@ async function handleSubmit() {
       </div>
     </NFormItem>
     <NSpace vertical :size="18" class="w-full">
-      <NButton type="primary" size="large" round block @click="handleSubmit">
+      <NButton type="primary" size="large" round block :loading="authStore.loginLoading" @click="handleSubmit">
         {{ $t('common.confirm') }}
       </NButton>
       <NButton size="large" round block @click="toggleLoginModule('pwd-login')">

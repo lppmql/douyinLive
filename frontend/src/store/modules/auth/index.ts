@@ -3,6 +3,7 @@ import { useRoute } from 'vue-router';
 import { defineStore } from 'pinia';
 import { useLoading } from '@sa/hooks';
 import { fetchGetUserInfo, fetchLogin } from '@/service/api';
+import { codeLogin as fetchCodeLogin } from '@/service/api/douyin';
 import { useRouterPush } from '@/hooks/common/router';
 import { localStg } from '@/utils/storage';
 import { SetupStoreId } from '@/enum';
@@ -87,6 +88,39 @@ export const useAuthStore = defineStore(SetupStoreId.Auth, () => {
 
     localStg.remove('lastLoginUserId');
     return false;
+  }
+
+  /**
+   * 手机验证码登录
+   *
+   * @param phone 手机号
+   * @param code 验证码
+   * @param [redirect=true] 是否登录后跳转
+   */
+  async function codeLogin(phone: string, code: string, redirect = true) {
+    startLoading();
+
+    const { data: loginToken, error } = await fetchCodeLogin(phone, code);
+
+    if (!error) {
+      const pass = await loginByToken(loginToken);
+
+      if (pass) {
+        const isClear = checkTabClear();
+        let needRedirect = redirect;
+        if (isClear) needRedirect = false;
+        await redirectFromLogin(needRedirect);
+        window.$notification?.success({
+          title: $t('page.login.common.loginSuccess'),
+          content: $t('page.login.common.welcomeBack', { userName: userInfo.userName }),
+          duration: 4500
+        });
+      }
+    } else {
+      resetStore();
+    }
+
+    endLoading();
   }
 
   /**
@@ -179,6 +213,7 @@ export const useAuthStore = defineStore(SetupStoreId.Auth, () => {
     loginLoading,
     resetStore,
     login,
+    codeLogin,
     initUserInfo
   };
 });

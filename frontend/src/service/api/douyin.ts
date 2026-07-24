@@ -614,3 +614,23 @@ export function deletePrompt(id: number) {
 export function fetchActivePrompts() {
   return backendRequest<Api.Douyin.PromptTemplate[]>({ url: `${API_PREFIX}/ai/prompts/active` });
 }
+
+/* ---------- 短信验证码 ---------- */
+
+/** 发送短信验证码 */
+export function sendSmsCode(phone: string) {
+  return backendRequest<{ success: boolean; message: string }>({
+    url: `${API_PREFIX}/auth/send-code`,
+    method: 'POST',
+    data: { phone }
+  });
+}
+
+/** 验证码登录 */
+export function codeLogin(phone: string, code: string) {
+  return backendRequest<Api.Douyin.TokenResponse>({
+    url: `${API_PREFIX}/auth/code-login`,
+    method: 'POST',
+    data: { phone, code }
+  });
+}
