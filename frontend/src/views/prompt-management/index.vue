@@ -236,7 +236,7 @@ onMounted(getData);
     </NCard>
 
     <!-- 编辑抽屉：左右分栏 -->
-    <NDrawer v-model:show="editDrawerOpen" :width="860" placement="right">
+    <NDrawer v-model:show="editDrawerOpen" :width="960" placement="right">
       <NDrawerContent
         :title="`编辑：${TYPE_OPTIONS.find(t => t.value === editForm.type)?.label || editForm.type} — v${editVersion}`"
         :native-scrollbar="false"
@@ -379,7 +379,7 @@ onMounted(getData);
 .drawer-split { display: flex; gap: 16px; height: 100%; }
 .drawer-left { flex: 1; min-width: 0; overflow-y: auto; padding-right: 4px; }
 .drawer-right {
-  width: 280px;
+  width: 200px;
   flex-shrink: 0;
   border-left: 1px solid #eee;
   padding-left: 12px;
@@ -390,6 +390,7 @@ onMounted(getData);
 
 /* 代码编辑器 */
 .code-editor-wrapper {
+  width: 100%;
   display: flex;
   border: 1px solid #d9d9d9;
   border-radius: 6px;
