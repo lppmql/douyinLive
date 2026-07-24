@@ -1,5 +1,6 @@
 import { backendRequest } from '../request';
 import { getServiceBaseURL } from '@/utils/service';
+import { localStg } from '@/utils/storage';
 
 /**
  * 零食店避坑直播运营复盘系统 — API 接口
@@ -566,6 +567,113 @@ export function askKnowledge(question: string, category?: string, history: Api.D
     method: 'POST',
     data: { question, category, history }
   });
+}
+
+/** SSE 流式事件类型 */
+export interface QaStreamEvent {
+  type: 'token' | 'done' | 'error';
+  content?: string;
+  sources?: Api.Douyin.KnowledgeSource[];
+  has_result?: boolean;
+  message?: string;
+}
+
+/**
+ * 知识库问答（流式输出）
+ *
+ * 用原生 fetch + ReadableStream 接收 SSE 流，
+ * 每收到一个 token 就回调 onToken，实现逐字打字效果。
+ *
+ * @param question  用户问题
+ * @param callbacks.onToken   收到文字片段时回调
+ * @param callbacks.onDone    流结束，携带引用来源
+ * @param callbacks.onError   出错时回调
+ * @param category  知识分类（可选）
+ * @param history   多轮对话历史（可选）
+ */
+export async function askKnowledgeStream(
+  question: string,
+  callbacks: {
+    onToken: (token: string) => void;
+    onDone: (sources: Api.Douyin.KnowledgeSource[], hasResult: boolean) => void;
+    onError: (message: string) => void;
+  },
+  category?: string,
+  history: Api.Douyin.KnowledgeChatHistory[] = []
+): Promise<void> {
+  // 和 backendRequest 用同一套 baseURL 构建逻辑，确保走 Vite 代理
+  const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
+  const { otherBaseURL } = getServiceBaseURL(import.meta.env, isHttpProxy);
+  const baseUrl = otherBaseURL.backend;  // 开发代理模式：/proxy-backend；直连模式：http://localhost:8000
+
+  // 从 localStorage 取 token（和 request/index.ts 里的 backendRequest 用同一套存储）
+  const token = localStg.get('token');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  console.log('[askKnowledgeStream] 开始流式请求', { question: question.slice(0, 20), baseUrl });
+
+  const response = await fetch(`${baseUrl}${API_PREFIX}/ai/qa/stream`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ question, category, history }),
+  });
+
+  console.log('[askKnowledgeStream] 响应状态', response.status, response.headers.get('content-type'));
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => '未知错误');
+    throw new Error(`请求失败 (${response.status}): ${errorText}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('浏览器不支持流式读取（Response body 为空）');
+  }
+
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';  // 缓冲区：拼接不完整的 SSE 行
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    // 解码二进制数据 → 拼到缓冲区
+    buffer += decoder.decode(value, { stream: true });
+
+    // 按行分割 SSE 事件
+    const lines = buffer.split('\n');
+    // 最后一行可能不完整，留到下次循环
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+
+      const jsonStr = line.slice(6);  // 去掉 "data: " 前缀
+      try {
+        const event: QaStreamEvent = JSON.parse(jsonStr);
+        switch (event.type) {
+          case 'token':
+            if (event.content) callbacks.onToken(event.content);
+            break;
+          case 'done':
+            console.log('[askKnowledgeStream] 流结束, sources:', event.sources?.length || 0);
+            callbacks.onDone(event.sources || [], event.has_result || false);
+            break;
+          case 'error':
+            console.error('[askKnowledgeStream] 流错误:', event.message);
+            callbacks.onError(event.message || 'AI 回答失败');
+            break;
+        }
+      } catch {
+        // 忽略解析失败的 JSON 行（可能是空行或者不完整的 chunk）
+      }
+    }
+  }
 }
 
 /** 保存到知识库 */

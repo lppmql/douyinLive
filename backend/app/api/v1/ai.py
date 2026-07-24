@@ -3,6 +3,7 @@ import json
 import logging
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -13,7 +14,7 @@ from app.services.ai.prompt_service import get_prompt_template
 from app.services.ai.scoring import score_session_transcript, batch_score_recent
 from app.services.ai.analysis import analyze_trend, detect_anomalies
 from app.services.ai.high_intent_service import identify_high_intent, list_high_intent_users
-from app.services.ai.kb_service import qa_search, sync_session_to_kb
+from app.services.ai.kb_service import qa_search, qa_search_stream, sync_session_to_kb
 from app.services.ai.post_collection import process_session_post_collection
 from app.models.analysis_reports import AnalysisReport
 from app.models.live_sessions import LiveSession
@@ -289,6 +290,36 @@ def knowledge_qa(req: QaRequest, db: Session = Depends(get_db)):
     history = [item.model_dump() for item in req.history[-8:]]
     result = qa_search(db, question=req.question, category=req.category, history=history)
     return result
+
+
+@router.post("/qa/stream")
+def knowledge_qa_stream(req: QaRequest, db: Session = Depends(get_db)):
+    """知识库问答（流式输出）
+
+    返回 SSE（Server-Sent Events）流，每个事件格式：
+        data: {"type": "token", "content": "文字片段"}
+
+    最后一条事件包含引用来源：
+        data: {"type": "done", "sources": [...], "has_result": true}
+
+    前端用 fetch + ReadableStream 逐字读取并实时显示，像 ChatGPT 一样的打字效果。
+    """
+    history = [item.model_dump() for item in req.history[-8:]]
+
+    return StreamingResponse(
+        qa_search_stream(
+            db,
+            question=req.question,
+            category=req.category,
+            history=history,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # 禁用 nginx 缓冲，确保逐字推送
+        },
+    )
 
 
 @router.post("/kb/save/{session_id}", response_model=AiKbSaveResponse)

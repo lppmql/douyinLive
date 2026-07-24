@@ -1,7 +1,7 @@
 <!-- 知识库 — 聊天面板（Naive UI 组件替代手写 HTML） -->
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue';
-import { NButton, NInput, NScrollbar, NSkeleton } from 'naive-ui';
+import { computed, nextTick, ref, watch } from 'vue';
+import { NButton, NInput, NScrollbar } from 'naive-ui';
 import type { ChatMessage } from '../composables/useKnowledgeChat';
 
 defineOptions({ name: 'KnowledgeChatPanel' });
@@ -25,18 +25,36 @@ const emit = defineEmits<{
 /** 聊天区底部锚点（自动滚动用） */
 const chatEndRef = ref<HTMLElement | null>(null);
 
-/** 消息变化时自动滚动到底部 */
-watch(() => props.messages.length, async () => {
-  await nextTick();
-  chatEndRef.value?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+/** 最后一条 AI 消息（用于判断流式状态） */
+const lastAiMsg = computed(() => {
+  const msgs = props.messages;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'ai') return msgs[i];
+  }
+  return null;
 });
+
+/**
+ * 自动滚动到底部（仅在新消息出现时）
+ *
+ * 只监听消息数量变化，不监听内容长度变化。
+ * 这样发送新消息时会自动滚到底部，但 AI 流式打字过程中不会强制跟随滚动，
+ * 用户可以自由阅读已输出的内容。
+ */
+watch(
+  () => props.messages.length,
+  async () => {
+    await nextTick();
+    chatEndRef.value?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+);
 
 /** 推荐问题列表（预设，点击即发送） */
 const recommendedQuestions = [
-  '零食店直播怎么提高留资率？',
-  '常见的直播违规话术有哪些？',
-  '投流 ROI 太低怎么优化？',
-  '哪些品类适合做直播引流？'
+  '留资率突然下降，可能是什么原因？怎么排查？',
+  '哪些避坑话题最容易让观众主动私信留资？',
+  '高意向用户的评论一般有哪些特征？怎么引导？',
+  '直播开场前5分钟讲什么内容最能留住人？',
 ];
 
 /** 将键盘事件交给问答编排层，统一判断回车发送和换行。 */
@@ -123,19 +141,22 @@ function handleKeydown(event: KeyboardEvent) {
 
             <!-- 用户消息（右侧） -->
             <div v-else class="msg-row msg-row--user">
-              <div class="msg-bubble msg-bubble--user">
-                <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
+              <div class="msg-user-wrap">
+                <div class="msg-bubble msg-bubble--user">
+                  <div class="whitespace-pre-wrap">{{ chatMessage.content }}</div>
+                </div>
+                <div v-if="chatMessage.timestamp" class="msg-time">{{ chatMessage.timestamp }}</div>
               </div>
             </div>
           </div>
 
-          <!-- 加载中（用 NSkeleton 替代手写动画） -->
-          <div v-if="chatting" class="msg-row msg-row--ai">
+          <!-- 等待知识库检索（还没收到第一个 token 时显示） -->
+          <div v-if="chatting && lastAiMsg && !lastAiMsg.content" class="msg-row msg-row--ai">
             <div class="msg-avatar msg-avatar--ai">
               <SvgIcon icon="mdi:robot-outline" class="text-20px" />
             </div>
             <div class="msg-bubble msg-bubble--ai msg-bubble--loading">
-              <NSkeleton text :repeat="2" :animated="true" />
+              <span class="msg-searching">正在查找知识库…</span>
             </div>
           </div>
           <div ref="chatEndRef" />
@@ -303,7 +324,27 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 .msg-bubble--loading {
-  width: 260px;
+  /* 宽度自适应文字 */
+}
+
+/* ── 搜索中提示 ── */
+.msg-searching {
+  color: #999;
+  font-size: 14px;
+}
+
+/* ── 消息时间 ── */
+.msg-user-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.msg-time {
+  font-size: 11px;
+  color: #999;
+  margin-top: 3px;
+  padding-right: 4px;
 }
 
 /* ── 消息操作 ── */

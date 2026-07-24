@@ -4,7 +4,13 @@
       "Bash(docker stop *)",
       "Bash(docker rm *)",
       "Bash(docker compose *)",
-      "Bash(grep -oP \"\\\\`[^']*\\\\`|'[^']*'\")"
+      "Bash(grep -oP \"\\\\`[^']*\\\\`|'[^']*'\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(pip show *)",
+      "Bash(ls /Users/lpp/Library/Caches/ms-playwright/ 2>/dev/null)",
+      "Read(//Users/lpp/Library/Caches/**)"
     ]
   }
 }

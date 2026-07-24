@@ -16,9 +16,9 @@ from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.review import ReviewFinding
 from app.prompts import get_system_prompt
-from app.services.ai.deepseek_client import chat
+from app.services.ai.deepseek_client import chat, chat_stream
 from app.services.ai.prompt_service import get_prompt_template
-from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices
+from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices, format_offset
 
 logger = logging.getLogger(__name__)
 
@@ -130,37 +130,43 @@ def _enrich_source_anchor_profiles(db: Session, sources: list[dict[str, Any]]) -
         source["douyin_id"] = profile.douyin_id
 
 
-def qa_search(
+def _prepare_qa_context(
     db: Session,
     question: str,
     category: str | None = None,
     history: list[dict[str, str]] | None = None,
-) -> dict[str, Any]:
-    """知识库问答 — 搜索 → 拼接上下文 → DeepSeek → 回答 + 引用来源
+) -> dict[str, Any] | None:
+    """准备问答上下文：混合搜索 → 拼接上下文 → 构建提示词。
 
-    流程：
-    1. 搜索知识库（关键词 + 可选分类）
-    2. 格式化 Top 5 结果为上下文
-    3. 调用 DeepSeek QA 提示词
-    4. 返回回答 + 引用来源
+    把搜索、RRF 融合、上下文拼接、提示词构建这些公共逻辑抽取出来，
+    让 qa_search()（一次性）和 qa_search_stream()（流式）共用。
+
+    Returns:
+        None: 没有找到相关知识或系统配置错误
+        dict: {
+            "sources": 引用来源列表,
+            "user_message": 拼接好的用户消息（已替换占位符）,
+            "system_prompt": 系统提示词,
+            "prompt_template": 提示词模板对象（用于记录观测）,
+        }
     """
-    # 1. 优先召回可追溯的时间片，再用原有整场知识补足上下文。
+    # 1. Phase 36: 混合搜索（向量 + 关键词并行）
     retrieval_question = _contextual_question(question, history)
-    time_slices = search_time_slices(db, question=retrieval_question, limit=5)
-    items = search_knowledge(
-        db,
-        keyword=retrieval_question,
-        category=category,
-        limit=max(0, 5 - len(time_slices)),
+
+    # 关键词搜索（保留作为兜底）
+    time_slices_keyword = search_time_slices(db, question=retrieval_question, limit=10)
+    items_keyword = search_knowledge(db, keyword=retrieval_question, category=category, limit=10)
+
+    # 向量搜索（Qdrant 语义相似度）
+    time_slices_vector, items_vector = _vector_search(retrieval_question)
+
+    # RRF 融合两路结果
+    time_slices, items = _hybrid_merge(
+        db, time_slices_vector, time_slices_keyword, items_vector, items_keyword
     )
 
     if not time_slices and not items:
-        # 没有匹配的知识库内容，直接让 DeepSeek 回答
-        return {
-            "answer": "知识库中没有找到相关信息。请尝试其他关键词或稍后再试。",
-            "sources": [],
-            "has_result": False,
-        }
+        return None
 
     # 2. 拼接上下文
     context_parts = []
@@ -200,11 +206,11 @@ def qa_search(
 
     knowledge_context = "\n\n---\n\n".join(context_parts)
 
-    # 3. 用 QA 提示词调用 DeepSeek
+    # 3. 用 QA 提示词构建用户消息
     prompt_template = get_prompt_template(db, "qa")
     if not prompt_template:
         logger.error("未找到 qa 提示词模板")
-        return {"answer": "系统配置错误", "sources": sources, "has_result": False}
+        return None
 
     conversation = _format_conversation(history)
     contextual_prompt = f"{conversation}\n\n当前问题：{question}" if conversation else question
@@ -212,25 +218,105 @@ def qa_search(
         "{question}", contextual_prompt
     )
 
+    return {
+        "sources": sources,
+        "user_message": user_message,
+        "system_prompt": get_system_prompt("knowledge_qa"),
+        "prompt_template": prompt_template,
+    }
+
+
+def qa_search(
+    db: Session,
+    question: str,
+    category: str | None = None,
+    history: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """知识库问答（一次性返回） — 混合搜索 → 拼接上下文 → DeepSeek → 回答 + 引用来源
+
+    Phase 36 升级：
+    1. 向量搜索（Qdrant 语义相似度）+ 关键词搜索（MySQL LIKE）并行
+    2. RRF 融合两路结果
+    3. 格式化 Top 5 结果为上下文
+    4. 调用 DeepSeek QA 提示词
+    5. 返回回答 + 引用来源
+    """
+    ctx = _prepare_qa_context(db, question, category, history)
+    if ctx is None:
+        return {
+            "answer": "知识库中没有找到相关信息。请尝试其他关键词或稍后再试。",
+            "sources": [],
+            "has_result": False,
+        }
+
     try:
         answer = chat(
-            system_prompt=get_system_prompt("knowledge_qa"),
-            user_message=user_message,
+            system_prompt=ctx["system_prompt"],
+            user_message=ctx["user_message"],
             temperature=0.5,
             max_tokens=2048,
             operation="knowledge_qa",
-            prompt_name=prompt_template.type,
-            prompt_version=prompt_template.version,
+            prompt_name=ctx["prompt_template"].type,
+            prompt_version=ctx["prompt_template"].version,
         )
     except Exception as e:
         logger.error("DeepSeek QA 回答失败: %s", e)
-        return {"answer": "AI 回答失败，请稍后重试", "sources": sources, "has_result": False}
+        return {"answer": "AI 回答失败，请稍后重试", "sources": ctx["sources"], "has_result": False}
 
     return {
         "answer": answer,
-        "sources": sources,
+        "sources": ctx["sources"],
         "has_result": True,
     }
+
+
+def qa_search_stream(
+    db: Session,
+    question: str,
+    category: str | None = None,
+    history: list[dict[str, str]] | None = None,
+):
+    """知识库问答（流式输出） — 和 qa_search 逻辑完全一样，但通过 SSE 逐字推送回答。
+
+    生成器产出的是 SSE 格式的字符串，每条格式为：
+        data: {"type": "token", "content": "文字片段"}\\n\\n
+
+    最后一条事件包含来源引用：
+        data: {"type": "done", "sources": [...], "has_result": true}\\n\\n
+
+    出错时：
+        data: {"type": "error", "message": "错误信息"}\\n\\n
+
+    用法（FastAPI StreamingResponse）：
+        return StreamingResponse(
+            qa_search_stream(db, question, category, history),
+            media_type="text/event-stream",
+        )
+    """
+    ctx = _prepare_qa_context(db, question, category, history)
+    if ctx is None:
+        # 没有找到相关知识
+        yield f"data: {json.dumps({'type': 'done', 'sources': [], 'has_result': False}, ensure_ascii=False)}\n\n"
+        return
+
+    try:
+        # 流式调用 DeepSeek，每收到一个 token 就推给前端
+        for token in chat_stream(
+            system_prompt=ctx["system_prompt"],
+            user_message=ctx["user_message"],
+            temperature=0.5,
+            operation="knowledge_qa",
+            prompt_name=ctx["prompt_template"].type,
+            prompt_version=ctx["prompt_template"].version,
+        ):
+            yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
+
+        # 流结束后发送引用来源
+        yield f"data: {json.dumps({'type': 'done', 'sources': ctx['sources'], 'has_result': True}, ensure_ascii=False)}\n\n"
+
+    except Exception as e:
+        logger.error("DeepSeek QA 流式回答失败: %s", e)
+        yield f"data: {json.dumps({'type': 'error', 'message': 'AI 回答失败，请稍后重试'}, ensure_ascii=False)}\n\n"
 
 
 def _upsert_kb_item(
@@ -250,16 +336,43 @@ def _upsert_kb_item(
         existing.title = title[:200]
         existing.content = content
         db.commit()
+        # Phase 36: 内容变更后同步向量到 Qdrant
+        _sync_kb_item_to_qdrant(existing.id, title[:200], content, source_type)
         return 0
-    db.add(KnowledgeBase(
+    kb = KnowledgeBase(
         session_id=session_id,
         category=category,
         title=title[:200],
         content=content,
         source_type=source_type,
-    ))
+    )
+    db.add(kb)
     db.commit()
+    db.refresh(kb)
+    # Phase 36: 新建后同步向量到 Qdrant
+    _sync_kb_item_to_qdrant(kb.id, title[:200], content, source_type)
     return 1
+
+
+def _sync_kb_item_to_qdrant(kb_id: int, title: str, content: str, source_type: str) -> None:
+    """把一条知识条目的向量写入 Qdrant（独立事务，失败不影响 MySQL）。"""
+    try:
+        from app.services.ai.embedding_service import embed_text
+        from app.services.ai.vector_store import upsert_knowledge_item
+
+        # 用标题+内容拼接做 embedding，标题权重更高（靠前）
+        text_for_embedding = f"{title}\n{title}\n{content}"[:3000]
+        vector = embed_text(text_for_embedding)
+        if vector:
+            upsert_knowledge_item(
+                kb_id=kb_id,
+                title=title,
+                content=content,
+                source_type=source_type,
+                vector=vector,
+            )
+    except Exception as exc:
+        logger.debug("知识条目 %d 向量同步跳过（非关键路径）: %s", kb_id, exc)
 
 
 def save_session_data_to_kb(db: Session, session_id: int) -> int:
@@ -375,6 +488,7 @@ def save_transcript_to_kb(db: Session, session_id: int) -> int:
         existing.title = f"话术 - 场次{session_id}"
         existing.category = "优质话术"
         db.commit()
+        _sync_kb_item_to_qdrant(existing.id, f"话术 - 场次{session_id}", full_text, "transcript")
         return 0
 
     kb = KnowledgeBase(
@@ -386,6 +500,8 @@ def save_transcript_to_kb(db: Session, session_id: int) -> int:
     )
     db.add(kb)
     db.commit()
+    db.refresh(kb)
+    _sync_kb_item_to_qdrant(kb.id, f"话术 - 场次{session_id}", full_text, "transcript")
     logger.info("场次 %d 话术已保存到知识库", session_id)
     return 1
 
@@ -397,6 +513,8 @@ def save_analysis_to_kb(db: Session, session_id: int) -> int:
     ).all()
 
     saved = 0
+    # Phase 36: 收集需要同步向量的条目
+    to_sync: list[tuple[int, str, str]] = []
     for r in reports:
         content = json.dumps(r.report_content, ensure_ascii=False, indent=2) if r.report_content else r.summary
         if not content:
@@ -417,7 +535,11 @@ def save_analysis_to_kb(db: Session, session_id: int) -> int:
             existing.title = title
             existing.content = normalized_content
             existing.category = "分析结论"
-            saved += int(changed)
+            if changed:
+                saved += 1
+                kb_id = getattr(existing, "id", None)
+                if kb_id is not None:
+                    to_sync.append((kb_id, title, normalized_content))
             continue
 
         kb = KnowledgeBase(
@@ -428,10 +550,17 @@ def save_analysis_to_kb(db: Session, session_id: int) -> int:
             source_type="ai_analysis",
         )
         db.add(kb)
+        db.flush()  # 获取自增 ID，不提交事务
+        kb_id = getattr(kb, "id", None)
+        if kb_id is not None:
+            to_sync.append((kb_id, title, normalized_content))
         saved += 1
 
     if saved:
         db.commit()
+        # Phase 36: 新写入和变更的条目同步向量到 Qdrant
+        for kb_id, t, c in to_sync:
+            _sync_kb_item_to_qdrant(kb_id, t, c, "ai_analysis")
         logger.info("场次 %d 的 %d 条分析结果已保存到知识库", session_id, saved)
     return saved
 
@@ -483,17 +612,235 @@ def save_review_findings_to_kb(db: Session, session_id: int) -> int:
         existing.content = content
         existing.category = "分析结论"
         db.commit()
+        if changed:
+            _sync_kb_item_to_qdrant(existing.id, title, content, "ai_analysis")
         return int(changed)
 
-    db.add(
-        KnowledgeBase(
-            session_id=session_id,
-            category="分析结论",
-            title=title,
-            content=content,
-            source_type="ai_analysis",
-        )
+    kb = KnowledgeBase(
+        session_id=session_id,
+        category="分析结论",
+        title=title,
+        content=content,
+        source_type="ai_analysis",
     )
+    db.add(kb)
     db.commit()
+    db.refresh(kb)
+    _sync_kb_item_to_qdrant(kb.id, title, content, "ai_analysis")
     logger.info("场次 %d 的 %d 条复盘发现已保存到知识库", session_id, len(findings))
     return 1
+
+
+# ── Phase 36: 混合搜索辅助函数 ──
+
+
+def _vector_search(question: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """向量搜索：对问题做 embedding，分别搜索时间片和知识条目两个向量集合。
+
+    Qdrant 不可用或 embedding 失败时返回空列表，
+    调用方检测后降级为纯关键词搜索。
+
+    Returns:
+        (时间片向量结果, 知识条目向量结果)
+    """
+    try:
+        from app.services.ai.embedding_service import embed_text
+        from app.services.ai.vector_store import search_time_slice_vectors, search_knowledge_vectors
+
+        vector = embed_text(question)
+        if vector is None:
+            return [], []
+
+        time_slices = search_time_slice_vectors(vector, limit=10)
+        items = search_knowledge_vectors(vector, limit=10)
+        return time_slices, items
+    except Exception as exc:
+        logger.debug("向量搜索跳过（Qdrant 不可用或 API 失败）: %s", exc)
+        return [], []
+
+
+def _hybrid_merge(
+    db: Session,
+    time_slices_vector: list[dict[str, Any]],
+    time_slices_keyword: list[dict[str, Any]],
+    items_vector: list[dict[str, Any]],
+    items_keyword: list[KnowledgeBase],
+) -> tuple[list[dict[str, Any]], list[KnowledgeBase]]:
+    """混合搜索合并：向量搜 + 关键词搜 → RRF 融合 → 从 MySQL 补齐完整数据。
+
+    Returns:
+        (合并后的时间片列表, 合并后的知识条目列表)
+    """
+    from app.services.ai.vector_store import rrf_fusion
+
+    # ── 时间片合并 ──
+    if time_slices_vector and time_slices_keyword:
+        fused_slices = rrf_fusion(
+            time_slices_vector,
+            time_slices_keyword,
+            vector_id_key="slice_id",
+            keyword_id_key="id",
+            top_n=8,
+        )
+        merged_slices = _resolve_slices_from_fusion(db, fused_slices, time_slices_keyword)
+        logger.info("RRF 融合时间片: 向量%d + 关键词%d → %d",
+                      len(time_slices_vector), len(time_slices_keyword), len(merged_slices))
+    elif time_slices_vector:
+        merged_slices = _resolve_slices_from_vector(db, time_slices_vector)
+        logger.info("纯向量搜索时间片: %d 条", len(merged_slices))
+    else:
+        merged_slices = time_slices_keyword
+        logger.info("关键词搜索时间片: %d 条", len(merged_slices))
+
+    # ── 知识条目合并 ──
+    if items_vector and items_keyword:
+        keyword_dicts = [
+            {"id": item.id, "title": item.title, "content": item.content, "source_type": item.source_type}
+            for item in items_keyword
+        ]
+        fused_items = rrf_fusion(items_vector, keyword_dicts, vector_id_key="kb_id", keyword_id_key="id", top_n=8)
+        # 同时提取向量来源（kb_id）和关键词来源（id）
+        kb_ids = set()
+        for f in fused_items:
+            kid = f.get("kb_id") or f.get("id")  # 兼容两路来源
+            if kid is not None:
+                kb_ids.add(kid)
+        if kb_ids:
+            rows = db.query(KnowledgeBase).filter(KnowledgeBase.id.in_(list(kb_ids))).all()
+            row_by_id = {row.id: row for row in rows}
+            merged_items = [row_by_id[kid] for kid in kb_ids if kid in row_by_id]
+        else:
+            merged_items = items_keyword
+        logger.info("RRF 融合知识条目: 向量%d + 关键词%d → %d",
+                      len(items_vector), len(items_keyword), len(merged_items))
+    elif items_vector:
+        kb_ids = [v["kb_id"] for v in items_vector if v.get("kb_id")]
+        if kb_ids:
+            rows = db.query(KnowledgeBase).filter(KnowledgeBase.id.in_(kb_ids)).all()
+            row_by_id = {row.id: row for row in rows}
+            merged_items = [row_by_id[kb_id] for kb_id in kb_ids if kb_id in row_by_id]
+        else:
+            merged_items = []
+        logger.info("纯向量搜索知识条目: %d 条", len(merged_items))
+    else:
+        merged_items = items_keyword
+        logger.info("关键词搜索知识条目: %d 条", len(merged_items))
+
+    return merged_slices, merged_items
+
+
+def _resolve_slices_from_fusion(
+    db: Session,
+    fused: list[dict[str, Any]],
+    keyword_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """用 RRF 融合结果解析时间片完整数据。
+
+    融合结果可能来自两路：
+    - 向量侧：key 是 slice_id（Qdrant point_id）
+    - 关键词侧：key 是 id（MySQL KnowledgeTimeSlice.id）
+
+    先从关键词结果中取（最快），取不到的从 MySQL 补。
+    """
+    from app.models.knowledge_time_slices import KnowledgeTimeSlice
+
+    keyword_by_id = {item["id"]: item for item in keyword_results}
+    resolved = []
+    db_ids_needed: set[int] = set()
+
+    for f_item in fused:
+        # 尝试从关键词结果中找（优先，数据最完整）
+        kw_id = f_item.get("id")      # 关键词来源
+        vec_id = f_item.get("slice_id")  # 向量来源
+
+        found_id = None
+        if kw_id is not None and kw_id in keyword_by_id:
+            found_id = kw_id
+        elif vec_id is not None and vec_id in keyword_by_id:
+            found_id = vec_id
+        elif kw_id is not None:
+            db_ids_needed.add(kw_id)
+        elif vec_id is not None:
+            db_ids_needed.add(vec_id)
+
+        if found_id is not None:
+            resolved.append({**keyword_by_id[found_id], "match_type": f_item.get("source", "unknown")})
+
+    # 向量搜索结果中不在关键词结果里的，从 MySQL 补齐
+    if db_ids_needed:
+        rows = db.query(KnowledgeTimeSlice).filter(KnowledgeTimeSlice.id.in_(list(db_ids_needed))).all()
+        for row in rows:
+            source_types = []
+            if row.transcript_text:
+                source_types.append("直播话术")
+            if row.comments_text:
+                source_types.append("用户评论")
+            if row.metric_point_count:
+                source_types.append("分钟指标")
+            excerpt = (row.transcript_text or row.comments_text or row.search_text or "")[:500]
+            resolved.append({
+                "id": row.id,
+                "session_id": row.session_id,
+                "anchor_name": row.anchor_name,
+                "session_title": row.session_title,
+                "slice_start_seconds": row.slice_start_seconds,
+                "slice_end_seconds": row.slice_end_seconds,
+                "time_range": f"{format_offset(row.slice_start_seconds)}-{format_offset(row.slice_end_seconds)}",
+                "source_types": source_types,
+                "excerpt": excerpt,
+                "score": 0,
+                "content": row.search_text,
+                "comment_count": row.comment_count,
+                "metric_point_count": row.metric_point_count,
+                "match_type": "vector",
+            })
+
+    return resolved
+
+
+def _resolve_slices_from_vector(
+    db: Session,
+    vector_results: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """纯向量搜索结果：从 MySQL 捞出时间片的完整数据。"""
+    if not vector_results:
+        return []
+    from app.models.knowledge_time_slices import KnowledgeTimeSlice
+
+    slice_ids = [v["slice_id"] for v in vector_results if v.get("slice_id")]
+    if not slice_ids:
+        return []
+
+    rows = db.query(KnowledgeTimeSlice).filter(KnowledgeTimeSlice.id.in_(slice_ids)).all()
+    row_by_id = {row.id: row for row in rows}
+
+    results = []
+    for v_item in vector_results:
+        row = row_by_id.get(v_item["slice_id"])
+        if row is None:
+            continue
+        source_types = []
+        if row.transcript_text:
+            source_types.append("直播话术")
+        if row.comments_text:
+            source_types.append("用户评论")
+        if row.metric_point_count:
+            source_types.append("分钟指标")
+        excerpt = (row.transcript_text or row.comments_text or row.search_text or "")[:500]
+        results.append({
+            "id": row.id,
+            "session_id": row.session_id,
+            "anchor_name": row.anchor_name,
+            "session_title": row.session_title,
+            "slice_start_seconds": row.slice_start_seconds,
+            "slice_end_seconds": row.slice_end_seconds,
+            "time_range": f"{format_offset(row.slice_start_seconds)}-{format_offset(row.slice_end_seconds)}",
+            "source_types": source_types,
+            "excerpt": excerpt,
+            "score": v_item.get("score", 0),
+            "content": row.search_text,
+            "comment_count": row.comment_count,
+            "metric_point_count": row.metric_point_count,
+            "match_type": "vector",
+        })
+    return results

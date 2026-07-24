@@ -7,8 +7,7 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useMessage } from 'naive-ui';
-import { unwrapServiceData } from '@/utils/service';
-import { askKnowledge } from '@/service/api/douyin';
+import { askKnowledgeStream } from '@/service/api/douyin';
 
 export type ChatMessage = {
   id: number;
@@ -16,6 +15,8 @@ export type ChatMessage = {
   content: string;
   sources?: Api.Douyin.KnowledgeSource[];
   error?: boolean;
+  /** 消息发送时间（用户消息专用），格式如 "14:30" */
+  timestamp?: string;
 };
 
 export function useKnowledgeChat() {
@@ -52,39 +53,75 @@ export function useKnowledgeChat() {
     activeSourceMsgId.value = chatMessage.id;
   }
 
-  /* ===== 发送问题 ===== */
+  /* ===== 发送问题（流式） ===== */
   async function sendQuestion(preset?: string) {
     const content = (preset || question.value).trim();
     if (!content || chatting.value) return;
 
-    messages.value.push({ id: ++messageId, role: 'user', content });
+    // 1. 先显示用户消息（带当前时间）
+    console.log('[sendQuestion] 开始发送:', content.slice(0, 30));
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    messages.value.push({ id: ++messageId, role: 'user', content, timestamp: timeStr });
     question.value = '';
     chatting.value = true;
+
+    // 2. 创建一个空的 AI 消息占位（内容会在流式回调中逐字填充）
+    const aiMsgId = ++messageId;
+    messages.value.push({
+      id: aiMsgId,
+      role: 'ai',
+      content: '',       // 空内容，token 到达后逐字追加
+      sources: [],
+    });
+
+    /** 通过 messages 响应式数组获取 AI 消息引用（确保修改能被 Vue 追踪到） */
+    const getAiMsg = (): ChatMessage | undefined =>
+      messages.value.find(m => m.id === aiMsgId);
 
     try {
       const knowledgeQuestion = contextSessionId.value
         ? `请只结合直播场次 ${contextSessionId.value} 的真实资料回答：${content}`
         : content;
-      const response = await askKnowledge(knowledgeQuestion);
-      const answer = unwrapServiceData(response, '知识检索请求失败');
-      const aiMsg: ChatMessage = {
-        id: ++messageId,
-        role: 'ai',
-        content: answer.answer || '当前真实知识库没有返回可用结论。',
-        sources: answer.sources || []
-      };
-      messages.value.push(aiMsg);
-      if (aiMsg.sources?.length) {
-        activeSources.value = aiMsg.sources;
-        activeSourceMsgId.value = aiMsg.id;
-      }
+
+      await askKnowledgeStream(
+        knowledgeQuestion,
+        {
+          // 每收到一个文字片段，追加到消息内容
+          onToken(token: string) {
+            const msg = getAiMsg();
+            if (msg) msg.content += token;
+          },
+          // 流结束，设置引用来源
+          onDone(sources, _hasResult) {
+            const msg = getAiMsg();
+            if (!msg) return;
+            msg.sources = sources;
+            if (!msg.content) {
+              msg.content = '当前真实知识库没有返回可用结论。';
+            }
+            if (msg.sources?.length) {
+              activeSources.value = msg.sources;
+              activeSourceMsgId.value = msg.id;
+            }
+          },
+          // 流中出错
+          onError(errorMsg: string) {
+            const msg = getAiMsg();
+            if (msg) {
+              msg.content = errorMsg;
+              msg.error = true;
+            }
+          },
+        }
+      );
     } catch (error) {
-      messages.value.push({
-        id: ++messageId,
-        role: 'ai',
-        content: error instanceof Error ? error.message : '知识检索请求失败，请确认 AI 服务状态后重试。',
-        error: true
-      });
+      console.error('[sendQuestion] 异常:', error);
+      const msg = getAiMsg();
+      if (msg) {
+        msg.content = error instanceof Error ? error.message : '知识检索请求失败，请确认 AI 服务状态后重试。';
+        msg.error = true;
+      }
     } finally {
       chatting.value = false;
     }
