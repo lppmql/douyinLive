@@ -312,10 +312,7 @@ function formatTime(seconds: number): string {
           </span>
         </div>
 
-        <div class="flex items-center gap-8px">
-          <NTag size="small" type="success" :bordered="false">9:16 · H.264 TS</NTag>
-          <span class="hidden sm:inline">{{ title }}</span>
-        </div>
+        <!-- 右侧控制信息已按用户要求移除 -->
       </div>
     </div>
   </div>
