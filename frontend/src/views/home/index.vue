@@ -268,7 +268,8 @@ const anchorColumns = [
       <!-- 空数据提示 -->
       <NEmpty
         v-else-if="!loading"
-        description="该日期范围内暂无直播数据"
+        description="该日期范围内暂无直播数据
+通过数据采集页扫码登录后自动同步留资数据"
         class="py-40px"
       />
 

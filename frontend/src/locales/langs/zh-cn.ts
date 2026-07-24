@@ -1,6 +1,6 @@
 const local: App.I18n.Schema = {
   system: {
-    title: '抖音直播经营中台',
+    title: '零食店直播运营系统',
     updateTitle: '系统版本更新通知',
     updateContent: '检测到系统有新版本发布，是否立即刷新页面？',
     updateConfirm: '立即刷新',
@@ -316,7 +316,7 @@ const local: App.I18n.Schema = {
     },
     dashboard: {
       placeholder: 'DataEase 数据大屏尚未配置',
-      placeholderDesc: '配置地址后可展示直播间实时数据、转化漏斗和用户画像等可视化图表',
+      placeholderDesc: '配置地址后可展示零食店避坑直播的留资转化漏斗、线索成本和主播排班等可视化图表',
       todayLeads: '今日留资',
       onlineUsers: '在线人数',
       validLeadRate: '有效留资率',
