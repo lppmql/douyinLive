@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useRouter, useRoute } from 'vue-router';
 import { fetchLiveSessionData, getLiveSessionVideoDownloadUrl } from '@/service/api/douyin';
@@ -103,14 +103,14 @@ async function load() {
   loadError.value = '';
   try {
     detail.value = unwrapServiceData(await fetchLiveSessionData(Number(props.id)), '后台没有返回该场次的详情数据。');
-    // 如果 URL 带了 ?seek= 参数（从知识库来源卡片跳转过来的），自动定位播放
+    // 如果 URL 带了 ?seek= 参数（从知识库来源卡片跳转过来的）
+    // 用 pendingSeekSeconds 而不是 seekTo()，因为播放器子组件此时还未挂载
+    //（Workbench 异步加载数据后才渲染播放器）
     const seekParam = route.query.seek;
     if (seekParam) {
       const seekSeconds = Number(seekParam);
       if (Number.isFinite(seekSeconds) && seekSeconds >= 0) {
-        // nextTick 确保播放器子组件已挂载、seekToken 的 watch 已激活
-        await nextTick();
-        reviewStore.seekTo(seekSeconds);
+        reviewStore.pendingSeekSeconds = seekSeconds;
       }
     }
   } catch (error) {

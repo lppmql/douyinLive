@@ -198,6 +198,23 @@ watch(seekToken, () => {
 
 // ── 生命周期 ──
 
+/**
+ * 处理来自知识库来源卡片的跳转 seek 请求。
+ *
+ * 场景：父页面在播放器挂载前就设置了 reviewStore.pendingSeekSeconds
+ *（因为 Workbench 异步加载数据后才渲染播放器，父页面的 nextTick 只能等到 Workbench 的 spinner，
+ * 等不到播放器）。所以播放器自己在挂载时检查这个字段。
+ */
+onMounted(() => {
+  const target = reviewStore.pendingSeekSeconds;
+  if (target !== null && target > 0) {
+    reviewStore.pendingSeekSeconds = null; // 清空，防止重复触发
+    streamStartSeconds = target;
+    reviewStore.seekTo(target);
+    nextTick(() => startPlayback());
+  }
+});
+
 onBeforeUnmount(() => {
   releasePlayer();
 });
