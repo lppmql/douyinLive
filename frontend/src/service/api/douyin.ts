@@ -578,3 +578,34 @@ export function syncRecentKnowledge(limit = 20) {
 export function fetchPrompts(type?: string) {
   return backendRequest<Api.Douyin.PromptTemplate[]>({ url: `${API_PREFIX}/ai/prompts/`, params: { type } });
 }
+
+/** 获取单个提示词模板 */
+export function fetchPromptById(id: number) {
+  return backendRequest<Api.Douyin.PromptTemplate>({ url: `${API_PREFIX}/ai/prompts/${id}` });
+}
+
+/** 创建新版本的提示词 */
+export function createPrompt(data: { type: string; content: string; name?: string; description?: string }) {
+  return backendRequest<Api.Douyin.PromptTemplate>({
+    url: `${API_PREFIX}/ai/prompts/`,
+    method: 'POST',
+    data
+  });
+}
+
+/** 编辑提示词（自动创建新版本） */
+export function updatePrompt(id: number, data: { type: string; content: string; name?: string; description?: string }) {
+  return backendRequest<Api.Douyin.PromptTemplate>({
+    url: `${API_PREFIX}/ai/prompts/${id}`,
+    method: 'PUT',
+    data
+  });
+}
+
+/** 删除提示词模板 */
+export function deletePrompt(id: number) {
+  return backendRequest<{ message: string }>({
+    url: `${API_PREFIX}/ai/prompts/${id}`,
+    method: 'DELETE'
+  });
+}

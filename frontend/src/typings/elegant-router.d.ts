@@ -30,6 +30,7 @@ declare module "@elegant-router/types" {
     "live-session-detail": "/live-sessions/:id";
     "live-sessions": "/live-sessions";
     "login": "/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?";
+    "prompt-management": "/prompt-management";
     "transcripts": "/transcripts";
     "user-management": "/user-management";
   };
@@ -76,6 +77,7 @@ declare module "@elegant-router/types" {
     | "live-session-detail"
     | "live-sessions"
     | "login"
+    | "prompt-management"
     | "transcripts"
     | "user-management"
   >;
@@ -107,6 +109,7 @@ declare module "@elegant-router/types" {
     | "knowledge"
     | "live-session-detail"
     | "live-sessions"
+    | "prompt-management"
     | "transcripts"
     | "user-management"
   >;

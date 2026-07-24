@@ -382,3 +382,15 @@
 ### Removed
 - 已删除的功能
 ```
+
+## [2026-07-24] — Prompt 管理页面（方案 A）
+
+### 新增
+- 前端 Prompt 管理页面（`/prompt-management`），菜单栏排在"主播排班"和"用户管理"之间
+- 支持新建提示词、编辑（自动创建新版本保留历史）、删除（二次确认）
+- 编辑抽屉内展示该类型所有历史版本，可对比回看
+- 后端新增 `GET /ai/prompts/{id}` 和 `PUT /ai/prompts/{id}` 接口
+
+### 变更
+- 路由顺序调整：`prompt-management` order=9，`user-management` 顺延至 order=10
+- 中英文 i18n 新增 `route.prompt-management`

@@ -161,6 +161,18 @@ export const generatedRoutes: GeneratedRoute[] = [
     }
   },
   {
+    name: 'prompt-management',
+    path: '/prompt-management',
+    component: 'layout.base$view.prompt-management',
+    meta: {
+      title: 'prompt-management',
+      i18nKey: 'route.prompt-management',
+      icon: 'mdi:code-braces',
+      order: 9,
+      keepAlive: true
+    }
+  },
+  {
     name: 'transcripts',
     path: '/transcripts',
     component: 'layout.base$view.transcripts',
@@ -180,7 +192,7 @@ export const generatedRoutes: GeneratedRoute[] = [
       title: 'user-management',
       i18nKey: 'route.user-management',
       icon: 'mdi:account-group',
-      order: 9,
+      order: 10,
       keepAlive: true,
       roles: ['R_SUPER']
     }

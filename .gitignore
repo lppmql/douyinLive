@@ -46,3 +46,6 @@ backend/storage_state/*.json
 # DataEase 外部配置
 dataease/
 .coverage
+
+# Claude Code generated files
+.claude/

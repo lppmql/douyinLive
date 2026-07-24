@@ -239,6 +239,7 @@ const local: App.I18n.Schema = {
     analysis: 'AI Analysis',
     knowledge: 'Knowledge Base',
     'anchor-schedule': 'Anchor Schedule',
+    'prompt-management': 'Prompt Management',
     'user-management': 'User Management'
   },
   page: {

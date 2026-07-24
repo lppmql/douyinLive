@@ -235,6 +235,7 @@ const local: App.I18n.Schema = {
     analysis: 'AI 复盘',
     knowledge: '知识库',
     'anchor-schedule': '主播排班',
+    'prompt-management': 'Prompt 管理',
     'user-management': '用户管理'
   },
   page: {

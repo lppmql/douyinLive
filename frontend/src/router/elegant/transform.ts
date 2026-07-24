@@ -176,6 +176,7 @@ const routeMap: RouteMap = {
   "live-session-detail": "/live-sessions/:id",
   "live-sessions": "/live-sessions",
   "login": "/login/:module(pwd-login|code-login|register|reset-pwd|bind-wechat)?",
+  "prompt-management": "/prompt-management",
   "transcripts": "/transcripts",
   "user-management": "/user-management"
 };

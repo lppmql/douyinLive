@@ -51,6 +51,26 @@ def get_latest_prompt(type: str, db: Session = Depends(get_db)):
     return t
 
 
+@router.get("/{prompt_id}", response_model=PromptResponse)
+def get_prompt_by_id(prompt_id: int, db: Session = Depends(get_db)):
+    """按 ID 获取单条提示词"""
+    t = db.query(PromptTemplate).filter(PromptTemplate.id == prompt_id).first()
+    if not t:
+        raise HTTPException(404, "提示词不存在")
+    return t
+
+
+@router.put("/{prompt_id}", response_model=PromptResponse)
+def update_prompt_template(prompt_id: int, data: PromptCreate, db: Session = Depends(get_db)):
+    """编辑提示词 — 自动创建新版本，保留旧版本历史"""
+    existing = db.query(PromptTemplate).filter(PromptTemplate.id == prompt_id).first()
+    if not existing:
+        raise HTTPException(404, "原始提示词不存在")
+    return create_prompt(db, type=data.type, content=data.content,
+                          name=data.name or existing.name,
+                          description=data.description or existing.description)
+
+
 @router.post("/", response_model=PromptResponse)
 def create_prompt_template(data: PromptCreate, db: Session = Depends(get_db)):
     """创建新版本提示词"""
