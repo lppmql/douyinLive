@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # DeepSeek
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_API_URL: str = "https://api.deepseek.com"
+    DEEPSEEK_MODEL: str = "deepseek-v4-flash"
 
     # ASR 并发。旧固定值仅保留环境兼容，真实 Worker 使用资源自适应上限。
     MAX_REALTIME_ASR_TASKS: int = 1
@@ -65,6 +66,13 @@ class Settings(BaseSettings):
 
     # P1: 知识库时间片
     KNOWLEDGE_SLICE_SECONDS: int = 300
+
+    # Phase 36: Qdrant 向量数据库（知识库 RAG 语义检索）
+    QDRANT_HOST: str = "localhost"
+    QDRANT_PORT: int = 6333
+    QDRANT_COLLECTION_KB: str = "douyin_live_knowledge"
+    QDRANT_COLLECTION_SLICES: str = "douyin_live_time_slices"
+    HF_ENDPOINT: str = "https://hf-mirror.com"  # HuggingFace 镜像（国内下载模型用）
 
     # Playwright / 采集
     PLAYWRIGHT_HEADLESS: bool = True

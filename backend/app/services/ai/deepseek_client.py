@@ -39,7 +39,7 @@ def get_client() -> OpenAI:
 def chat(
     system_prompt: str,
     user_message: str,
-    model: str = "deepseek-chat",
+    model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
     response_format: dict | None = None,
@@ -54,7 +54,7 @@ def chat(
     Args:
         system_prompt: 系统提示词
         user_message: 用户消息
-        model: 模型名，默认 deepseek-chat
+        model: 模型名，默认从 DEEPSEEK_MODEL 配置读取
         temperature: 温度
         max_tokens: 最大输出 token
         response_format: 响应格式，如 {"type": "json_object"}
@@ -62,6 +62,8 @@ def chat(
     Returns:
         模型回复文本
     """
+    if model is None:
+        model = settings.DEEPSEEK_MODEL
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
@@ -129,7 +131,7 @@ def chat(
 def chat_json(
     system_prompt: str,
     user_message: str,
-    model: str = "deepseek-chat",
+    model: str | None = None,
     temperature: float = 0.3,
     operation: str = "chat_json",
     session_id: int | None = None,
@@ -155,7 +157,7 @@ def chat_json(
 def chat_stream(
     system_prompt: str,
     user_message: str,
-    model: str = "deepseek-chat",
+    model: str | None = None,
     temperature: float = 0.7,
     operation: str = "chat_stream",
     session_id: int | None = None,
@@ -163,6 +165,8 @@ def chat_stream(
     prompt_version: int | None = None,
 ):
     """流式调用 DeepSeek，返回迭代器"""
+    if model is None:
+        model = settings.DEEPSEEK_MODEL
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
