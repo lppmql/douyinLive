@@ -58,20 +58,20 @@ const bgColor = computed(() => {
         class="login-intro hidden overflow-hidden rounded-14px p-32px text-white lg:flex lg:flex-col lg:justify-between"
       >
         <div>
-          <NTag :bordered="false" round class="!bg-white/16 !text-white">真实数据 · 全链路经营</NTag>
-          <h1 class="mb-0 mt-22px text-30px font-700 leading-42px">从采集到分析，一处掌握每场直播</h1>
+          <NTag :bordered="false" round class="!bg-white/16 !text-white">零食店避坑 · 留资复盘</NTag>
+          <h1 class="mb-0 mt-22px text-30px font-700 leading-42px">从选址到留资，每一场都有据可查</h1>
           <p class="mb-0 mt-14px text-14px leading-24px text-white/78">
-            统一管理主播、场次、评论、分钟趋势、ASR 话术、AI 分析与知识库，所有经营结论都可追溯到真实数据。
+            统一管理零食店留资直播的场次、评论、话术与 AI 复盘分析。通过省份选址、预算品牌、快招避坑等知识，用资料钩子引导私信留资。所有经营结论都基于真实采集数据。
           </p>
         </div>
         <div class="flex flex-col gap-12px text-13px text-white/85">
           <span class="flex items-center gap-8px">
             <SvgIcon icon="mdi:shield-check-outline" />
-            登录后再访问业务数据
+            登录后查看留资数据与 AI 复盘
           </span>
           <span class="flex items-center gap-8px">
             <SvgIcon icon="mdi:database-check-outline" />
-            缺失数据明确标记，不伪造补值
+            采集进度与失败原因全程可见
           </span>
           <span class="flex items-center gap-8px">
             <SvgIcon icon="mdi:chart-timeline-variant" />
@@ -103,7 +103,7 @@ const bgColor = computed(() => {
           </header>
           <main class="pt-24px">
             <h3 class="text-18px text-primary font-medium">{{ $t(activeModule.label) }}</h3>
-            <p class="mb-0 mt-6px text-12px text-gray-500">登录后可访问已授权的直播经营数据</p>
+            <p class="mb-0 mt-6px text-12px text-gray-500">登录后可访问已授权的留资数据分析</p>
             <div class="pt-24px">
               <Transition :name="themeStore.page.animateMode" mode="out-in" appear>
                 <component :is="activeModule.component" />
