@@ -298,10 +298,12 @@ def _apply_summary_metrics_to_session(session: LiveSession, sm: dict) -> None:
 def _prune_unmapped_sessions(db: Session, room: LiveRoom) -> int:
     """企业映射成功后删除无法安全归属主播的历史场次，避免污染场次列表。"""
     child_tables = (
-        "high_intent_users", "analysis_reports", "leads",
-        "live_audience_profiles", "asr_tasks",
+        "ai_call_traces", "analysis_reports", "asr_audio_chunks", "asr_tasks",
+        "comments", "high_intent_users", "knowledge_base", "knowledge_time_slices",
+        "leads", "live_audience_profiles", "live_metrics",
+        "review_action_items", "review_findings",
+        "script_assets", "stream_sources",
         "transcript_full_texts", "transcript_segments",
-        "knowledge_base", "stream_sources", "comments", "live_metrics",
     )
     session_ids = [
         row[0]

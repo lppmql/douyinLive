@@ -255,19 +255,19 @@ onMounted(getData);
               <!-- 代码编辑器 -->
               <NFormItem label="提示词内容">
                 <div class="code-editor-wrapper">
-                  <div class="code-editor-gutter">
-                    <div v-for="n in lineCount" :key="n" class="code-editor-line-number">{{ n }}</div>
+                  <div class="code-editor-body">
+                    <div class="code-editor-gutter">
+                      <div v-for="n in lineCount" :key="n" class="code-editor-line-number">{{ n }}</div>
+                    </div>
+                    <textarea
+                      ref="textareaRef"
+                      v-model="editForm.content"
+                      class="code-editor-textarea"
+                      placeholder="输入提示词模板，使用 {变量名} 作为占位符"
+                      spellcheck="false"
+                    />
                   </div>
-                  <textarea
-                    ref="textareaRef"
-                    v-model="editForm.content"
-                    class="code-editor-textarea"
-                    placeholder="输入提示词模板，使用 {变量名} 作为占位符"
-                    spellcheck="false"
-                  />
-                </div>
-                <div class="code-editor-footer">
-                  <span>{{ lineCount }} 行 · {{ charCount }} 字符</span>
+                  <div class="code-editor-status-bar">{{ lineCount }} 行 · {{ charCount }} 字符</div>
                 </div>
               </NFormItem>
 
@@ -391,13 +391,15 @@ onMounted(getData);
 /* 代码编辑器 */
 .code-editor-wrapper {
   width: 100%;
-  display: flex;
   border: 1px solid #d9d9d9;
   border-radius: 6px;
   overflow: hidden;
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
   font-size: 13px;
   line-height: 1.6;
+}
+.code-editor-body {
+  display: flex;
   min-height: 200px;
 }
 .code-editor-gutter {
@@ -418,7 +420,8 @@ onMounted(getData);
   line-height: inherit; tab-size: 2; background: #fff; min-height: 200px;
 }
 .code-editor-textarea:focus { background: #fafafa; }
-.code-editor-footer { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; color: #999; }
+.code-editor-status-bar { background: #f8f8f8; border-top: 1px solid #e8e8e8; padding: 3px 12px; font-size: 11px; color: #999; line-height: 1.8; text-align: right; }
+
 
 /* 变量标签 */
 .var-tags { display: flex; flex-wrap: wrap; gap: 4px; }
