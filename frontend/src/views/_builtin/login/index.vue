@@ -53,32 +53,7 @@ const bgColor = computed(() => {
 <template>
   <div class="relative size-full flex-center overflow-hidden p-16px lt-sm:p-12px" :style="{ backgroundColor: bgColor }">
     <WaveBg :theme-color="bgThemeColor" />
-    <div class="relative z-4 grid w-full max-w-820px items-stretch gap-16px lg:grid-cols-[360px_440px]">
-      <section
-        class="login-intro hidden overflow-hidden rounded-14px p-32px text-white lg:flex lg:flex-col lg:justify-between"
-      >
-        <div>
-          <NTag :bordered="false" round class="!bg-white/16 !text-white">真实数据 · 全链路经营</NTag>
-          <h1 class="mb-0 mt-22px text-30px font-700 leading-42px">从采集到分析，一处掌握每场直播</h1>
-          <p class="mb-0 mt-14px text-14px leading-24px text-white/78">
-            统一管理主播、场次、评论、分钟趋势、ASR 话术、AI 分析与知识库，所有经营结论都可追溯到真实数据。
-          </p>
-        </div>
-        <div class="flex flex-col gap-12px text-13px text-white/85">
-          <span class="flex items-center gap-8px">
-            <SvgIcon icon="mdi:shield-check-outline" />
-            登录后再访问业务数据
-          </span>
-          <span class="flex items-center gap-8px">
-            <SvgIcon icon="mdi:database-check-outline" />
-            缺失数据明确标记，不伪造补值
-          </span>
-          <span class="flex items-center gap-8px">
-            <SvgIcon icon="mdi:chart-timeline-variant" />
-            采集进度与失败原因全程可见
-          </span>
-        </div>
-      </section>
+    <div class="relative z-4 grid w-full max-w-820px items-stretch gap-16px lg:grid-cols-[440px]">
 
       <NCard :bordered="false" class="min-w-0 w-full rd-14px shadow-xl">
         <div class="w-full max-w-400px">
@@ -117,10 +92,4 @@ const bgColor = computed(() => {
 </template>
 
 <style scoped>
-.login-intro {
-  background:
-    radial-gradient(circle at 85% 15%, rgba(255, 255, 255, 0.22), transparent 30%),
-    linear-gradient(145deg, #155eef, #0d9488);
-  box-shadow: 0 24px 60px rgba(21, 94, 239, 0.25);
-}
 </style>
