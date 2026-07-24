@@ -394,3 +394,10 @@
 ### 变更
 - 路由顺序调整：`prompt-management` order=9，`user-management` 顺延至 order=10
 - 中英文 i18n 新增 `route.prompt-management`
+
+## [2026-07-24] — Prompt 页改为"仅管理生效提示词"
+
+### 变更
+- 后端新增 `GET /ai/prompts/active` 接口，返回 6 种注册类型的最新版本
+- 前端重写 Prompt 管理页：加载时自动展示生效的 6 条提示词，去掉"新建"按钮和类型筛选
+- 编辑抽屉的"类型"字段改为禁用，禁止变更类型

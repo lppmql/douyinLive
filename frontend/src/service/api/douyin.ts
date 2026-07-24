@@ -609,3 +609,8 @@ export function deletePrompt(id: number) {
     method: 'DELETE'
   });
 }
+
+/** 获取项目注册的所有类型的最新版提示词 */
+export function fetchActivePrompts() {
+  return backendRequest<Api.Douyin.PromptTemplate[]>({ url: `${API_PREFIX}/ai/prompts/active` });
+}

@@ -5,8 +5,9 @@ import {
   NDrawer, NDrawerContent, NInput, NForm, NFormItem,
   NSelect, NPopconfirm, NAlert, NEmpty,
   useMessage,
+  NSkeleton,
 } from 'naive-ui';
-import { fetchPrompts, createPrompt, updatePrompt, deletePrompt } from '@/service/api/douyin';
+import { fetchActivePrompts, fetchPrompts, updatePrompt, deletePrompt } from '@/service/api/douyin';
 import { unwrapServiceData, getServiceErrorMessage } from '@/utils/service';
 import TableHeaderOperation from '@/components/advanced/table-header-operation.vue';
 
@@ -14,7 +15,7 @@ defineOptions({ name: 'PromptManagement' });
 
 const ms = useMessage();
 
-/** 提示词类型选项 */
+/** 6 种提示词类型映射，供表格展示和编辑时选择 */
 const TYPE_OPTIONS = [
   { label: '话术评分 (speech_score)', value: 'speech_score' },
   { label: '趋势分析 (trend_analysis)', value: 'trend_analysis' },
@@ -26,22 +27,22 @@ const TYPE_OPTIONS = [
 
 /* ===== 数据状态 ===== */
 const loading = ref(false);
+/** 当前生效的 6 条提示词（每种类型的最新版本） */
 const prompts = ref<Api.Douyin.PromptTemplate[]>([]);
-const searchType = ref<string | null>(null);
 const editDrawerOpen = ref(false);
-const editMode = ref<'create' | 'edit'>('create');
 const editForm = ref({ type: 'speech_score', name: '', content: '', description: '' });
 const editId = ref<number | null>(null);
+/** 当前编辑类型的全部历史版本 */
 const versionHistory = ref<Api.Douyin.PromptTemplate[]>([]);
 const saving = ref(false);
 const tableError = ref('');
 
-/* ===== 获取数据 ===== */
+/* ===== 加载生效提示词 ===== */
 async function getData() {
   loading.value = true;
   tableError.value = '';
   try {
-    const result = await fetchPrompts(searchType.value ?? undefined);
+    const result = await fetchActivePrompts();
     prompts.value = unwrapServiceData(result, '加载提示词列表失败');
   } catch (err: unknown) {
     tableError.value = getServiceErrorMessage(err, '加载失败');
@@ -50,24 +51,8 @@ async function getData() {
   }
 }
 
-function handleSearch() { getData(); }
-function handleReset() {
-  searchType.value = null;
-  getData();
-}
-
-/* ===== 打开新建抽屉 ===== */
-function openCreate() {
-  editMode.value = 'create';
-  editId.value = null;
-  editForm.value = { type: 'speech_score', name: '', content: '', description: '' };
-  versionHistory.value = [];
-  editDrawerOpen.value = true;
-}
-
 /* ===== 打开编辑抽屉 ===== */
 async function openEdit(row: Api.Douyin.PromptTemplate) {
-  editMode.value = 'edit';
   editId.value = row.id;
   editForm.value = {
     type: row.type,
@@ -75,6 +60,7 @@ async function openEdit(row: Api.Douyin.PromptTemplate) {
     content: row.content,
     description: row.description || '',
   };
+  // 加载该类型的所有历史版本
   try {
     const result = await fetchPrompts(row.type);
     const all = unwrapServiceData(result, '获取历史版本失败');
@@ -85,7 +71,7 @@ async function openEdit(row: Api.Douyin.PromptTemplate) {
   editDrawerOpen.value = true;
 }
 
-/* ===== 保存 ===== */
+/* ===== 保存（编辑 → 自动创建新版本） ===== */
 async function handleSave() {
   if (!editForm.value.content.trim()) {
     ms.warning('提示词内容不能为空');
@@ -93,15 +79,9 @@ async function handleSave() {
   }
   saving.value = true;
   try {
-    if (editMode.value === 'create') {
-      const result = await createPrompt(editForm.value);
-      const created = unwrapServiceData(result, '创建失败');
-      ms.success(`已创建版本 v${created.version}`);
-    } else {
-      const result = await updatePrompt(editId.value!, editForm.value);
-      const updated = unwrapServiceData(result, '保存失败');
-      ms.success(`已创建新版本 v${updated.version}，旧版本保留在历史中`);
-    }
+    const result = await updatePrompt(editId.value!, editForm.value);
+    const updated = unwrapServiceData(result, '保存失败');
+    ms.success(`已创建新版本 v${updated.version}，旧版本保留在历史中`);
     editDrawerOpen.value = false;
     getData();
   } catch (err: unknown) {
@@ -111,7 +91,7 @@ async function handleSave() {
   }
 }
 
-/* ===== 删除 ===== */
+/* ===== 删除（清理无用旧版本） ===== */
 async function handleDelete(id: number) {
   try {
     await deletePrompt(id);
@@ -124,45 +104,43 @@ async function handleDelete(id: number) {
 
 /* ===== 表格列定义 ===== */
 const columns = [
-  { title: 'ID', key: 'id', width: 60 },
-  {
-    title: '类型', key: 'type', width: 150,
+  { title: '类型', key: 'type', width: 160,
     render: (row: Api.Douyin.PromptTemplate) => {
       const opt = TYPE_OPTIONS.find(t => t.value === row.type);
-      return opt?.label || row.type;
+      return h('div', [
+        h(NTag, { size: 'small', type: 'primary' }, { default: () => opt?.label || row.type }),
+      ]);
     },
   },
+  { title: '名称', key: 'name', width: 180,
+    render: (row: Api.Douyin.PromptTemplate) => row.name || '-' },
   {
-    title: '名称', key: 'name', width: 160,
-    render: (row: Api.Douyin.PromptTemplate) => row.name || '-',
-  },
-  {
-    title: '版本', key: 'version', width: 70,
+    title: '当前版本', key: 'version', width: 90,
     render: (row: Api.Douyin.PromptTemplate) => h(NTag, { size: 'small', type: 'info' }, { default: () => `v${row.version}` }),
   },
   {
-    title: '用途说明', key: 'description', minWidth: 160,
+    title: '用途说明', key: 'description', minWidth: 180,
     render: (row: Api.Douyin.PromptTemplate) => row.description || '-',
   },
   {
-    title: '内容预览', key: 'content', minWidth: 200, ellipsis: { tooltip: true },
+    title: '内容预览', key: 'content', minWidth: 240, ellipsis: { tooltip: true },
     render: (row: Api.Douyin.PromptTemplate) =>
-      row.content.length > 80 ? `${row.content.slice(0, 80)}...` : row.content,
+      row.content.length > 100 ? `${row.content.slice(0, 100)}...` : row.content,
   },
   {
-    title: '创建时间', key: 'created_at', width: 170,
+    title: '最后更新', key: 'created_at', width: 170,
     render: (row: Api.Douyin.PromptTemplate) =>
       row.created_at ? new Date(row.created_at).toLocaleString('zh-CN') : '-',
   },
   {
-    title: '操作', key: 'actions', width: 140, fixed: 'right' as const,
+    title: '操作', key: 'actions', width: 120, fixed: 'right' as const,
     render: (row: Api.Douyin.PromptTemplate) => [
       h(NButton, { size: 'small', type: 'primary', secondary: true, onClick: () => openEdit(row) }, { default: () => '编辑' }),
       h(NPopconfirm, {
         onPositiveClick: () => handleDelete(row.id),
         positiveButtonProps: { type: 'error' },
       }, {
-        default: () => '删除后不可恢复，确认删除？',
+        default: () => '删除后不可恢复，确认删除该版本？',
         trigger: () => h(NButton, { size: 'small', type: 'error', secondary: true, style: 'margin-left: 8px' }, { default: () => '删除' }),
       }),
     ],
@@ -174,36 +152,21 @@ onMounted(() => { getData(); });
 
 <template>
   <NSpace vertical :size="16" class="business-page">
-    <NCard :bordered="false" class="card-wrapper h-full" title="Prompt 模板管理">
+    <NCard :bordered="false" class="card-wrapper h-full" title="Prompt 管理（项目生效提示词）">
       <!-- 加载错误 -->
       <NAlert v-if="tableError" class="mb-16px" type="error" :bordered="false" show-icon>
         {{ tableError }}
         <NButton size="small" secondary @click="getData">重新加载</NButton>
       </NAlert>
 
-      <!-- 工具栏 -->
+      <!-- 工具栏：只有刷新 -->
       <div class="business-toolbar mb-16px">
-        <div class="business-toolbar__filters">
-          <NSelect
-            v-model:value="searchType"
-            placeholder="按类型筛选"
-            clearable
-            :options="TYPE_OPTIONS"
-            class="w-280px"
-            @update:value="handleSearch"
-          />
-          <NButton @click="handleReset">重置</NButton>
+        <div class="business-toolbar__info">
+          <NTag type="success" round size="small">6 种提示词类型</NTag>
+          <span style="margin-left: 8px; font-size: 13px; color: #999;">编辑自动创建新版本，不影响旧版调用</span>
         </div>
         <div class="business-toolbar__actions">
-          <NButton type="primary" @click="openCreate">
-            <template #icon><SvgIcon icon="mdi:plus" /></template>
-            新建提示词
-          </NButton>
-          <TableHeaderOperation :loading="loading" @refresh="getData">
-            <template #default>
-              <NTag type="info" round size="small">编辑自动创建新版本，不覆盖旧版</NTag>
-            </template>
-          </TableHeaderOperation>
+          <TableHeaderOperation :loading="loading" @refresh="getData" />
         </div>
       </div>
 
@@ -221,19 +184,19 @@ onMounted(() => { getData(); });
           :bordered="false"
           class="min-h-0"
         />
-        <NEmpty v-if="!loading && prompts.length === 0" description="暂无提示词模板" class="py-40px" />
+        <NEmpty v-if="!loading && prompts.length === 0" description="暂无生效提示词" class="py-40px" />
       </div>
     </NCard>
 
     <!-- 编辑抽屉 -->
     <NDrawer v-model:show="editDrawerOpen" :width="680" placement="right">
       <NDrawerContent
-        :title="editMode === 'create' ? '新建提示词' : '编辑提示词（自动创建新版本）'"
+        title="编辑提示词（自动创建新版本，保留旧版）"
         :native-scrollbar="false"
       >
         <NForm label-placement="top" label-width="auto">
           <NFormItem label="类型">
-            <NSelect v-model:value="editForm.type" :options="TYPE_OPTIONS" placeholder="选择提示词类型" />
+            <NSelect v-model:value="editForm.type" :options="TYPE_OPTIONS" placeholder="选择提示词类型" disabled />
           </NFormItem>
           <NFormItem label="名称">
             <NInput v-model:value="editForm.name" placeholder="提示词名称（可选）" />
@@ -253,7 +216,7 @@ onMounted(() => { getData(); });
         </NForm>
 
         <!-- 版本历史 -->
-        <template v-if="editMode === 'edit' && versionHistory.length > 0" #footer>
+        <template v-if="versionHistory.length > 0" #footer>
           <details style="margin-top: 12px; font-size: 13px;">
             <summary><strong>版本历史（{{ versionHistory.length }} 个版本）</strong></summary>
             <div v-for="v in versionHistory" :key="v.id" style="margin-top: 8px; padding: 8px; background: #f5f5f5; border-radius: 6px;">
@@ -273,9 +236,7 @@ onMounted(() => { getData(); });
         <template #footer>
           <NSpace justify="end">
             <NButton @click="editDrawerOpen = false">取消</NButton>
-            <NButton type="primary" :loading="saving" @click="handleSave">
-              {{ editMode === 'create' ? '创建' : '保存为新版本' }}
-            </NButton>
+            <NButton type="primary" :loading="saving" @click="handleSave">保存为新版本</NButton>
           </NSpace>
         </template>
       </NDrawerContent>
@@ -289,7 +250,7 @@ onMounted(() => { getData(); });
 .business-toolbar {
   display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
 }
-.business-toolbar__filters { display: flex; align-items: center; gap: 8px; }
+.business-toolbar__info { display: flex; align-items: center; }
 .business-toolbar__actions { display: flex; align-items: center; gap: 8px; }
 .business-table-shell { flex: 1; min-height: 0; overflow: auto; }
 </style>

@@ -51,6 +51,20 @@ def get_latest_prompt(type: str, db: Session = Depends(get_db)):
     return t
 
 
+@router.get("/active", response_model=list[PromptResponse])
+def get_active_prompts(db: Session = Depends(get_db)):
+    """返回项目注册的所有类型的最新版提示词"""
+    from app.prompts import DEFAULT_PROMPTS
+    results: list[PromptTemplate] = []
+    for definition in DEFAULT_PROMPTS:
+        t = db.query(PromptTemplate).filter(
+            PromptTemplate.type == definition.type
+        ).order_by(PromptTemplate.version.desc()).first()
+        if t:
+            results.append(t)
+    return results
+
+
 @router.get("/{prompt_id}", response_model=PromptResponse)
 def get_prompt_by_id(prompt_id: int, db: Session = Depends(get_db)):
     """按 ID 获取单条提示词"""
