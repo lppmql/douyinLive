@@ -4,6 +4,7 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -31,6 +32,8 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
+# 浏览器 <video> 标签发请求时无法带 JWT header，因此回放流端点放在公开路由上
+stream_router = APIRouter(tags=["直播场次-流"])
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 AVATAR_HOST_SUFFIXES = (".douyinpic.com", ".byteimg.com")
 LIVE_SESSION_LIST_COLUMNS = (
@@ -256,7 +259,7 @@ def download_session_video(session_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.get("/{session_id}/playback")
+@stream_router.get("/live-sessions/{session_id}/playback")
 def playback_session_video(
     session_id: int,
     start_seconds: float = Query(0, ge=0),
@@ -326,10 +329,25 @@ def update_session(session_id: int, data: LiveSessionUpdate, db: Session = Depen
 
 @router.delete("/{session_id}", response_model=MessageResponse)
 def delete_session(session_id: int, db: Session = Depends(get_db)):
-    """删除直播场次"""
+    """删除直播场次（级联删除关联的评论、指标、话术、知识库等所有子表数据）"""
     s = db.get(LiveSession, session_id)
     if not s:
         raise HTTPException(404, "直播场次不存在")
+
+    # 安全兜底：先清理关联子表数据（数据库层已有 ON DELETE CASCADE，此处显式清理避免长事务锁）
+    child_tables = [
+        "ai_call_traces", "analysis_reports", "asr_audio_chunks", "asr_tasks",
+        "comments", "high_intent_users", "knowledge_base", "knowledge_time_slices",
+        "leads", "live_audience_profiles", "live_metrics",
+        "review_action_items", "review_findings",
+        "script_assets", "stream_sources",
+        "transcript_full_texts", "transcript_segments",
+    ]
+    for table in child_tables:
+        db.execute(text(f"DELETE FROM {table} WHERE session_id = :sid"), {"sid": session_id})
+    # scraper_tasks 只解除关联不删除任务记录
+    db.execute(text("UPDATE scraper_tasks SET session_id = NULL WHERE session_id = :sid"), {"sid": session_id})
+
     db.delete(s)
     db.commit()
     return {"message": "删除成功"}
