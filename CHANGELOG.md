@@ -10,10 +10,15 @@
 - **一键启动自动安装依赖**：`start.sh` 启动时自动检查 Python/Node/FFmpeg/pnpm 是否安装，缺的通过 Homebrew 自动装，Docker 未安装则给出下载指引
 - **Qdrant 向量数据库随系统启动**：`start.sh` 第 1 步同时拉起 Qdrant 容器，启动后等待健康检查通过
 - **FunASR 语音转写随系统启动**：`start.sh` 第 5 步用 `--profile funasr` 拉起 FunASR 容器，等待 WebSocket 端口就绪（首次自动下载模型，最多等 5 分钟）
+- **行业知识集成（MySQL + Qdrant 双存储）**：`docs/行业知识/` 下的品牌红黑榜和区域分布文档自动导入知识库，启动时幂等导入，AI 问答可引用
+- **ASR 智能纠错（双通道）**：
+  - 第 1 层：从行业知识自动提取 145 个品牌名/术语热词，注入 FunASR hotwords 参数，提高语音识别准确率
+  - 第 2 层：后处理纠错器，用编辑距离模糊匹配（141 个品牌名词典），自动校正 ASR 识别错的品牌名（如「好想赖」→「好想来」）
 - 新增 ADR 0017：《一键启动全服务覆盖与环境自动安装》
 
 ### Fixed
 - **话术转写一直失败**：根因是 FunASR Docker 容器从未被启动（`profiles: [funasr]` 需显式 `--profile` 才能拉起），`start.sh` 原来只有占位符没有实际启动命令
+- **Qdrant 健康检查 404**：`start.sh` 里 Qdrant 健康检查 URL 从 `/health` 改为 `/healthz`（Qdrant v1.13.5 实际端点）
 
 ---
 
