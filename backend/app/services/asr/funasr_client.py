@@ -55,6 +55,7 @@ class FunasrClient:
                 self.ws_url,
                 ping_interval=30,
                 max_size=10_485_760,  # 10MB
+                compression=None,  # 禁用 WebSocket 压缩：FunASR 的 C++ websocketpp 服务端不支持 permessage-deflate，开启会导致 JSON 配置消息变乱码
             )
             logger.info(f"FunASR 已连接: {self.ws_url}")
             return True
