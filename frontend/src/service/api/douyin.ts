@@ -116,6 +116,15 @@ export function getLiveSessionPlaybackUrl(id: number, startSeconds = 0) {
   return `${backendBaseUrl}${API_PREFIX}/live-sessions/${id}/playback?start_seconds=${Math.max(0, startSeconds).toFixed(3)}`;
 }
 
+/** 自动刷新场次流地址（用已保存的 Cookie 重新抓取 m3u8）。
+ *  播放失败或转写前调用，后端会用浏览器打开大屏页面重新提取流地址。 */
+export function refreshSessionStream(sessionId: number) {
+  return backendRequest<{ message: string; stream_url: string; source: string }>({
+    url: `${API_PREFIX}/live-sessions/${sessionId}/refresh-stream`,
+    method: 'POST',
+  });
+}
+
 /* ---------- 采集 ---------- */
 
 /** 获取采集器状态 */

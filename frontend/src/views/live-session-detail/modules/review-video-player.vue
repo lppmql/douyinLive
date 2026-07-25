@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import mpegts from 'mpegts.js';
-import { getStreamUrl } from '@/service/api/douyin';
+import { getStreamUrl, refreshSessionStream } from '@/service/api/douyin';
 import { useReviewStore } from '@/store/modules/review';
 
 defineOptions({ name: 'ReviewVideoPlayer' });
@@ -21,6 +21,7 @@ const progressRef = ref<HTMLElement | null>(null);
 const started = ref(false);
 const loading = ref(false);
 const errorMessage = ref('');
+const refreshingStream = ref(false);
 const isPlaying = ref(false);
 const reviewStore = useReviewStore();
 const { seekToken } = storeToRefs(reviewStore);
@@ -120,13 +121,39 @@ function startPlayback() {
   // 兜底：5 秒后强制开始
   setTimeout(onReady, 5000);
 
-  // 错误处理
+  // 错误处理（播放失败时自动尝试刷新 m3u8 流地址）
   player.on(mpegts.Events.ERROR, (_type, info) => {
     console.error('[mpegts.js] 播放错误:', _type, info);
     loading.value = false;
-    errorMessage.value = '播放失败，请刷新后重试';
+    errorMessage.value = '流地址可能已过期，正在尝试自动刷新...';
     releasePlayer();
+    void tryRefreshAndReplay();
   });
+}
+
+// ── 流地址自动刷新 ──
+
+/** 调后端 API 自动刷新 m3u8 流地址，成功则自动重播。 */
+async function tryRefreshAndReplay() {
+  if (refreshingStream.value) return;
+  refreshingStream.value = true;
+  errorMessage.value = '正在自动刷新流地址（用已保存的 Cookie 重新抓取）...';
+  try {
+    const result = await refreshSessionStream(props.sessionId);
+    if (result.data?.stream_url) {
+      errorMessage.value = '';
+      // 重新开始播放（新流地址已在后端写入 DB，前端重新请求即可）
+      nextTick(() => startPlayback());
+    } else {
+      errorMessage.value = '流地址自动刷新失败，请稍后手动重试或重新采集';
+    }
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail || e?.message || '未知错误';
+    errorMessage.value = `流地址自动刷新失败: ${detail}`;
+    console.error('[stream-refresh] 刷新失败:', e);
+  } finally {
+    refreshingStream.value = false;
+  }
 }
 
 // ── 播放/暂停 ──
@@ -272,6 +299,9 @@ function formatTime(seconds: number): string {
     <NAlert v-if="errorMessage" type="error" :show-icon="true" :bordered="false" class="mx-12px mt-10px">
       {{ errorMessage }}
       <NButton text type="primary" class="ml-8px" @click="startPlayback">重新播放</NButton>
+      <NButton v-if="!refreshingStream" text type="warning" class="ml-8px" @click="tryRefreshAndReplay">
+        刷新流地址
+      </NButton>
     </NAlert>
 
     <!-- 自定义控制栏 -->

@@ -14,6 +14,7 @@ from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
 from app.models.live_audience_profiles import LiveAudienceProfile
+from app.services.collector.stream_refresh import refresh_session_stream_url
 from app.services.collector.video_download import (
     _safe_ffmpeg_headers,
     build_video_download_command,
@@ -340,6 +341,26 @@ async def _stream_h264(stream_url: str, headers: dict | None, start_seconds: flo
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
+
+
+# ── 流地址刷新 API（stream_router：无需 JWT 认证，ASR Worker 直接调用）──
+
+@stream_router.post("/live-sessions/{session_id}/refresh-stream")
+async def refresh_session_stream(session_id: int, db: Session = Depends(get_db)):
+    """自动刷新场次流地址（用已保存的 Cookie 重新从抖音抓取 m3u8）。
+
+    ASR Worker 转写前 / 前端播放失败时调用此接口，
+    成功时返回新流地址，失败时返回原因。
+    放在 stream_router 而非 router 是为了让 ASR Worker（独立进程）无需 JWT Token 即可调用。
+    """
+    result = await refresh_session_stream_url(db, session_id)
+    if not result["success"]:
+        raise HTTPException(400, result["error"] or "流地址刷新失败")
+    return {
+        "message": "流地址已刷新",
+        "stream_url": result["stream_url"],
+        "source": result["source"],
+    }
 
 
 @stream_router.get("/live-sessions/{session_id}/stream")

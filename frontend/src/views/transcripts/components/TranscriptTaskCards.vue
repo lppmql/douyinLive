@@ -48,7 +48,7 @@ defineEmits<{
 
   <!-- 失败任务提醒 -->
   <NAlert v-if="failedCount" type="warning" :bordered="false" show-icon>
-    有 {{ failedCount }} 场转写需要处理，不一定都是缺少 m3u8，也可能是回放过期或无有效语音。
+    有 {{ failedCount }} 场转写需要处理，重试时会自动探测并刷新过期的流地址。
     <NButton text type="warning" class="ml-8px" @click="$emit('openDrawer', 'failed')">
       查看具体场次和错误
     </NButton>

@@ -17,6 +17,7 @@ import signal
 from time import monotonic
 from datetime import datetime, timedelta
 
+import httpx
 from sqlalchemy.exc import DataError
 
 from app.core.config import settings
@@ -36,6 +37,7 @@ from app.services.asr.queue import list_queued_task_ids_latest_first, queue_auto
 from app.services.asr.websocket_manager import ws_manager
 from app.services.asr.corrector import correct_text as correct_asr_text
 from app.services.ai.post_collection import process_session_post_collection
+from app.services.collector.stream_health import probe_stream_url
 from app.services.resources.asr_policy import AsrResourcePlan, build_asr_resource_plan
 from app.services.resources.system_usage import get_system_usage
 from app.services.tasks.runtime import (
@@ -45,6 +47,9 @@ from app.services.tasks.runtime import (
     touch_task,
 )
 from app.services.tasks.exceptions import TaskCancellationRequested
+
+# ASR Worker 调用后端 API 的基地址（同机部署）
+_BACKEND_BASE_URL = "http://localhost:8000/api/v1"
 
 
 def build_chunk_ranges(duration_seconds: int, chunk_seconds: int) -> list[tuple[float, float | None]]:
@@ -349,6 +354,12 @@ class AsrWorker:
 
                 m3u8_url = stream.m3u8_url
                 headers = dict(stream.headers_json) if stream and stream.headers_json else {}
+
+                # ── 流地址自动刷新：转写前先探测 m3u8 是否有效 ──
+                m3u8_url, stream = await self._auto_refresh_stream_if_expired(
+                    db, task, m3u8_url, headers
+                )
+
                 chunks = self._prepare_chunks(db, task, session, m3u8_url)
 
                 for chunk in chunks:
@@ -469,6 +480,87 @@ class AsrWorker:
         """一个分片结束后释放动态槽位，让下一任务按最新资源重新竞争。"""
         async with self._resource_slot_lock:
             self._active_chunk_task_ids.discard(task_id)
+
+    async def _auto_refresh_stream_if_expired(
+        self,
+        db,
+        task: AsrTask,
+        m3u8_url: str,
+        headers: dict,
+    ) -> tuple[str, StreamSource | None]:
+        """
+        转写前先探测 m3u8 是否有效；如果过期则调后端 API 自动刷新。
+
+        返回: (最终可用的 m3u8_url, 关联的 StreamSource 或 None)
+        """
+        # ── 1. 快速探测 ──
+        logger.info("任务 %s: 探测流地址可用性...", task.id)
+        health = await probe_stream_url(m3u8_url, headers, probe_seconds=2.0)
+
+        if health["alive"]:
+            logger.info("任务 %s: 流地址有效，直接开始转写", task.id)
+            return m3u8_url, db.get(StreamSource, task.stream_id) if task.stream_id else None
+
+        logger.warning(
+            "任务 %s: 流地址已过期（%s），尝试自动刷新...",
+            task.id,
+            health.get("error", "未知原因"),
+        )
+
+        # ── 2. 调后端 API 自动刷新 ──
+        refresh_url = f"{_BACKEND_BASE_URL}/live-sessions/{task.session_id}/refresh-stream"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+                response = await client.post(refresh_url)
+                if response.status_code == 200:
+                    data = response.json()
+                    new_url = data.get("stream_url")
+                    if new_url:
+                        logger.info(
+                            "任务 %s: 流地址自动刷新成功: %s...",
+                            task.id,
+                            new_url[:80],
+                        )
+                        # 重新查询新的 StreamSource（API 已写入）
+                        db.commit()  # 释放当前事务，让新数据可见
+                        new_source = (
+                            db.query(StreamSource)
+                            .filter(
+                                StreamSource.session_id == task.session_id,
+                                StreamSource.status == "active",
+                            )
+                            .order_by(StreamSource.fetched_at.desc(), StreamSource.id.desc())
+                            .first()
+                        )
+                        if new_source:
+                            task.stream_id = new_source.id
+                            db.commit()
+                            return new_url, new_source
+                        # 如果没找到新记录，直接用返回的 URL
+                        return new_url, None
+                    else:
+                        logger.warning("任务 %s: 刷新 API 返回成功但无 stream_url", task.id)
+                else:
+                    error_detail = "未知错误"
+                    try:
+                        error_detail = response.json().get("detail", response.text[:200])
+                    except Exception:
+                        error_detail = response.text[:200]
+                    logger.warning(
+                        "任务 %s: 流地址刷新 API 返回 %s: %s",
+                        task.id,
+                        response.status_code,
+                        error_detail,
+                    )
+        except Exception as exc:
+            logger.error("任务 %s: 调用刷新 API 失败: %s", task.id, exc)
+
+        # ── 3. 刷新失败，仍用原 URL 尝试（万一探测误判）──
+        logger.warning(
+            "任务 %s: 自动刷新失败，将使用原流地址继续尝试（可能仍会失败）",
+            task.id,
+        )
+        return m3u8_url, db.get(StreamSource, task.stream_id) if task.stream_id else None
 
     @staticmethod
     def _ensure_task_running(db, task: AsrTask) -> None:
