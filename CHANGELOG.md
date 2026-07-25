@@ -7,6 +7,15 @@
 ## [2026-07-25]
 
 ### Added
+- **m3u8 流地址自动刷新**：流地址过期时自动用已保存的 Cookie 重新从抖音大屏页面抓取新 m3u8，无需人工重新采集
+  - **流地址健康探测**（`stream_health.py`）：ffmpeg 快速拉流 2-3 秒检测是否有效 + 从 URL 解析抖音自带过期时间戳做预警
+  - **自动刷新服务**（`stream_refresh.py`）：Cookie → 打开大屏页面 → 抓取新 m3u8 → 更新 StreamSource + LiveSession
+  - **ASR Worker 转写前自动刷新**：转写前先探测 m3u8，过期则自动调 API 刷新，成功用新 URL 继续
+  - **前端播放器自动恢复**：播放失败时自动调用刷新 API，成功后自动重播，用户无感
+  - **刷新 API 免认证**：放在 `stream_router`（和视频流端点一样），ASR Worker 独立进程无需 JWT Token 即可调用
+- 新增 ADR 0019：《m3u8 流地址自动刷新》
+
+### Added
 - **一键启动自动安装依赖**：`start.sh` 启动时自动检查 Python/Node/FFmpeg/pnpm 是否安装，缺的通过 Homebrew 自动装，Docker 未安装则给出下载指引
 - **Qdrant 向量数据库随系统启动**：`start.sh` 第 1 步同时拉起 Qdrant 容器，启动后等待健康检查通过
 - **FunASR 语音转写随系统启动**：`start.sh` 第 5 步用 `--profile funasr` 拉起 FunASR 容器，等待 WebSocket 端口就绪（首次自动下载模型，最多等 5 分钟）
