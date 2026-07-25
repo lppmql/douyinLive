@@ -33,6 +33,7 @@
   - **FunASR C++ segfault**：服务在收到异常连接后可能崩溃，靠 Docker `restart: unless-stopped` + pgrep 修复自动恢复
 - **话术转写一直失败**：根因是 FunASR Docker 容器从未被启动（`profiles: [funasr]` 需显式 `--profile` 才能拉起），`start.sh` 原来只有占位符没有实际启动命令
 - **Qdrant 健康检查 404**：`start.sh` 里 Qdrant 健康检查 URL 从 `/health` 改为 `/healthz`（Qdrant v1.13.5 实际端点）
+- **话术转写任务抽屉新增清空失败任务功能**：筛选到「失败」tab 时显示红色「清空全部失败任务」按钮，每条失败/已取消任务右侧也有删除按钮。删除前弹确认框防误操作，删除时自动清理关联的音频分片和话术分段
 - 新增 ADR 0020：《ASR 转写失败修复——FunASR 自动恢复 + 流刷新优化》
 
 ---
