@@ -83,6 +83,19 @@ class TranscriptSegmentOut(BaseModel):
     ai_score: float | None = None
 
 
+class TranscriptTaskDeleteResponse(BaseModel):
+    """DELETE /transcripts/tasks/{task_id}"""
+    task_id: int
+    deleted: bool = True
+    message: str = ""
+
+
+class TranscriptFailedClearResponse(BaseModel):
+    """DELETE /transcripts/tasks/failed"""
+    deleted_count: int = 0
+    message: str = ""
+
+
 class TranscriptFullTextResponse(BaseModel):
     """GET /transcripts/{session_id}/full-text"""
     id: int | None = None

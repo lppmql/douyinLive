@@ -319,6 +319,22 @@ export function fetchTranscriptTasks(status?: Api.Douyin.TranscriptTask['status'
   });
 }
 
+/** 删除单条失败/已取消的转写任务 */
+export function deleteTranscriptTask(taskId: number) {
+  return backendRequest<{ task_id: number; deleted: boolean; message: string }>({
+    url: `${API_PREFIX}/transcripts/tasks/${taskId}`,
+    method: 'DELETE'
+  });
+}
+
+/** 一键清空全部失败/已取消的转写任务 */
+export function clearFailedTranscriptTasks() {
+  return backendRequest<{ deleted_count: number; message: string }>({
+    url: `${API_PREFIX}/transcripts/tasks/failed`,
+    method: 'DELETE'
+  });
+}
+
 /* ---------- AI 分析 ---------- */
 
 /** 获取已保存的真实 AI 分析报告。 */

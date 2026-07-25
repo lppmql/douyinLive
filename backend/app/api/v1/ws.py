@@ -8,6 +8,7 @@ from app.models.transcript_segments import TranscriptSegment
 from app.models.transcript_full_texts import TranscriptFullText
 from app.models.live_sessions import LiveSession
 from app.models.stream_sources import StreamSource
+from app.models.asr_audio_chunks import AsrAudioChunk
 from app.core.status import TaskStatus
 from app.models.asr_tasks import AsrTask
 from app.services.asr.queue import queue_session_transcription
@@ -19,6 +20,8 @@ from app.schemas.transcript import (
     TranscriptTaskOut,
     TranscriptSegmentOut,
     TranscriptFullTextResponse,
+    TranscriptTaskDeleteResponse,
+    TranscriptFailedClearResponse,
 )
 
 # REST 路由（注册到 v1_router）
@@ -202,6 +205,65 @@ def list_transcription_tasks(
         .all()
     )
     return [serialize_transcription_task(task, session, segment_count) for task, session, segment_count in rows]
+
+
+@rest_router.delete("/tasks/failed", response_model=TranscriptFailedClearResponse)
+def clear_failed_transcription_tasks(db: Session = Depends(get_db)):
+    """一键清空全部失败和已取消的转写任务，同时清理关联的音频分片和话术分段。
+
+    只允许删除 failed / cancelled 状态的任务，防止误删正常任务。
+    """
+    allowed_statuses = [TaskStatus.FAILED, TaskStatus.CANCELLED]
+    failed_tasks = db.query(AsrTask).filter(AsrTask.status.in_(allowed_statuses)).all()
+
+    if not failed_tasks:
+        return {"deleted_count": 0, "message": "没有需要清理的失败任务"}
+
+    task_ids = [t.id for t in failed_tasks]
+    session_ids = list({t.session_id for t in failed_tasks})
+
+    # 1. 删除关联的音频分片
+    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id.in_(task_ids)).delete(synchronize_session=False)
+
+    # 2. 删除关联的话术分段
+    db.query(TranscriptSegment).filter(
+        TranscriptSegment.session_id.in_(session_ids)
+    ).delete(synchronize_session=False)
+
+    # 3. 删除失败任务本身
+    deleted = db.query(AsrTask).filter(AsrTask.id.in_(task_ids)).delete(synchronize_session=False)
+
+    db.commit()
+    return {"deleted_count": deleted, "message": f"已清理 {deleted} 条失败任务及关联数据"}
+
+
+@rest_router.delete("/tasks/{task_id:int}", response_model=TranscriptTaskDeleteResponse)
+def delete_transcription_task(task_id: int, db: Session = Depends(get_db)):
+    """删除单条转写任务（仅限 failed / cancelled 状态），同时清理关联的音频分片。"""
+    task = db.get(AsrTask, task_id)
+    if not task:
+        raise HTTPException(404, f"任务 #{task_id} 不存在")
+
+    if task.status not in {TaskStatus.FAILED, TaskStatus.CANCELLED}:
+        raise HTTPException(
+            400,
+            f"任务 #{task_id} 当前状态为「{task.status}」，仅允许删除失败或已取消的任务。"
+            f"如需停止正在进行的任务，请先调用停止接口。",
+        )
+
+    # 1. 删除关联的音频分片
+    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id == task_id).delete(synchronize_session=False)
+
+    # 2. 删除关联的话术分段
+    db.query(TranscriptSegment).filter(
+        TranscriptSegment.session_id == task.session_id
+    ).delete(synchronize_session=False)
+
+    # 3. 删除任务本身
+    db.delete(task)
+    db.commit()
+
+    return {"task_id": task_id, "deleted": True, "message": f"任务 #{task_id} 已删除"}
 
 
 @rest_router.get("/{session_id:int}/segments", response_model=list[TranscriptSegmentOut])

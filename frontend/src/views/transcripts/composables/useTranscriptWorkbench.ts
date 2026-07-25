@@ -13,7 +13,7 @@
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useIntervalFn } from '@vueuse/core';
-import { useMessage } from 'naive-ui';
+import { useDialog, useMessage } from 'naive-ui';
 
 import {
   fetchLiveSessions,
@@ -23,7 +23,9 @@ import {
   fetchTranscriptTaskStatus,
   queueTranscript,
   queueTranscriptsByAnchor,
-  runTranscriptAiPipeline
+  runTranscriptAiPipeline,
+  deleteTranscriptTask,
+  clearFailedTranscriptTasks
 } from '@/service/api/douyin';
 import { unwrapServiceData } from '@/utils/service';
 import { sortSessionsByLatest } from '@/utils/analysisHelpers';
@@ -47,6 +49,7 @@ export function useTranscriptWorkbench() {
   const router = useRouter();
   const route = useRoute();
   const message = useMessage();
+  const dialog = useDialog();
 
   // ── 响应式状态 ──
 
@@ -336,6 +339,71 @@ export function useTranscriptWorkbench() {
     void loadTranscript(task.session_id);
   }
 
+  /** 正在删除中的任务 ID 集合（用于按钮 loading 状态） */
+  const deletingTaskIds = ref(new Set<number>());
+  /** 是否正在清空全部失败任务 */
+  const clearFailedLoading = ref(false);
+
+  /** 删除单条失败任务（带确认弹窗） */
+  function deleteTask(task: Api.Douyin.TranscriptTask) {
+    dialog.warning({
+      title: '确认删除',
+      content: `确定要删除「${task.anchor_name} - ${task.session_title}」的失败任务吗？关联的话术分段也会被清理。`,
+      positiveText: '确认删除',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        deletingTaskIds.value.add(task.id);
+        try {
+          const response = await deleteTranscriptTask(task.id);
+          const data = response.data;
+          if (data?.deleted) {
+            message.success(data.message || `任务 #${task.id} 已删除`);
+          } else {
+            message.success(`任务 #${task.id} 已删除`);
+          }
+          await loadTaskData();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '删除失败，请稍后重试');
+        } finally {
+          deletingTaskIds.value.delete(task.id);
+          deletingTaskIds.value = new Set(deletingTaskIds.value);
+        }
+      }
+    });
+  }
+
+  /** 一键清空全部失败任务（带确认弹窗） */
+  function clearFailedTasks() {
+    const failedCount = taskSummary.value.failed;
+    if (!failedCount) {
+      message.info('当前没有失败任务需要清理');
+      return;
+    }
+    dialog.warning({
+      title: '确认清空',
+      content: `确定要清空全部 ${failedCount} 条失败任务吗？关联的话术分段也会被清理，此操作不可撤销。`,
+      positiveText: '全部清空',
+      negativeText: '取消',
+      onPositiveClick: async () => {
+        clearFailedLoading.value = true;
+        try {
+          const response = await clearFailedTranscriptTasks();
+          const data = response.data;
+          if (data?.deleted_count) {
+            message.success(data.message || `已清理 ${data.deleted_count} 条失败任务`);
+          } else {
+            message.info(data?.message || '没有需要清理的失败任务');
+          }
+          await loadTaskData();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '清空失败，请稍后重试');
+        } finally {
+          clearFailedLoading.value = false;
+        }
+      }
+    });
+  }
+
   /** 跳转到场次详情页 */
   function openSessionDetail(sessionId: number) {
     void router.push({ name: 'live-session-detail', params: { id: String(sessionId) } });
@@ -438,7 +506,12 @@ export function useTranscriptWorkbench() {
     jumpToSegment,
     openTaskDrawer,
     selectTask,
-    openSessionDetail
+    openSessionDetail,
+    // 删除相关
+    deletingTaskIds,
+    clearFailedLoading,
+    deleteTask,
+    clearFailedTasks
   };
 }
 

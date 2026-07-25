@@ -57,6 +57,11 @@ const {
   taskDrawerVisible,
   taskFilter,
   filteredTasks,
+  // 删除相关
+  deletingTaskIds,
+  clearFailedLoading,
+  deleteTask,
+  clearFailedTasks,
   // 操作
   initializePage,
   loadTranscript,
@@ -151,10 +156,14 @@ const {
       :visible="taskDrawerVisible"
       :task-filter="taskFilter"
       :filtered-tasks="filteredTasks"
+      :clear-failed-loading="clearFailedLoading"
+      :deleting-task-ids="deletingTaskIds"
       @update:visible="taskDrawerVisible = $event"
       @update:task-filter="taskFilter = $event"
       @select-task="selectTask"
       @open-session-detail="openSessionDetail"
+      @delete-task="deleteTask"
+      @clear-failed-tasks="clearFailedTasks"
     />
   </NSpace>
 </template>

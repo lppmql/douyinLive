@@ -26,6 +26,10 @@ defineProps<{
   taskFilter: TaskStatus | 'all';
   /** 筛选后的任务列表 */
   filteredTasks: Api.Douyin.TranscriptTask[];
+  /** 是否正在清空全部失败任务 */
+  clearFailedLoading?: boolean;
+  /** 正在删除中的任务 ID 集合 */
+  deletingTaskIds?: Set<number>;
 }>();
 
 defineEmits<{
@@ -33,6 +37,10 @@ defineEmits<{
   'update:taskFilter': [value: TaskStatus | 'all'];
   selectTask: [task: Api.Douyin.TranscriptTask];
   openSessionDetail: [sessionId: number];
+  /** 删除单条失败任务 */
+  deleteTask: [task: Api.Douyin.TranscriptTask];
+  /** 一键清空全部失败任务 */
+  clearFailedTasks: [];
 }>();
 </script>
 
@@ -54,6 +62,18 @@ defineEmits<{
           <NRadioButton value="failed">失败</NRadioButton>
         </NRadioGroup>
         <span class="text-12px text-gray-500">{{ filteredTasks.length }} 个真实任务</span>
+      </div>
+
+      <!-- 清空全部失败任务（仅筛选到「失败」tab 时显示） -->
+      <div v-if="taskFilter === 'failed' && filteredTasks.length > 0" class="mb-12px">
+        <NButton
+          type="error"
+          size="small"
+          :loading="clearFailedLoading"
+          @click="$emit('clearFailedTasks')"
+        >
+          清空全部失败任务（{{ filteredTasks.length }} 条）
+        </NButton>
       </div>
 
       <!-- 空状态 -->
@@ -91,6 +111,16 @@ defineEmits<{
               </div>
             </div>
             <NButton size="tiny" secondary @click="$emit('selectTask', task)">查看话术</NButton>
+            <!-- 失败/已取消任务显示删除按钮 -->
+            <NButton
+              v-if="task.status === 'failed' || task.status === 'cancelled'"
+              size="tiny"
+              type="error"
+              :loading="deletingTaskIds?.has(task.id)"
+              @click="$emit('deleteTask', task)"
+            >
+              删除
+            </NButton>
           </div>
           <!-- 转写错误 -->
           <NAlert v-if="task.error_message" type="error" :bordered="false" class="mt-10px">
