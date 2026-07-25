@@ -104,9 +104,9 @@ export function useTranscriptWorkbench() {
     new Map(tasks.value.map(item => [item.session_id, item]))
   );
 
-  /** 4 张任务状态卡片配置 */
+  /** 4 张任务状态卡片配置（含进度信息） */
   const taskStatusCards = computed(() =>
-    buildTaskStatusCards(taskSummary.value)
+    buildTaskStatusCards(taskSummary.value, tasks.value)
   );
 
   /** 场次下拉选项列表 */

@@ -109,6 +109,20 @@ defineEmits<{
                 <span>{{ task.segment_count }} 个分段</span>
                 <span v-if="task.retry_count">已尝试 {{ task.retry_count }}/{{ task.max_retries }} 次</span>
               </div>
+              <!-- 转写进度条（仅处理中的任务显示） -->
+              <div v-if="task.status === 'processing' && task.total_chunks > 0" class="mt-8px">
+                <div class="mb-3px flex items-center justify-between text-11px text-gray-500">
+                  <span>转写进度</span>
+                  <span>{{ task.completed_chunks }} / {{ task.total_chunks }} 分片（{{ task.progress_percent }}%）</span>
+                </div>
+                <NProgress
+                  :percentage="task.progress_percent"
+                  :height="6"
+                  :border-radius="3"
+                  color="#f0a020"
+                  :show-indicator="false"
+                />
+              </div>
             </div>
             <NButton size="tiny" secondary @click="$emit('selectTask', task)">查看话术</NButton>
             <!-- 失败/已取消任务显示删除按钮 -->

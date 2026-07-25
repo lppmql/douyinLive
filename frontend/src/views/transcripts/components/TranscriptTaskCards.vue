@@ -37,6 +37,10 @@ defineEmits<{
         <div>
           <div class="text-12px text-gray-500">{{ card.label }}</div>
           <div class="mt-5px text-26px font-800">{{ card.value }}</div>
+          <!-- 正在转写时显示最快进度 -->
+          <div v-if="card.status === 'processing' && card.maxProgress != null" class="mt-4px text-11px text-orange-500">
+            最快进度 {{ card.maxProgress }}%
+          </div>
         </div>
         <div class="status-icon flex-center rounded-10px p-8px">
           <SvgIcon :icon="card.icon" class="text-24px" />

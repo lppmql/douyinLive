@@ -37,8 +37,46 @@ def build_full_transcript_text(segments: list[TranscriptSegment]) -> str:
     )
 
 
-def serialize_transcription_task(task: AsrTask, session: LiveSession, segment_count: int) -> dict:
-    """统一任务明细结构，页面只展示数据库中的真实任务与场次信息。"""
+def get_chunk_counts(db: Session, task_ids: list[int]) -> dict[int, tuple[int, int]]:
+    """批量查询每个任务的分片总数和已完成数（用于显示转写进度）。
+
+    每个 ASR 任务会被拆成多个音频分片（asr_audio_chunks），Worker 逐个处理。
+    进度 = 已完成分片数 / 总分数。
+    """
+    from collections import defaultdict
+
+    counts: dict[int, list[int]] = defaultdict(lambda: [0, 0])
+    if not task_ids:
+        return {}
+    rows = (
+        db.query(AsrAudioChunk.task_id, AsrAudioChunk.status, func.count(AsrAudioChunk.id))
+        .filter(AsrAudioChunk.task_id.in_(task_ids))
+        .group_by(AsrAudioChunk.task_id, AsrAudioChunk.status)
+        .all()
+    )
+    for task_id, status, count in rows:
+        counts[task_id][0] += int(count or 0)
+        if status == TaskStatus.COMPLETED:
+            counts[task_id][1] += int(count or 0)
+    return {task_id: (values[0], values[1]) for task_id, values in counts.items()}
+
+
+def serialize_transcription_task(
+    task: AsrTask,
+    session: LiveSession,
+    segment_count: int,
+    chunk_counts: tuple[int, int] = (0, 0),
+) -> dict:
+    """统一任务明细结构，页面只展示数据库中的真实任务与场次信息。
+
+    chunk_counts: (total_chunks, completed_chunks)，用于前端显示转写进度条。
+    """
+    total_chunks, completed_chunks = chunk_counts
+    progress_percent = (
+        100 if task.status == TaskStatus.COMPLETED
+        else int(completed_chunks / total_chunks * 100) if total_chunks
+        else 0
+    )
     return {
         "id": task.id,
         "session_id": task.session_id,
@@ -62,6 +100,10 @@ def serialize_transcription_task(task: AsrTask, session: LiveSession, segment_co
         "completed_at": task.completed_at,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
+        # 转写进度（音频分片维度）
+        "total_chunks": total_chunks,
+        "completed_chunks": completed_chunks,
+        "progress_percent": progress_percent,
     }
 
 
@@ -204,7 +246,16 @@ def list_transcription_tasks(
         .limit(limit)
         .all()
     )
-    return [serialize_transcription_task(task, session, segment_count) for task, session, segment_count in rows]
+    # 批量查询分片进度（一次 SQL 查所有任务的分片数，避免 N+1 问题）
+    task_ids = [task.id for task, _, _ in rows]
+    chunk_counts_map = get_chunk_counts(db, task_ids)
+    return [
+        serialize_transcription_task(
+            task, session, segment_count,
+            chunk_counts=chunk_counts_map.get(task.id, (0, 0)),
+        )
+        for task, session, segment_count in rows
+    ]
 
 
 @rest_router.delete("/tasks/failed", response_model=TranscriptFailedClearResponse)

@@ -613,6 +613,12 @@ declare namespace Api {
       completed_at: string | null;
       created_at: string;
       updated_at: string;
+      /** 音频分片总数（转写进度分母） */
+      total_chunks: number;
+      /** 已完成音频分片数（转写进度分子） */
+      completed_chunks: number;
+      /** 转写进度百分比 0-100 */
+      progress_percent: number;
     }
 
     interface AnalysisReport {

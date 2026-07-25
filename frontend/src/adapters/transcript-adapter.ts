@@ -33,6 +33,8 @@ export interface TaskStatusCard {
   value: number;
   icon: string;
   tone: 'info' | 'warning' | 'success' | 'error';
+  /** 处理中任务里最快的进度百分比（0-100），仅 processing 卡片有意义 */
+  maxProgress?: number;
 }
 
 // ========== 适配函数 ==========
@@ -58,12 +60,21 @@ export function buildCategoryStats(segments: Api.Douyin.TranscriptSegment[]): Ca
 
 /**
  * 构建任务状态卡片配置
- * 把任务汇总数字转成 4 张卡片需要的展示数据
+ * 把任务汇总数字转成 4 张卡片需要的展示数据。
+ * tasks 用于计算处理中任务的最快进度（显示在「正在转写」卡片上）。
  */
-export function buildTaskStatusCards(taskSummary: Record<string, number>): TaskStatusCard[] {
+export function buildTaskStatusCards(
+  taskSummary: Record<string, number>,
+  tasks?: Api.Douyin.TranscriptTask[]
+): TaskStatusCard[] {
+  // 计算处理中任务的最快进度百分比
+  const processingTasks = (tasks || []).filter(t => t.status === 'processing' && t.progress_percent > 0);
+  const maxProgress = processingTasks.length
+    ? Math.max(...processingTasks.map(t => t.progress_percent))
+    : undefined;
   return [
     { status: 'queued', label: '等待转写', value: taskSummary.queued || 0, icon: 'mdi:clock-outline', tone: 'info' },
-    { status: 'processing', label: '正在转写', value: taskSummary.processing || 0, icon: 'mdi:waveform', tone: 'warning' },
+    { status: 'processing', label: '正在转写', value: taskSummary.processing || 0, icon: 'mdi:waveform', tone: 'warning', maxProgress },
     { status: 'completed', label: '转写完成', value: taskSummary.completed || 0, icon: 'mdi:check-circle-outline', tone: 'success' },
     { status: 'failed', label: '需要处理', value: taskSummary.failed || 0, icon: 'mdi:alert-circle-outline', tone: 'error' }
   ];
