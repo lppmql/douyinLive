@@ -64,7 +64,11 @@ def serialize_transcription_task(task: AsrTask, session: LiveSession, segment_co
 
 @rest_router.post("/{session_id:int}/queue", response_model=TranscriptQueueResponse)
 def queue_transcription(session_id: int, db: Session = Depends(get_db)):
-    """为指定场次排队转写，复用已采集流源并避免重复任务。"""
+    """为指定场次排队转写，复用已采集流源并避免重复任务。
+
+    如果 ASR Worker 未运行（比如之前在采集页关闭了 ASR），自动拉起运行时，
+    避免任务创建后无人处理一直卡在 queued 状态。
+    """
     session = db.get(LiveSession, session_id)
     if not session:
         raise HTTPException(404, "直播场次不存在")
@@ -75,6 +79,11 @@ def queue_transcription(session_id: int, db: Session = Depends(get_db)):
         raise HTTPException(400, str(exc)) from exc
     db.commit()
     db.refresh(task)
+
+    # 确保 ASR 运行时在跑（已运行时 start_asr_runtime 是幂等的，不会重复启动）
+    from app.services.asr.control import start_asr_runtime
+    start_asr_runtime()
+
     return {"task_id": task.id, "status": task.status, "created": created}
 
 
@@ -135,6 +144,11 @@ def queue_transcription_by_anchor(
                 break
 
     db.commit()
+
+    # 确保 ASR 运行时在跑（比如之前在采集页关闭了 ASR，批量排队后需要 Worker 来处理）
+    from app.services.asr.control import start_asr_runtime
+    start_asr_runtime()
+
     return {
         "anchor_count": len(anchors),
         "selected_count": len(results),
