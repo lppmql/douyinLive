@@ -26,11 +26,11 @@
 - 新增 ADR 0017：《一键启动全服务覆盖与环境自动安装》
 
 ### Fixed
-- **ASR 转写频繁失败（FunASR 崩溃恢复）**：三层修复
-  - **FunASR 自动重启**：Worker 转写前自动检测 FunASR 容器状态，容器挂了就自动 `docker restart`，不等 300 秒超时才报错
-  - **连接等待从 300 秒降到 60 秒**：模型加载约 18 秒，配合自动重启机制，总恢复时间从"干等 5 分钟"变成"重启+最多 1 分钟"
-  - **流刷新失败不再硬转**：流地址确认过期（403/404）且刷新也失败时，直接报错不浪费队列资源；只有探测不明确时才用原 URL 容错
-  - **FunASR 内存上限从 1.8G 降到 1.6G**：给 8GB Mac 系统留更多余量，减少 OOM 崩溃
+- **主播话术页手动转写不自动启动 Worker**：采集页关 ASR 后去话术页点"开始转写"，任务写入数据库但 Worker 没跑，一直卡在 queued。现在手动排队时自动拉起 ASR 运行时（已运行则幂等跳过）
+- **ASR 转写频繁失败（FunASR 容器修复）**：三个排查
+  - **pgrep 模式修正**：`pgrep -f` 会匹配 bash 命令行自身，导致 FunASR 崩溃后监控循环检测不到。改为 `pgrep funasr-wss-server`（只匹配进程名）
+  - **显式 decoder 线程数**：Docker for Mac 的 /proc/cpuinfo 显示宿主机 8 核，run_server.sh 自动检测错误。显式设置 `--decoder-thread-num 4 --io-thread-num 1`
+  - **FunASR C++ segfault**：服务在收到异常连接后可能崩溃，靠 Docker `restart: unless-stopped` + pgrep 修复自动恢复
 - **话术转写一直失败**：根因是 FunASR Docker 容器从未被启动（`profiles: [funasr]` 需显式 `--profile` 才能拉起），`start.sh` 原来只有占位符没有实际启动命令
 - **Qdrant 健康检查 404**：`start.sh` 里 Qdrant 健康检查 URL 从 `/health` 改为 `/healthz`（Qdrant v1.13.5 实际端点）
 - 新增 ADR 0020：《ASR 转写失败修复——FunASR 自动恢复 + 流刷新优化》
