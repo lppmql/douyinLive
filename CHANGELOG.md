@@ -4,6 +4,19 @@
 
 ---
 
+## [2026-07-25]
+
+### Added
+- **一键启动自动安装依赖**：`start.sh` 启动时自动检查 Python/Node/FFmpeg/pnpm 是否安装，缺的通过 Homebrew 自动装，Docker 未安装则给出下载指引
+- **Qdrant 向量数据库随系统启动**：`start.sh` 第 1 步同时拉起 Qdrant 容器，启动后等待健康检查通过
+- **FunASR 语音转写随系统启动**：`start.sh` 第 5 步用 `--profile funasr` 拉起 FunASR 容器，等待 WebSocket 端口就绪（首次自动下载模型，最多等 5 分钟）
+- 新增 ADR 0017：《一键启动全服务覆盖与环境自动安装》
+
+### Fixed
+- **话术转写一直失败**：根因是 FunASR Docker 容器从未被启动（`profiles: [funasr]` 需显式 `--profile` 才能拉起），`start.sh` 原来只有占位符没有实际启动命令
+
+---
+
 ## [2026-07-24]
 
 ### Added

@@ -57,6 +57,60 @@ echo "========================================"
 echo "  抖音留资直播分析系统 — 启动"
 echo "========================================"
 
+# 0. 环境自检 + 自动安装（macOS）
+echo ""
+echo "  🔍 环境自检与自动安装..."
+
+# brew 是 macOS 包管理器，后续自动安装都靠它
+if ! command -v brew >/dev/null 2>&1; then
+  echo "  ❌ 未找到 Homebrew（macOS 包管理器）"
+  echo "  请先安装：/bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+  echo "  安装完成后重新运行 ./start.sh"
+  exit 1
+fi
+echo "  ✅ Homebrew"
+
+# 逐个检查必要工具，缺了就自动装
+auto_install() {
+  local NAME="$1"
+  local BIN="$2"
+  local BREW_PKG="$3"
+  if command -v "$BIN" >/dev/null 2>&1; then
+    echo "  ✅ $NAME（$(command -v "$BIN")）"
+    return 0
+  fi
+  echo "  ⏳ $NAME 未安装，正在用 Homebrew 自动安装..."
+  if brew install "$BREW_PKG" 2>&1 | tail -1; then
+    echo "  ✅ $NAME 安装完成"
+  else
+    echo "  ❌ $NAME 自动安装失败，请手动执行：brew install $BREW_PKG"
+    exit 1
+  fi
+}
+
+auto_install "Python 3" python3 python@3.12
+auto_install "Node.js" node node@22
+auto_install "FFmpeg" ffmpeg ffmpeg
+
+# pnpm 通过 npm 安装（node 此时一定可用了）
+if ! command -v pnpm >/dev/null 2>&1; then
+  echo "  ⏳ pnpm 未安装，正在通过 npm 全局安装..."
+  npm install -g pnpm 2>&1 | tail -1 && echo "  ✅ pnpm 安装完成" || { echo "  ❌ pnpm 安装失败"; exit 1; }
+else
+  echo "  ✅ pnpm（$(command -v pnpm)）"
+fi
+
+# Docker Desktop 是 GUI 应用，不能自动装，只能提示
+if ! docker info >/dev/null 2>&1; then
+  echo "  ❌ Docker 未安装或未启动"
+  echo "  请先下载 Docker Desktop：https://www.docker.com/products/docker-desktop/"
+  echo "  安装并启动后重新运行 ./start.sh"
+  exit 1
+fi
+echo "  ✅ Docker 已运行"
+
+echo "  🎉 环境自检通过"
+
 # 清理旧进程：先给后端和前端足够时间安全退出，再在确实卡死时强制结束。
 clean_port() {
   local PORT=$1
@@ -149,13 +203,17 @@ wait_for_http() {
 
 # 1. 启动基础 Docker 服务与 DataEase（ASR 由后端按安全资源限制自动启动）
 echo ""
-echo "[1/6] 启动 MySQL、Redis 与 DataEase..."
+echo "[1/6] 启动 MySQL、Redis、Qdrant 与 DataEase..."
 cd "$ROOT_DIR"
-docker compose --profile dataease up -d mysql redis dataease
+docker compose --profile dataease up -d mysql redis qdrant dataease
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
+if ! wait_for_http "Qdrant" "http://127.0.0.1:6333/health" "douyin_live_qdrant" 60; then
+  exit 1
+fi
+echo "  ✅ Qdrant: http://localhost:6333"
 echo "  ⏳ DataEase 正在启动，8GB 电脑首次初始化可能需要 3-10 分钟"
-echo "  ℹ️  FunASR 由后端按页面开关管理，并根据电脑资源实时调节并发"
+echo "  ℹ️  FunASR 将在第 5 步启动；ASR Worker 由后端按页面开关管理"
 if ! wait_for_dataease; then
   exit 1
 fi
@@ -217,11 +275,48 @@ WORKER_PID=""
 echo "  ✅ 避免重复启动独立 Worker 和重复创建浏览器"
 echo "     设置 MONITOR_ENABLED=true 启用自动采集"
 
-# 5. ASR 由后端统一启动，避免重复 Worker
+# 5. 启动 FunASR 语音转写容器
 echo ""
-echo "[5/6] ASR 话术服务由后端统一管理..."
+echo "[5/6] 启动 FunASR 语音转写服务..."
+cd "$ROOT_DIR"
+docker compose --profile funasr up -d funasr
+echo "  ⏳ FunASR 容器启动中，首次需下载模型（约 1-3 分钟，8GB Mac 请耐心等待）..."
+
+# 等待 FunASR 端口就绪（WebSocket 服务，用 Python 检测 TCP 连通性）
+FUNASR_READY=false
+for ((i = 1; i <= 300; i++)); do
+  # 先确认容器在运行
+  if [ "$(docker inspect -f '{{.State.Running}}' douyin_live_funasr 2>/dev/null)" != "true" ]; then
+    echo "  ❌ FunASR 容器异常退出，最近日志如下："
+    docker logs --tail 30 douyin_live_funasr 2>&1 || true
+    exit 1
+  fi
+  # 用 Python 检测 WebSocket 端口是否已监听
+  if "$BACKEND_DIR/.venv/bin/python" -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(2)
+try:
+    s.connect(('127.0.0.1', 10096))
+    s.close()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
+    FUNASR_READY=true
+    break
+  fi
+  sleep 1
+done
+
+if [ "$FUNASR_READY" != "true" ]; then
+  echo "  ❌ FunASR 在 300 秒内未就绪，最近日志如下："
+  docker logs --tail 30 douyin_live_funasr 2>&1 || true
+  exit 1
+fi
+echo "  ✅ FunASR: ws://localhost:10096"
+echo "  ℹ️  ASR Worker 由后端按页面开关管理，并根据电脑资源实时调节并发"
 ASR_PID=""
-echo "  ✅ 是否运行以采集页 ASR 开关为准；并发会随 CPU 和内存压力自动升降"
 
 # 6. 启动前端（先清理 9527 端口）
 echo ""
