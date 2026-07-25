@@ -222,15 +222,17 @@ def clear_failed_transcription_tasks(db: Session = Depends(get_db)):
     task_ids = [t.id for t in failed_tasks]
     session_ids = list({t.session_id for t in failed_tasks})
 
-    # 1. 删除关联的音频分片
-    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id.in_(task_ids)).delete(synchronize_session=False)
-
-    # 2. 删除关联的话术分段
+    # ⚠️ 外键依赖链：transcript_segments.asr_chunk_id → asr_audio_chunks.id → asr_tasks.id
+    # 必须按「孙子→儿子→爷爷」顺序删，否则 MySQL 外键约束报错
+    # 1. 先删话术分段（引用 asr_audio_chunks）
     db.query(TranscriptSegment).filter(
         TranscriptSegment.session_id.in_(session_ids)
     ).delete(synchronize_session=False)
 
-    # 3. 删除失败任务本身
+    # 2. 再删音频分片（引用 asr_tasks）
+    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id.in_(task_ids)).delete(synchronize_session=False)
+
+    # 3. 最后删失败任务本身
     deleted = db.query(AsrTask).filter(AsrTask.id.in_(task_ids)).delete(synchronize_session=False)
 
     db.commit()
@@ -251,15 +253,17 @@ def delete_transcription_task(task_id: int, db: Session = Depends(get_db)):
             f"如需停止正在进行的任务，请先调用停止接口。",
         )
 
-    # 1. 删除关联的音频分片
-    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id == task_id).delete(synchronize_session=False)
-
-    # 2. 删除关联的话术分段
+    # ⚠️ 外键依赖链：transcript_segments.asr_chunk_id → asr_audio_chunks.id → asr_tasks.id
+    # 必须按「孙子→儿子→爷爷」顺序删
+    # 1. 先删话术分段（引用 asr_audio_chunks）
     db.query(TranscriptSegment).filter(
         TranscriptSegment.session_id == task.session_id
     ).delete(synchronize_session=False)
 
-    # 3. 删除任务本身
+    # 2. 再删音频分片（引用 asr_tasks）
+    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id == task_id).delete(synchronize_session=False)
+
+    # 3. 最后删任务本身
     db.delete(task)
     db.commit()
 
