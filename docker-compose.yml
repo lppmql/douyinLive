@@ -55,7 +55,7 @@ services:
     # 项目转写的是已结束场次回放，只加载离线模型；不再额外加载在线模型，
     # 这样 8GB Mac 也能把真实 ASR 与数据采集同时保持开启。
     cpus: 2.0
-    mem_limit: 1600m
+    mem_limit: 1800m
     ports:
       - "127.0.0.1:10096:10095"
     volumes:
@@ -63,7 +63,7 @@ services:
     working_dir: /workspace/FunASR/runtime
     entrypoint: ["/bin/bash", "-lc"]
     command:
-      - "bash run_server.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --lm-dir '' --hotword /workspace/models/hotwords.txt; while pgrep -f '/funasr-wss-server' >/dev/null; do sleep 5; done; exit 1"
+      - "bash run_server.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --lm-dir '' --hotword /workspace/models/hotwords.txt --decoder-thread-num 4 --io-thread-num 1; while pgrep -f 'bin/funasr-wss-server' >/dev/null; do sleep 5; done; exit 1"
     profiles:
       - funasr
 
