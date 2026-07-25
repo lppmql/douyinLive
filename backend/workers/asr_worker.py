@@ -72,6 +72,11 @@ def is_full_text_too_long_error(exc: DataError) -> bool:
 class AsrWorker:
     """ASR 转写 Worker"""
 
+    # FunASR Docker 容器名（与 docker-compose.yml 中 container_name 保持一致）
+    _FUNASR_CONTAINER = "douyin_live_funasr"
+    # FunASR 模型加载后最大连接等待秒数（模型冷启动约 18 秒）
+    _FUNASR_CONNECT_TIMEOUT = 60
+
     def __init__(self):
         self._semaphore = asyncio.Semaphore(max(1, settings.ASR_DYNAMIC_MAX_TASKS))
         self._active_tasks: set[asyncio.Task] = set()
@@ -481,6 +486,40 @@ class AsrWorker:
         async with self._resource_slot_lock:
             self._active_chunk_task_ids.discard(task_id)
 
+    async def _ensure_funasr_alive(self) -> None:
+        """确保 FunASR Docker 容器在运行；挂了就自动重启并等待模型加载。
+
+        在每次分片转写前调用，避免 FunASR 容器 OOM 崩溃后
+        Worker 傻等 300 秒超时才发现服务不可用。
+        """
+        # 1. 快速检查：容器是否在运行
+        check = await asyncio.create_subprocess_shell(
+            f"docker ps --filter name={self._FUNASR_CONTAINER} --format '{{{{.Status}}}}'",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await check.communicate()
+
+        if stdout.decode().strip():
+            return  # ✅ 容器在运行，连接问题交给 _process_chunk 的等待循环
+
+        # 2. 容器没在跑 → 尝试重启
+        logger.warning("⚠️ FunASR 容器未运行，尝试自动重启...")
+        restart = await asyncio.create_subprocess_shell(
+            f"docker restart {self._FUNASR_CONTAINER}",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await restart.communicate()
+
+        if restart.returncode != 0:
+            raise RuntimeError(
+                f"FunASR 容器重启失败（docker 返回码 {restart.returncode}），"
+                f"请手动执行 docker restart {self._FUNASR_CONTAINER} 并检查 Docker 状态"
+            )
+
+        logger.info("✅ FunASR 容器重启成功，模型加载约需 18 秒，稍候...")
+
     async def _auto_refresh_stream_if_expired(
         self,
         db,
@@ -555,10 +594,24 @@ class AsrWorker:
         except Exception as exc:
             logger.error("任务 %s: 调用刷新 API 失败: %s", task.id, exc)
 
-        # ── 3. 刷新失败，仍用原 URL 尝试（万一探测误判）──
+        # ── 3. 刷新失败，判断探测结果的确定性 ──
+        error_msg = health.get("error", "")
+        # 403/404/410/流地址已失效 → 明确过期，不再用原 URL 硬转
+        is_definitely_expired = any(
+            keyword.lower() in error_msg.lower()
+            for keyword in ["403", "404", "410", "流地址已失效"]
+        )
+        if is_definitely_expired:
+            raise RuntimeError(
+                f"流地址已失效（{error_msg}），且自动刷新也失败，无法继续转写。"
+                "请检查直播回放是否仍可用，或手动重新采集流地址。"
+            )
+
+        # 探测不明确（网络波动/超时）→ 用原 URL 尝试，万一误判还能转成功
         logger.warning(
-            "任务 %s: 自动刷新失败，将使用原流地址继续尝试（可能仍会失败）",
+            "任务 %s: 自动刷新失败（%s），探测结果不明确，将使用原流地址继续尝试",
             task.id,
+            error_msg or "未知原因",
         )
         return m3u8_url, db.get(StreamSource, task.stream_id) if task.stream_id else None
 
@@ -646,15 +699,19 @@ class AsrWorker:
                 {"chunk_index": chunk.chunk_index, "retry_count": chunk.retry_count},
             )
 
-            deadline = monotonic() + settings.ASR_ENGINE_READY_TIMEOUT_SECONDS
+            # 先确保 FunASR 容器在运行（挂了就自动重启）
+            await self._ensure_funasr_alive()
+            # 模型加载约 18 秒，给的超时足够覆盖冷启动
+            deadline = monotonic() + self._FUNASR_CONNECT_TIMEOUT
             connected = await client.connect()
             while not connected and monotonic() < deadline:
                 logger.info("任务 %s 分片 %s 等待 FunASR 模型就绪", task.id, chunk.chunk_index)
-                await asyncio.sleep(5)
+                await asyncio.sleep(3)
                 connected = await client.connect()
             if not connected and not settings.asr_mock_enabled:
                 raise RuntimeError(
-                    f"真实 FunASR 服务在 {settings.ASR_ENGINE_READY_TIMEOUT_SECONDS} 秒内未就绪"
+                    f"FunASR 服务在 {self._FUNASR_CONNECT_TIMEOUT} 秒内未就绪，"
+                    f"请检查容器日志: docker logs {self._FUNASR_CONTAINER}"
                 )
 
             timeout = max(

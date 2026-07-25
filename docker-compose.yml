@@ -55,7 +55,7 @@ services:
     # 项目转写的是已结束场次回放，只加载离线模型；不再额外加载在线模型，
     # 这样 8GB Mac 也能把真实 ASR 与数据采集同时保持开启。
     cpus: 2.0
-    mem_limit: 1800m
+    mem_limit: 1600m
     ports:
       - "127.0.0.1:10096:10095"
     volumes:
