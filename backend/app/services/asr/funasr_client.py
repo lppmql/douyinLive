@@ -55,7 +55,8 @@ class FunasrClient:
                 self.ws_url,
                 ping_interval=30,
                 max_size=10_485_760,  # 10MB
-                compression=None,  # 禁用 WebSocket 压缩：FunASR 的 C++ websocketpp 服务端不支持 permessage-deflate，开启会导致 JSON 配置消息变乱码
+                # compression 用默认值 'deflate'：7/20-7/22 实测 FunASR C++ 服务端虽不解压
+                # 但能正常处理音频（配置信息用默认值），compression=None 反而会导致消息帧异常
             )
             logger.info(f"FunASR 已连接: {self.ws_url}")
             return True
@@ -155,9 +156,12 @@ class FunasrClient:
                 "wav_name": str(self._session_id),
                 "wav_format": "pcm",
                 "is_speaking": True,
-                "hotwords": get_hotwords_cached(),
+                "hotwords": "",  # 暂不发送热词：200+ 中文词会使 JSON 过大，触发 FunASR C++ segfault
                 "itn": True,
             }))
+            # ⚠️ 延迟：确保 FunASR C++ 服务端处理完 JSON 配置消息，
+            # 再开始发送 PCM 二进制帧，避免第一条消息被当作二进制 parse error
+            await asyncio.sleep(0.5)
             receiver_task = asyncio.create_task(receive_results())
 
             frame_count = 0

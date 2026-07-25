@@ -75,7 +75,8 @@ class AsrWorker:
     # FunASR Docker 容器名（与 docker-compose.yml 中 container_name 保持一致）
     _FUNASR_CONTAINER = "douyin_live_funasr"
     # FunASR 模型加载后最大连接等待秒数（模型冷启动约 18 秒）
-    _FUNASR_CONNECT_TIMEOUT = 60
+    # FunASR 容器重启 + 模型重载约需 60-90 秒，300 秒给足恢复余量（7/20-7/22 实测值）
+    _FUNASR_CONNECT_TIMEOUT = 300
 
     def __init__(self):
         self._semaphore = asyncio.Semaphore(max(1, settings.ASR_DYNAMIC_MAX_TASKS))
