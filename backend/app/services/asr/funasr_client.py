@@ -14,6 +14,7 @@ from websockets.protocol import State
 
 from app.core.config import settings
 from app.core.logger import logger
+from app.services.asr.hotwords import get_hotwords_cached
 
 
 # 模拟话术片段（供 mock 模式使用）
@@ -153,7 +154,7 @@ class FunasrClient:
                 "wav_name": str(self._session_id),
                 "wav_format": "pcm",
                 "is_speaking": True,
-                "hotwords": "",
+                "hotwords": get_hotwords_cached(),
                 "itn": True,
             }))
             receiver_task = asyncio.create_task(receive_results())

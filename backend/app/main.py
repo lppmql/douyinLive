@@ -110,6 +110,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("⚠️  Qdrant 初始化跳过（服务未启动或不可用）: %s", exc)
 
+    # Phase 41: 自动导入行业知识（幂等，仅在首次或文档更新时导入）
+    try:
+        from scripts.import_industry_knowledge import import_industry_knowledge
+
+        result = import_industry_knowledge()
+        if result["created"] > 0 or result["updated"] > 0:
+            logger.info("✅ 行业知识已同步：新建 %d 条，更新 %d 条", result["created"], result["updated"])
+        else:
+            logger.debug("行业知识无变化，跳过导入")
+    except Exception as exc:
+        logger.warning("⚠️  行业知识自动导入跳过: %s", exc)
+
     yield
 
     # 先关掉所有“任务生产者”，再等待控制任务和实时页面完成，避免停机期间又创建浏览器。

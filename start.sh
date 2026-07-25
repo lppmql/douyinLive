@@ -208,7 +208,7 @@ cd "$ROOT_DIR"
 docker compose --profile dataease up -d mysql redis qdrant dataease
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
-if ! wait_for_http "Qdrant" "http://127.0.0.1:6333/health" "douyin_live_qdrant" 60; then
+if ! wait_for_http "Qdrant" "http://127.0.0.1:6333/healthz" "douyin_live_qdrant" 60; then
   exit 1
 fi
 echo "  ✅ Qdrant: http://localhost:6333"

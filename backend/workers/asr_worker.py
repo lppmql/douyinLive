@@ -34,6 +34,7 @@ from app.services.asr.m3u8_pipe import M3u8Pipe
 from app.services.asr.funasr_client import FunasrClient
 from app.services.asr.queue import list_queued_task_ids_latest_first, queue_auto_transcriptions
 from app.services.asr.websocket_manager import ws_manager
+from app.services.asr.corrector import correct_text as correct_asr_text
 from app.services.ai.post_collection import process_session_post_collection
 from app.services.resources.asr_policy import AsrResourcePlan, build_asr_resource_plan
 from app.services.resources.system_usage import get_system_usage
@@ -677,12 +678,15 @@ class AsrWorker:
             absolute_result = dict(result)
             absolute_result["segment_start"] = offset + float(result.get("segment_start") or 0)
             absolute_result["segment_end"] = offset + float(result.get("segment_end") or 0)
+            # 行业知识纠错：对 ASR 输出的原始文本做品牌名和术语校正
+            raw_text = absolute_result.get("text", "")
+            corrected_text = correct_asr_text(raw_text) if raw_text else ""
             segment = TranscriptSegment(
                 session_id=task.session_id,
                 asr_chunk_id=chunk.id,
                 segment_start=absolute_result["segment_start"],
                 segment_end=absolute_result["segment_end"],
-                text_content=absolute_result.get("text", ""),
+                text_content=corrected_text,
                 asr_status="completed",
                 segment_type="asr_offline" if task.task_type == "offline" else "asr_realtime",
             )
