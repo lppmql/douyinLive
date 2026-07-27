@@ -67,6 +67,10 @@ class TranscriptTaskOut(BaseModel):
     completed_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # 转写进度（音频分片维度，从 asr_audio_chunks 表统计）
+    total_chunks: int = 0     # 音频分片总数（进度分母）
+    completed_chunks: int = 0 # 已完成音频分片数（进度分子）
+    progress_percent: int = 0 # 转写进度百分比 0-100
 
 
 # ── 分段 / 全文 ──
