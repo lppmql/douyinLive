@@ -1,6 +1,6 @@
 """从 kezi.lpp6.com 增量同步真实客资。
 
-“增量同步”大白话：服务只从上次成功保存的编号继续往后拉，不会每分钟
+"增量同步"大白话：服务只从上次成功保存的编号继续往后拉，不会每分钟
 把全部历史数据重读一遍。每条数据还会保存源系统唯一编号，双重保证不重复。
 """
 
@@ -133,39 +133,124 @@ def _state(db: Session) -> LeadSyncState:
     return state
 
 
-def match_live_session(db: Session, item: KeziLeadItem) -> LiveSession | None:
-    """按真实主播名和直播时间窗匹配场次，没有证据时返回 None。"""
-    if not item.anchor:
-        return None
+def _anchor_name_filter(anchor: str):
+    """主播名模糊匹配条件：精确 + 包含。
+
+    解决 kezi 短名 vs 直播间完整标题的对应问题：
+    - 大全 包含在 大全谈开店天准 里 -> contains
+    """
+    return or_(
+        LiveSession.anchor_name == anchor,
+        LiveSession.anchor_nickname == anchor,
+        LiveSession.anchor_name.contains(anchor),
+        LiveSession.anchor_nickname.contains(anchor),
+    )
+
+
+def _query_candidates(db: Session, anchor_name: str) -> list[LiveSession]:
+    """分层查询候选场次：先精确+包含，没结果再用首字兜底。
+
+    分层是为了防止首字匹配太宽（如"主"匹配到"主播甲"和"主播乙"）。
+    """
+    # 第 1 层：精确 + 包含匹配
     candidates = (
         db.query(LiveSession)
         .filter(
-            or_(
-                LiveSession.anchor_name == item.anchor,
-                LiveSession.anchor_nickname == item.anchor,
-            ),
+            _anchor_name_filter(anchor_name),
             LiveSession.live_start_time.isnot(None),
-            LiveSession.live_start_time <= item.created_at,
         )
-        .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .order_by(LiveSession.live_start_time.desc())
         .all()
     )
-    covered_sessions: list[LiveSession] = []
+    if candidates:
+        return candidates
+
+    # 第 2 层：首字匹配兜底（第 1 层精确+包含没命中，只需首字条件）
+    if len(anchor_name) >= 1:
+        candidates = (
+            db.query(LiveSession)
+            .filter(
+                or_(
+                    LiveSession.anchor_name.startswith(anchor_name[0]),
+                    LiveSession.anchor_nickname.startswith(anchor_name[0]),
+                ),
+                LiveSession.live_start_time.isnot(None),
+            )
+            .order_by(LiveSession.live_start_time.desc())
+            .all()
+        )
+    return candidates
+
+
+def _get_session_end_time(session: LiveSession) -> datetime | None:
+    """计算直播场次的结束时间（优先用记录值，其次用时长推算）。"""
+    if session.live_end_time:
+        return session.live_end_time
+    if int(session.live_duration_seconds or 0) > 0:
+        return session.live_start_time + timedelta(seconds=int(session.live_duration_seconds))
+    if session.live_status == "live":
+        return datetime.now(_SHANGHAI).replace(tzinfo=None) + timedelta(minutes=5)
+    return None
+
+
+def match_live_session(db: Session, item: KeziLeadItem) -> LiveSession | None:
+    """两级匹配客资到直播场次。
+
+    第 1 级（优先）：主播名模糊匹配 + 时间窗匹配 —— 精确归属到场次
+    第 2 级（兜底）：同一天、同主播 —— 不管具体时间窗
+
+    都匹配不上或匹配到多个 -> 返回 None，进入"待归属"。
+    """
+    if not item.anchor or not item.anchor.strip():
+        return None
+
+    anchor_name = item.anchor.strip()
+
+    # ── 分层查询候选场次（精确+包含 -> 首字兜底） ──────────
+    candidates = _query_candidates(db, anchor_name)
+
+    if not candidates:
+        return None
+
+    # ── 第 1 级：时间窗匹配（含缓冲） ────────────────────────
+    BUFFER_BEFORE = timedelta(minutes=30)   # 开播前 30 分钟
+    BUFFER_AFTER = timedelta(minutes=60)    # 下播后 60 分钟
+
+    time_matched: list[LiveSession] = []
     for session in candidates:
-        end_time = session.live_end_time
-        if end_time is None and int(session.live_duration_seconds or 0) > 0:
-            end_time = session.live_start_time + timedelta(seconds=int(session.live_duration_seconds))
-        if end_time is None and session.live_status == "live":
-            end_time = datetime.now(_SHANGHAI).replace(tzinfo=None) + timedelta(minutes=5)
-        if end_time is not None and item.created_at <= end_time:
-            covered_sessions.append(session)
-    # 同名主播或重复场次导致两个时间窗同时覆盖时，没有足够证据选择其中之一。
-    # 宁可进入待归属，也不能按“最新 ID”猜测。
-    return covered_sessions[0] if len(covered_sessions) == 1 else None
+        end_time = _get_session_end_time(session)
+        if end_time is None:
+            continue
+        window_start = session.live_start_time - BUFFER_BEFORE
+        window_end = end_time + BUFFER_AFTER
+        if window_start <= item.created_at <= window_end:
+            time_matched.append(session)
+
+    # 恰好 1 个时间窗匹配 -> 精确归属
+    if len(time_matched) == 1:
+        return time_matched[0]
+
+    # 多个时间窗同时覆盖 -> 证据不足，不瞎猜
+    if len(time_matched) > 1:
+        return None
+
+    # ── 第 2 级：同一天兜底 ──────────────────────────────────
+    if item.created_at is None:
+        return None
+
+    lead_date = item.created_at.date()
+    same_day = [s for s in candidates if s.live_start_time.date() == lead_date]
+
+    # 同一天恰好 1 个场次 -> 兜底归属
+    if len(same_day) == 1:
+        return same_day[0]
+
+    # 0 个（主播当天没播）或多于 1 个 -> 待归属
+    return None
 
 
 def _save_item(db: Session, item: KeziLeadItem) -> tuple[bool, int | None]:
-    """幂等保存一条客资，返回“是否新增”和匹配到的场次编号。"""
+    """幂等保存一条客资，返回"是否新增"和匹配到的场次编号。"""
     existing = (
         db.query(Lead)
         .filter(
@@ -211,6 +296,61 @@ def _refresh_session_lead_counts(db: Session, session_ids: set[int]) -> None:
             )
             .count()
         )
+
+
+def rematch_pending_leads(db: Session) -> dict:
+    """把已有的「待归属」客资重新匹配一遍。
+
+    什么时候用：匹配逻辑更新后（比如名字模糊匹配上线），
+    把之前因为匹配不上而进入 pending 的客资拉回来重新跑一次。
+    """
+    pending_leads = (
+        db.query(Lead)
+        .filter(
+            Lead.external_source == SOURCE_SYSTEM,
+            Lead.attribution_status == "pending",
+        )
+        .all()
+    )
+
+    if not pending_leads:
+        return {"matched_count": 0, "still_pending": 0}
+
+    matched_count = 0
+    still_pending = 0
+    affected_sessions: set[int] = set()
+
+    for lead in pending_leads:
+        # 用客资数据构造匹配输入（sourceId 取 safe 值，匹配逻辑不用它）
+        item = KeziLeadItem(
+            sourceId=max(lead.external_id or 1, 1),
+            phone=lead.lead_phone or "",
+            douyinId=lead.douyin_id or "",
+            anchor=lead.anchor_name or "",
+            createdAt=lead.create_time or datetime.min,
+        )
+        session = match_live_session(db, item)
+        if session:
+            lead.session_id = session.id
+            lead.attribution_status = "matched"
+            lead.remark = None  # 清除旧备注
+            matched_count += 1
+            affected_sessions.add(session.id)
+        else:
+            still_pending += 1
+
+    _refresh_session_lead_counts(db, affected_sessions)
+    db.commit()
+
+    logger.info(
+        "客资重匹配完成：%s 条已归属，%s 条仍待归属",
+        matched_count,
+        still_pending,
+    )
+    return {
+        "matched_count": matched_count,
+        "still_pending": still_pending,
+    }
 
 
 async def sync_kezi_leads(
@@ -281,7 +421,7 @@ async def sync_kezi_leads(
                 "added_count": added,
                 "duplicate_count": duplicates,
                 "matched_count": matched,
-                # 前端展示系统当前仍需人工处理的总数，而不是“本轮新增待归属数”。
+                # 前端展示系统当前仍需人工处理的总数，而不是"本轮新增待归属数"。
                 "pending_count": int(state.pending_count or 0),
                 "last_external_id": int(state.last_external_id or 0),
                 "page_count": pages,

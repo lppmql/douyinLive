@@ -15,6 +15,7 @@ class LeadSyncResponse(BaseModel):
     pending_count: int = 0
     last_external_id: int = 0
     page_count: int = 0
+    rematch: dict | None = None  # 仅 ?rematch=true 时返回重匹配统计
 
 
 class LeadSyncStatusResponse(BaseModel):

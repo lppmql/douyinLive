@@ -17,7 +17,7 @@ from app.schemas.leads import (
     LeadSyncResponse,
     LeadSyncStatusResponse,
 )
-from app.services.leads.kezi_sync import SOURCE_SYSTEM, sync_kezi_leads
+from app.services.leads.kezi_sync import SOURCE_SYSTEM, rematch_pending_leads, sync_kezi_leads
 
 router = APIRouter(prefix="/leads", tags=["留资"])
 
@@ -81,15 +81,24 @@ def get_lead_sync_status(db: Session = Depends(get_db)):
 
 
 @router.post("/sync", response_model=LeadSyncResponse)
-async def run_lead_sync(db: Session = Depends(get_db)):
-    """立即拉取新增客资；密钥缺失时给出可操作提示。"""
+async def run_lead_sync(
+    rematch: bool = Query(False, description="先重匹配待归属客资，再拉取新增"),
+    db: Session = Depends(get_db),
+):
+    """立即拉取新增客资；传 ?rematch=true 会先把待归属客资重新匹配一遍。"""
     if not is_valid_kezi_api_key(settings.KEZI_API_KEY):
         raise HTTPException(
             409,
             "请在项目根目录 .env 配置至少 32 位、无空格的英文 KEZI_API_KEY",
         )
     try:
-        return await sync_kezi_leads(db)
+        rematch_result = None
+        if rematch:
+            rematch_result = rematch_pending_leads(db)
+        sync_result = await sync_kezi_leads(db)
+        if rematch_result:
+            sync_result["rematch"] = rematch_result
+        return sync_result
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
 
