@@ -222,12 +222,13 @@ def _pick_closest_session(sessions: list[LiveSession], lead_time: datetime) -> L
 
 
 def match_live_session(db: Session, item: KeziLeadItem) -> tuple[LiveSession | None, str | None]:
-    """三级匹配客资到直播场次。返回 (场次, 匹配方式)。
+    """四级匹配客资到直播场次。返回 (场次, 匹配方式)。
 
     匹配方式（用于设置备注）：
     - "time_window": 时间窗精确匹配，无需备注
     - "same_day": 同天仅 1 场，兜底归属
     - "gap": 同天多场次间隙，就近匹配，备注"下播后留资"
+    - "no_session_today": 当天无直播，按主播就近匹配，备注"当天无直播记录 / 换号播的"
     - None: 无法匹配，进入"待归属"
     """
     if not item.anchor or not item.anchor.strip():
@@ -280,7 +281,15 @@ def match_live_session(db: Session, item: KeziLeadItem) -> tuple[LiveSession | N
         if closest:
             return closest, "gap"
 
-    # 0 个同天场次 -> 主播当天没播
+    # ── 第 4 级：当天没直播，不限日期按主播就近匹配 ──────────
+    # 第 3 级都没匹配上（同天 0 场或 _pick_closest_session 返回 None），
+    # 说明主播当天没播或当天场次信息不全。此时放宽到所有候选场次，
+    # 按时间就近匹配，备注"当天无直播记录 / 换号播的"。
+    if len(same_day) == 0 and candidates:
+        closest = _pick_closest_session(candidates, item.created_at)
+        if closest:
+            return closest, "no_session_today"
+
     return None, None
 
 
@@ -303,6 +312,8 @@ def _save_item(db: Session, item: KeziLeadItem) -> tuple[bool, int | None]:
     if session:
         if match_reason == "gap":
             remark = "下播后留资（自动匹配到最近场次）"
+        elif match_reason == "no_session_today":
+            remark = "当天无直播记录 / 换号播的"
         else:
             remark = None
     else:
@@ -384,7 +395,12 @@ def rematch_pending_leads(db: Session) -> dict:
         if session:
             lead.session_id = session.id
             lead.attribution_status = "matched"
-            lead.remark = "下播后留资（自动匹配到最近场次）" if match_reason == "gap" else None
+            if match_reason == "gap":
+                lead.remark = "下播后留资（自动匹配到最近场次）"
+            elif match_reason == "no_session_today":
+                lead.remark = "当天无直播记录 / 换号播的"
+            else:
+                lead.remark = None
             matched_count += 1
             affected_sessions.add(session.id)
         else:

@@ -380,3 +380,50 @@ def test_manual_create_and_delete_refresh_session_count(db):
     delete_lead(lead.id, db=db)
     db.refresh(session)
     assert session.leads_count == 0
+
+
+def test_match_no_session_today_fallback_to_closest(db):
+    """当天没直播但主播有历史场次时，第 4 级按主播就近匹配。"""
+    room = LiveRoom(
+        room_id_str="room-no-session-today",
+        account_name="换号播测试账号",
+        anchor_name="主播甲",
+        platform="douyin",
+        status=True,
+    )
+    db.add(room)
+    db.flush()
+
+    # 主播甲只有 7/26 和 7/28 的直播，7/27 没播
+    day_before = LiveSession(
+        room_id=room.id,
+        anchor_name="主播甲",
+        live_status="ended",
+        live_start_time=datetime(2026, 7, 26, 10, 0),
+        live_end_time=datetime(2026, 7, 26, 11, 0),
+    )
+    day_after = LiveSession(
+        room_id=room.id,
+        anchor_name="主播甲",
+        live_status="ended",
+        live_start_time=datetime(2026, 7, 28, 10, 0),
+        live_end_time=datetime(2026, 7, 28, 11, 0),
+    )
+    db.add_all([day_before, day_after])
+    db.commit()
+
+    # 客资时间在 7/27（主播当天没播）
+    item = KeziLeadItem(
+        sourceId=301,
+        phone="13800138001",
+        douyinId="douyin-no-session",
+        anchor="主播甲",
+        createdAt=datetime(2026, 7, 27, 10, 30),
+    )
+
+    session, reason = match_live_session(db, item)
+    assert session is not None
+    # 应该匹配到 7/26 的场次（时间更近：距 7/26 下播 ~23.5h，距 7/28 开播 ~23.5h，
+    # 但 _pick_closest_session 优先找 lead_time 之前结束的）
+    assert session.id == day_before.id
+    assert reason == "no_session_today"
