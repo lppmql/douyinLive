@@ -14,7 +14,6 @@ from websockets.protocol import State
 
 from app.core.config import settings
 from app.core.logger import logger
-from app.services.asr.hotwords import get_hotwords_cached
 
 
 # 模拟话术片段（供 mock 模式使用）
@@ -110,8 +109,13 @@ class FunasrClient:
                     if isinstance(response, bytes):
                         continue
                     await result_queue.put(json.loads(response))
-            except websockets.ConnectionClosed:
-                pass
+            except websockets.ConnectionClosed as exc:
+                # 接收协程不能静默退出，否则发送方可能把只识别一半的分片误记为完成。
+                await result_queue.put({"__connection_error__": str(exc)})
+
+        def raise_if_connection_error(data: dict) -> None:
+            if "__connection_error__" in data:
+                raise RuntimeError("FunASR 连接中断，本分片将从断点重试")
 
         def normalize_result(data: dict, elapsed_seconds: float) -> Optional[dict]:
             text = str(data.get("text") or "").strip()
@@ -171,26 +175,35 @@ class FunasrClient:
                 await asyncio.sleep(0.005)
 
                 while not result_queue.empty():
-                    result = normalize_result(
-                        result_queue.get_nowait(), frame_count * 0.06
-                    )
+                    data = result_queue.get_nowait()
+                    raise_if_connection_error(data)
+                    result = normalize_result(data, frame_count * 0.06)
                     if result:
                         yield result
 
             await self._ws.send(json.dumps({"is_speaking": False}))
+            # 没有任何 PCM 帧说明 ffmpeg 实际没读到音频。它不是“整段安静”，
+            # 而是流地址过期、回放不存在或音轨读取失败，必须让分片进入重试，
+            # 不能误标为已完成后把几十个空分片全部跑一遍。
+            if frame_count == 0:
+                raise RuntimeError("真实流未输出任何音频帧，请刷新流地址后从断点重试")
             # 流结束后，离线精修结果可能稍晚到达。
             while True:
                 try:
                     data = await asyncio.wait_for(result_queue.get(), timeout=15)
                 except asyncio.TimeoutError:
+                    if receiver_task.done() and not self.connected:
+                        raise RuntimeError("FunASR 连接提前结束，本分片将从断点重试")
                     break
+                raise_if_connection_error(data)
                 result = normalize_result(data, frame_count * 0.06)
                 if result:
                     yield result
                 if data.get("is_final"):
                     break
-        except websockets.ConnectionClosed:
-            logger.warning("FunASR 连接断开")
+        except websockets.ConnectionClosed as exc:
+            logger.warning("FunASR 连接断开，本分片将从断点重试")
+            raise RuntimeError("FunASR 连接中断，本分片将从断点重试") from exc
         except Exception as e:
             logger.error(f"FunASR 转写出错: {e}")
             raise

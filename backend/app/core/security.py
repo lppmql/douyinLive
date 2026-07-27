@@ -1,5 +1,8 @@
 """JWT Token 签发/验证 + 密码哈希 + 当前用户依赖。"""
+import hashlib
+import hmac
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -15,7 +18,7 @@ from app.models.user import User
 
 MEDIA_ACCESS_COOKIE = "douyin_media_access"
 _MEDIA_PATH_PATTERN = re.compile(
-    r"^/api/v1/live-sessions/\d+/(?:avatar|video|playback|comments/\d+/avatar)$"
+    r"^/api/v1/live-sessions/\d+/(?:avatar|video|stream|playback|comments/\d+/avatar)$"
 )
 
 # auto_error=False 让依赖有机会读取只用于原生媒体标签的 HttpOnly Cookie。
@@ -61,6 +64,29 @@ def create_media_access_token(user_id: int) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {"sub": str(user_id), "exp": expire, "type": "media"}
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def build_internal_worker_token() -> str:
+    """生成 ASR Worker 专用凭证，不复用浏览器访问 Token。
+
+    生产环境可以在根目录 .env 单独配置；未配置时使用 JWT 密钥做单向派生。
+    即使派生结果泄露，也不能反推出 JWT 密钥。
+    """
+    configured = settings.INTERNAL_WORKER_TOKEN.strip()
+    if configured:
+        return configured
+    return hmac.new(
+        settings.JWT_SECRET_KEY.encode("utf-8"),
+        b"douyin-live:internal-asr-worker:v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def verify_internal_worker_token(token: str | None) -> bool:
+    """使用恒定时间比较内部凭证，避免通过响应耗时逐位猜测。"""
+    if not token:
+        return False
+    return secrets.compare_digest(token, build_internal_worker_token())
 
 
 def decode_token(token: str) -> Optional[dict]:
@@ -116,3 +142,18 @@ def get_current_user(
             detail="用户已被禁用",
         )
     return user
+
+
+def get_current_user_or_internal_worker(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
+) -> User | None:
+    """允许登录用户或 ASR Worker 调用内部刷新接口。
+
+    返回 None 表示请求来自已验证的 Worker；浏览器请求仍返回真实用户对象。
+    """
+    worker_token = request.headers.get("X-Internal-Worker-Token")
+    if verify_internal_worker_token(worker_token):
+        return None
+    return get_current_user(request=request, credentials=credentials, db=db)

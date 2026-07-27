@@ -53,7 +53,7 @@ class TestTaskStatus:
     def test_all_expected_values_present(self):
         """确保数据库中实际使用的状态都在枚举里"""
         expected = {"pending", "queued", "running", "processing",
-                     "retryable", "completed", "failed", "cancelled"}
+                     "retryable", "completed", "failed", "cancelled", "skipped"}
         actual = {e.value for e in TaskStatus}
         assert expected == actual
 

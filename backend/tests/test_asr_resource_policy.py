@@ -11,15 +11,15 @@ def _usage(cpu: float, memory: float, pressure: str) -> dict:
     }
 
 
-def test_asr_uses_more_than_one_worker_when_computer_has_headroom():
+def test_asr_keeps_single_funasr_connection_when_computer_has_headroom():
     plan = build_asr_resource_plan(
         _usage(cpu=18, memory=42, pressure="normal"),
         cpu_count=12,
         max_concurrency=4,
     )
 
-    assert plan.target_concurrency > 1
-    assert plan.queue_capacity == plan.target_concurrency
+    assert plan.target_concurrency == 1
+    assert plan.queue_capacity == 1
     assert plan.pause_new_tasks is False
 
 

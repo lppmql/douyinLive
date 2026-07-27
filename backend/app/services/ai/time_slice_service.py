@@ -318,7 +318,7 @@ def _sync_time_slice_vectors(db: Session, session_id: int, _slice_count: int) ->
     """
     try:
         from app.services.ai.embedding_service import embed_batch
-        from app.services.ai.vector_store import upsert_time_slice, delete_time_slice
+        from app.services.ai.vector_store import upsert_time_slice
     except ImportError:
         return
 

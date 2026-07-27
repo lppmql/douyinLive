@@ -48,8 +48,8 @@ export function useUserManagement() {
         render(row: UserRecord) {
           if (!row.roles || row.roles.length === 0) return '-';
           return row.roles.map(role =>
-            h(NTag, { type: role === 'R_SUPER' ? 'primary' : 'default', size: 'small', round: true }, {
-              default: () => role === 'R_SUPER' ? '超级管理员' : '普通用户'
+            h(NTag, { type: ['R_SUPER', 'R_ADMIN'].includes(role) ? 'primary' : role === 'R_VIEWER' ? 'info' : 'default', size: 'small', round: true }, {
+              default: () => ['R_SUPER', 'R_ADMIN'].includes(role) ? '超级管理员' : role === 'R_VIEWER' ? '只读查看' : '运营人员'
             })
           );
         }
@@ -172,7 +172,8 @@ export function useUserManagement() {
 
   const roleOptions = [
     { label: '超级管理员', value: 'R_SUPER' },
-    { label: '普通用户', value: 'R_USER' }
+    { label: '运营人员', value: 'R_USER' },
+    { label: '只读查看', value: 'R_VIEWER' }
   ];
 
   const statusOptions = [
@@ -212,7 +213,9 @@ export function useUserManagement() {
     formData.nickname = row.nickname || '';
     formData.email = row.email || '';
     formData.phone = row.phone || '';
-    formData.roles = row.roles;
+    // 旧版管理员角色 R_ADMIN 只用于读取兼容；编辑提交时统一升级成 R_SUPER，
+    // 否则即使只改昵称，后端的新角色白名单也会拒绝整张表单。
+    formData.roles = row.roles.map(role => role === 'R_ADMIN' ? 'R_SUPER' : role);
     formData.status = row.status;
     drawerVisible.value = true;
   }

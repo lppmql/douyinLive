@@ -280,11 +280,12 @@ echo ""
 echo "[5/6] 启动 FunASR 语音转写服务..."
 cd "$ROOT_DIR"
 docker compose --profile funasr up -d funasr
-echo "  ⏳ FunASR 容器启动中，首次需下载模型（约 1-3 分钟，8GB Mac 请耐心等待）..."
+echo "  ⏳ FunASR 容器启动中，首次下载或崩溃恢复可能需要 5-15 分钟..."
 
 # 等待 FunASR 端口就绪（WebSocket 服务，用 Python 检测 TCP 连通性）
 FUNASR_READY=false
-for ((i = 1; i <= 300; i++)); do
+FUNASR_WAIT_SECONDS="${ASR_ENGINE_READY_TIMEOUT_SECONDS:-900}"
+for ((i = 1; i <= FUNASR_WAIT_SECONDS; i++)); do
   # 先确认容器在运行
   if [ "$(docker inspect -f '{{.State.Running}}' douyin_live_funasr 2>/dev/null)" != "true" ]; then
     echo "  ❌ FunASR 容器异常退出，最近日志如下："
@@ -310,7 +311,7 @@ except Exception:
 done
 
 if [ "$FUNASR_READY" != "true" ]; then
-  echo "  ❌ FunASR 在 300 秒内未就绪，最近日志如下："
+  echo "  ❌ FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，最近日志如下："
   docker logs --tail 30 douyin_live_funasr 2>&1 || true
   exit 1
 fi

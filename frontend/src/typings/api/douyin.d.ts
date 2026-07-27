@@ -593,8 +593,8 @@ declare namespace Api {
     interface TranscriptTask {
       id: number;
       session_id: number;
-      status: 'queued' | 'processing' | 'completed' | 'failed';
-      task_type: string;
+      status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
+      task_type: 'realtime' | 'offline';
       anchor_name: string;
       session_title: string;
       live_start_time: string | null;
@@ -615,7 +615,7 @@ declare namespace Api {
       updated_at: string;
       /** 音频分片总数（转写进度分母） */
       total_chunks: number;
-      /** 已完成音频分片数（转写进度分子） */
+      /** 已处理音频分片数（包含因时长修正而安全跳过的技术分片） */
       completed_chunks: number;
       /** 转写进度百分比 0-100 */
       progress_percent: number;

@@ -54,7 +54,6 @@ const bgColor = computed(() => {
   <div class="relative size-full flex-center overflow-hidden p-16px lt-sm:p-12px" :style="{ backgroundColor: bgColor }">
     <WaveBg :theme-color="bgThemeColor" />
     <div class="relative z-4 flex justify-center">
-
       <NCard :bordered="false" class="min-w-0 w-full rd-14px shadow-xl">
         <div class="w-full max-w-400px">
           <header class="flex-y-center justify-between">

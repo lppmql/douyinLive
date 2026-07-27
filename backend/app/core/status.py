@@ -38,6 +38,7 @@ class TaskStatus(str, Enum):
     COMPLETED = "completed"       # 已成功完成
     FAILED = "failed"             # 已失败（不再自动重试）
     CANCELLED = "cancelled"       # 已取消（预留，当前未使用）
+    SKIPPED = "skipped"           # 已跳过（真实时长修正后产生的越界技术分片）
 
 
 class ReviewFindingStatus(str, Enum):

@@ -6,13 +6,20 @@
 3. 登录时从 Redis 取出校验
 """
 
+import hashlib
+import hmac
 import logging
-import random
+import secrets
 from datetime import timedelta
 
 from redis import Redis
 
 from app.core.config import settings
+from app.services.security.rate_limit import (
+    RateLimitExceeded,
+    clear_rate_limit,
+    hit_rate_limit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +34,21 @@ def _redis_client() -> Redis:
 
 
 def _generate_code(length: int = 6) -> str:
-    """生成纯数字验证码。"""
-    return str(random.randint(10 ** (length - 1), 10**length - 1))
+    """使用密码学安全随机数生成固定长度验证码。"""
+    lower = 10 ** (length - 1)
+    return str(lower + secrets.randbelow(9 * lower))
 
 
-async def send_sms_code(phone: str) -> dict:
+def _code_digest(phone: str, code: str) -> str:
+    """验证码只以摘要形式存入 Redis，避免缓存泄露后直接看到验证码。"""
+    return hmac.new(
+        settings.JWT_SECRET_KEY.encode("utf-8"),
+        f"{phone}:{code}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+async def send_sms_code(phone: str, client_identity: str = "unknown") -> dict:
     """向指定手机号发送验证码。
 
     步骤：
@@ -43,21 +60,32 @@ async def send_sms_code(phone: str) -> dict:
     Returns:
         {"success": True, "message": "验证码已发送"}
     """
+    try:
+        hit_rate_limit("sms-ip", client_identity, limit=5, window_seconds=3600)
+        hit_rate_limit("sms-phone", phone, limit=3, window_seconds=3600)
+    except RateLimitExceeded as exc:
+        raise TencentSmsError(str(exc)) from exc
+
+    if not all(
+        [
+            settings.TENCENT_SMS_APP_ID,
+            settings.TENCENT_SMS_APP_KEY,
+            settings.TENCENT_SMS_SIGN,
+            settings.TENCENT_SMS_TEMPLATE_CODE,
+        ]
+    ):
+        raise TencentSmsError("短信服务尚未完成配置，请联系管理员")
+
     r = _redis_client()
-    key = f"{settings.SMS_CODE_REDIS_PREFIX}{phone}"
+    key = f"{settings.SMS_CODE_REDIS_PREFIX}{hashlib.sha256(phone.encode()).hexdigest()}"
+    try:
+        # 同一手机号 60 秒内不能重复发送。
+        ttl = r.ttl(key)
+        total_ttl = settings.SMS_CODE_EXPIRE_MINUTES * 60
+        if ttl > max(0, total_ttl - 60):
+            raise TencentSmsError(f"请 {ttl - (total_ttl - 60)} 秒后再试")
 
-    # 检查是否 60 秒内重复发送
-    ttl = r.ttl(key)
-    if ttl > 240:  # 还有 4 分钟以上有效期，说明刚发过
-        remaining = ttl - 240
-        raise TencentSmsError(f"请 {remaining} 秒后再试")
-
-    code = _generate_code()
-
-    # 如果 APP_ID 为空，进入开发/测试模式（不真正发短信）
-    if not settings.TENCENT_SMS_APP_ID:
-        logger.warning("短信 SDK_APP_ID 未配置，验证码 %s 不发送（开发模式）", code)
-    else:
+        code = _generate_code()
         try:
             from tencentcloud.common import credential
             from tencentcloud.sms.v20210111 import sms_client, models
@@ -76,20 +104,23 @@ async def send_sms_code(phone: str) -> dict:
 
             resp = client.SendSms(req)
             if resp.SendStatusSet[0].Code != "Ok":
-                raise TencentSmsError(f"短信发送失败: {resp.SendStatusSet[0].Message}")
+                raise TencentSmsError("短信发送失败，请稍后重试")
 
-            logger.info("验证码已发送至 %s, code=%s", phone, code)
+            logger.info("短信验证码发送成功")
         except TencentSmsError:
             raise
         except Exception as e:
             logger.exception("腾讯云短信 SDK 调用异常")
-            raise TencentSmsError(f"短信服务异常: {e}") from e
+            raise TencentSmsError("短信服务暂时不可用，请稍后重试") from e
 
-    # 存入 Redis，有效期 5 分钟
-    r.setex(key, timedelta(minutes=settings.SMS_CODE_EXPIRE_MINUTES), code)
-    r.close()
-
-    return {"success": True, "message": "验证码已发送"}
+        r.setex(
+            key,
+            timedelta(minutes=settings.SMS_CODE_EXPIRE_MINUTES),
+            _code_digest(phone, code),
+        )
+        return {"success": True, "message": "验证码已发送"}
+    finally:
+        r.close()
 
 
 def verify_sms_code(phone: str, code: str) -> bool:
@@ -97,19 +128,32 @@ def verify_sms_code(phone: str, code: str) -> bool:
 
     校验成功后立即删除 Redis 中的验证码（一次性使用）。
     """
+    try:
+        hit_rate_limit("sms-verify", phone, limit=5, window_seconds=600)
+    except RateLimitExceeded:
+        return False
+
     r = _redis_client()
-    key = f"{settings.SMS_CODE_REDIS_PREFIX}{phone}"
-
-    stored = r.get(key)
-    if stored is None:
-        r.close()
+    key = f"{settings.SMS_CODE_REDIS_PREFIX}{hashlib.sha256(phone.encode()).hexdigest()}"
+    expected = _code_digest(phone, code)
+    try:
+        # Lua 脚本让“比较成功并删除”成为一个原子动作，同一验证码只能成功一次。
+        matched = r.eval(
+            """
+            local stored = redis.call('GET', KEYS[1])
+            if stored and stored == ARGV[1] then
+                redis.call('DEL', KEYS[1])
+                return 1
+            end
+            return 0
+            """,
+            1,
+            key,
+            expected,
+        )
+        if int(matched or 0) == 1:
+            clear_rate_limit("sms-verify", phone)
+            return True
         return False
-
-    if stored != code:
+    finally:
         r.close()
-        return False
-
-    # 校验成功，立即删除（一次性使用）
-    r.delete(key)
-    r.close()
-    return True

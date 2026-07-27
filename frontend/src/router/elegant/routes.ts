@@ -194,7 +194,7 @@ export const generatedRoutes: GeneratedRoute[] = [
       icon: 'mdi:account-group',
       order: 10,
       keepAlive: true,
-      roles: ['R_SUPER']
+      roles: ['R_SUPER', 'R_ADMIN']
     }
   }
 ];

@@ -14,7 +14,7 @@ from app.core.error_handler import register_exception_handlers
 from app.models.scraper_tasks import ScraperTask
 from app.api.v1 import v1_router
 from app.api.v1.auth import router as auth_router
-from app.api.v1.live_sessions import stream_router  # 浏览器回放流端点，无需鉴权
+from app.api.v1.live_sessions import stream_router  # 原生媒体标签使用短时 HttpOnly Cookie
 from app.services.collector.scheduler import scheduler_manager
 from app.services.tasks.runtime import publish_task_event, touch_task
 from app.services.tasks.control import CONTROL_TASK_TYPES, collector_task_control
@@ -74,14 +74,25 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️  数据库连接失败: {e}")
 
+    # 首次管理员属于安全入口：空库又缺少合格凭证时必须停止启动，不能留下
+    # “服务看似正常、实际无人能登录”的半成品状态。
+    bootstrap_db = SessionLocal()
     try:
-        db = SessionLocal()
-        seed_prompts(db)
+        from app.services.security.bootstrap import bootstrap_admin_if_empty
+
+        if bootstrap_admin_if_empty(bootstrap_db):
+            logger.warning("全新安装管理员已从环境变量安全创建，请妥善保管账号")
+    finally:
+        bootstrap_db.close()
+
+    # 默认提示词只是辅助内容，失败不应拖垮已经具备安全管理员的主服务。
+    prompt_db = SessionLocal()
+    try:
+        seed_prompts(prompt_db)
     except Exception as exc:
         logger.warning("默认 AI 提示词检查失败，不阻塞服务启动: %s", exc)
     finally:
-        if "db" in locals():
-            db.close()
+        prompt_db.close()
 
     try:
         requeued_tasks = collector_task_control.recover_interrupted_tasks()
@@ -230,7 +241,7 @@ def prometheus_metrics():
 # 注册 API 路由
 # auth_router 单独注册（含公开的 login/refreshToken，不经过 v1_router 的全局鉴权）
 app.include_router(auth_router, prefix="/api/v1")
-# 浏览器 <video> 标签发请求时无法带 JWT header，回放流不经过 v1_router 全局鉴权
+# 浏览器 <video> 标签无法添加 JWT header，回放流端点自行校验短时媒体 Cookie。
 app.include_router(stream_router, prefix="/api/v1")
 app.include_router(v1_router)
 app.add_websocket_route("/ws/transcript/{session_id}", transcript_ws)

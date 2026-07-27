@@ -3,12 +3,15 @@ import asyncio
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.permissions import is_business_action_allowed
+from app.core.security import get_current_user, get_current_user_or_internal_worker
+from app.models.user import User
 from app.models.live_sessions import LiveSession
 from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
@@ -36,7 +39,7 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
-# 浏览器 <video> 标签发请求时无法带 JWT header，因此回放流端点放在公开路由上
+# 浏览器 <video> 标签不能添加 Authorization 头，因此这里使用短时 HttpOnly 媒体 Cookie。
 stream_router = APIRouter(tags=["直播场次-流"])
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
 AVATAR_HOST_SUFFIXES = (".douyinpic.com", ".byteimg.com")
@@ -346,13 +349,28 @@ async def _stream_h264(stream_url: str, headers: dict | None, start_seconds: flo
 # ── 流地址刷新 API（stream_router：无需 JWT 认证，ASR Worker 直接调用）──
 
 @stream_router.post("/live-sessions/{session_id}/refresh-stream")
-async def refresh_session_stream(session_id: int, db: Session = Depends(get_db)):
+async def refresh_session_stream(
+    session_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _actor: User | None = Depends(get_current_user_or_internal_worker),
+):
     """自动刷新场次流地址（用已保存的 Cookie 重新从抖音抓取 m3u8）。
 
     ASR Worker 转写前 / 前端播放失败时调用此接口，
     成功时返回新流地址，失败时返回原因。
-    放在 stream_router 而非 router 是为了让 ASR Worker（独立进程）无需 JWT Token 即可调用。
+    登录用户使用 Bearer Token；ASR Worker 使用专用内部凭证，接口不再公开。
     """
+    # 内部 Worker 已用独立密钥验明身份；浏览器账号仍必须遵守“查看者只读”规则。
+    if _actor is not None and not is_business_action_allowed(
+        _actor.roles,
+        request.method,
+        request.url.path,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="当前账号没有执行此操作的权限",
+        )
     result = await refresh_session_stream_url(db, session_id)
     if not result["success"]:
         raise HTTPException(400, result["error"] or "流地址刷新失败")
@@ -368,6 +386,7 @@ async def stream_session_video(
     session_id: int,
     start_seconds: float = Query(0, ge=0),
     db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
 ):
     """H.264 MPEG-TS 流——前端 mpegts.js 通过 MSE 解码。
     VideoToolbox 硬件编码 H.265→H.264，所有浏览器通用。"""
@@ -401,6 +420,7 @@ def playback_session_video(
     session_id: int,
     start_seconds: float = Query(0, ge=0),
     db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
 ):
     """将真实 H.265 回放按需转换为浏览器兼容的 H.264 流。"""
     session = db.get(LiveSession, session_id)

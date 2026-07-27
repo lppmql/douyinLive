@@ -3,8 +3,8 @@ import { h, onMounted, ref, computed, nextTick } from 'vue';
 import {
   NButton, NCard, NSpace, NDataTable, NTag,
   NDrawer, NDrawerContent, NInput, NForm, NFormItem,
-  NSelect, NPopconfirm, NAlert, NEmpty, NModal,
-  useMessage, NScrollbar, NSpin, NTag as NTag2, NDivider,
+  NPopconfirm, NAlert, NEmpty, NModal,
+  useMessage, NScrollbar, NSpin,
 } from 'naive-ui';
 import {
   fetchActivePrompts, fetchPrompts, updatePrompt, deletePrompt,
@@ -14,6 +14,7 @@ import { unwrapServiceData, getServiceErrorMessage } from '@/utils/service';
 defineOptions({ name: 'PromptManagement' });
 
 const ms = useMessage();
+const promptRowKey = (row: Api.Douyin.PromptTemplate) => row.id;
 
 const TYPE_OPTIONS = [
   { label: '话术评分 (speech_score)', value: 'speech_score' },
@@ -228,7 +229,7 @@ onMounted(getData);
       <div class="business-table-shell">
         <NDataTable
           :loading="loading" :columns="columns" :data="prompts"
-          :row-key="(row: Api.Douyin.PromptTemplate) => row.id"
+          :row-key="promptRowKey"
           :scroll-x="1100" :max-height="520" size="small" striped :bordered="false" class="min-h-0"
         />
         <NEmpty v-if="!loading && prompts.length === 0" description="暂无生效提示词" class="py-40px" />
@@ -275,8 +276,10 @@ onMounted(getData);
               <template v-if="extractedVars.length">
                 <NFormItem label="变量占位符（点击即插入）">
                   <div class="var-tags">
-                    <NTag v-for="v in extractedVars" :key="v" size="small" type="warning"
-                      style="cursor: pointer;" @click="insertVar(v)">
+                    <NTag
+                      v-for="v in extractedVars" :key="v" size="small" type="warning"
+                      style="cursor: pointer;" @click="insertVar(v)"
+                    >
                       {{ v }}
                     </NTag>
                   </div>
@@ -302,8 +305,10 @@ onMounted(getData);
           <div class="drawer-right">
             <div class="history-panel-title">版本历史（{{ versionHistory.length }}）</div>
             <NScrollbar style="flex: 1; max-height: calc(100vh - 220px);">
-              <div v-for="v in versionHistory" :key="v.id"
-                class="version-item" :class="{ 'version-item--current': v.version === editVersion }">
+              <div
+                v-for="v in versionHistory" :key="v.id"
+                class="version-item" :class="{ 'version-item--current': v.version === editVersion }"
+              >
                 <div class="version-item__header">
                   <NTag size="small" :type="v.version === editVersion ? 'success' : 'info'">v{{ v.version }}</NTag>
                   <span class="version-item__date">
@@ -343,8 +348,10 @@ onMounted(getData);
         <span style="margin-left: 16px; color: #999; font-size: 12px;">红色 = 已删除 · 绿色 = 新增</span>
       </div>
       <div class="diff-modal-body">
-        <div v-for="dl in diffLines" :key="dl.idx + dl.type"
-          class="diff-line" :class="'diff-line--' + dl.type">
+        <div
+          v-for="dl in diffLines" :key="dl.idx + dl.type"
+          class="diff-line" :class="'diff-line--' + dl.type"
+        >
           <span class="diff-line-num">{{ dl.idx }}</span>
           <span class="diff-line-sign">{{ dl.type === 'added' ? '+' : dl.type === 'removed' ? '-' : ' ' }}</span>
           <span class="diff-line-text">{{ dl.line }}</span>

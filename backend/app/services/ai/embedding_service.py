@@ -6,8 +6,6 @@
 import logging
 import threading
 from pathlib import Path
-from typing import Any
-
 import torch
 from transformers import AutoModel, AutoTokenizer
 

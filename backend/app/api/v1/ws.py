@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSock
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
+from app.core.security import MEDIA_ACCESS_COOKIE, decode_token
 from app.models.transcript_segments import TranscriptSegment
 from app.models.transcript_full_texts import TranscriptFullText
 from app.models.live_sessions import LiveSession
@@ -11,6 +12,7 @@ from app.models.stream_sources import StreamSource
 from app.models.asr_audio_chunks import AsrAudioChunk
 from app.core.status import TaskStatus
 from app.models.asr_tasks import AsrTask
+from app.models.user import User
 from app.services.asr.queue import queue_session_transcription
 from app.services.asr.websocket_manager import ws_manager
 from app.schemas.transcript import (
@@ -56,7 +58,7 @@ def get_chunk_counts(db: Session, task_ids: list[int]) -> dict[int, tuple[int, i
     )
     for task_id, status, count in rows:
         counts[task_id][0] += int(count or 0)
-        if status == TaskStatus.COMPLETED:
+        if status in {TaskStatus.COMPLETED, TaskStatus.SKIPPED}:
             counts[task_id][1] += int(count or 0)
     return {task_id: (values[0], values[1]) for task_id, values in counts.items()}
 
@@ -378,6 +380,27 @@ def get_full_text(session_id: int, db: Session = Depends(get_db)):
 
 async def transcript_ws(websocket: WebSocket):
     """前端 WebSocket 连接，实时接收 ASR 转写结果"""
+    # WebSocket 无法添加普通 Authorization 请求头，因此复用登录后签发的短时
+    # HttpOnly 媒体 Cookie。未登录连接在 accept 前关闭，不能订阅任何真实话术。
+    token = websocket.cookies.get(MEDIA_ACCESS_COOKIE)
+    payload = decode_token(token) if token else None
+    if payload is None or payload.get("type") != "media":
+        await websocket.close(code=4401, reason="请先登录")
+        return
+    try:
+        user_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        await websocket.close(code=4401, reason="登录凭证无效")
+        return
+    db = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        if user is None or user.status != "active":
+            await websocket.close(code=4403, reason="账号已被禁用")
+            return
+    finally:
+        db.close()
+
     session_id = int(websocket.path_params["session_id"])
     await websocket.accept()
     await ws_manager.connect(session_id, websocket)

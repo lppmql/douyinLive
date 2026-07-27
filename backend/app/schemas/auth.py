@@ -1,7 +1,7 @@
 """认证相关 Pydantic 模型 — 登录 / 用户信息 / 用户管理"""
 from datetime import datetime
 from typing import Generic, Optional, TypeVar
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # 泛型类型变量，用于 SoybeanResponse 包装
 T = TypeVar("T")
@@ -31,6 +31,19 @@ class LoginRequest(BaseModel):
     """登录请求"""
     username: str = Field(min_length=1, max_length=100, description="用户名，不能为空")
     password: str = Field(min_length=1, max_length=128, description="密码，不能为空")
+
+
+class SendCodeRequest(BaseModel):
+    """发送短信验证码请求。"""
+
+    phone: str = Field(pattern=r"^1[3-9]\d{9}$", description="中国大陆 11 位手机号")
+
+
+class CodeLoginRequest(BaseModel):
+    """手机号验证码登录请求。"""
+
+    phone: str = Field(pattern=r"^1[3-9]\d{9}$", description="中国大陆 11 位手机号")
+    code: str = Field(pattern=r"^\d{6}$", description="6 位数字验证码")
 
 
 class TokenData(BaseModel):
@@ -75,6 +88,15 @@ class UserCreate(BaseModel):
     roles: list[str] = Field(default_factory=lambda: ["R_USER"])
     status: str = Field(default="active", pattern="^(active|disabled)$", description="用户状态")
 
+    @field_validator("roles")
+    @classmethod
+    def validate_roles(cls, value: list[str]) -> list[str]:
+        """只接受系统定义的三种角色，未知角色默认不能入库。"""
+        allowed = {"R_VIEWER", "R_USER", "R_SUPER"}
+        if not value or any(role not in allowed for role in value):
+            raise ValueError("角色只能是 R_VIEWER、R_USER 或 R_SUPER")
+        return sorted(set(value))
+
 
 class UserUpdate(BaseModel):
     """更新用户请求（所有字段可选）"""
@@ -85,6 +107,13 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
     roles: Optional[list[str]] = None
     status: Optional[str] = None
+
+    @field_validator("roles")
+    @classmethod
+    def validate_optional_roles(cls, value: Optional[list[str]]) -> Optional[list[str]]:
+        if value is None:
+            return None
+        return UserCreate.validate_roles(value)
 
 
 # ===== 分页 =====

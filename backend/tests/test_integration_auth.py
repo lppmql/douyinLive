@@ -43,8 +43,8 @@ class TestAuthLogin:
 
         assert resp.status_code == 401
 
-    def test_login_disabled_user_returns_403(self, client, db):
-        """被禁用的用户 → 403"""
+    def test_login_disabled_user_uses_same_generic_401(self, client, db):
+        """被禁用账号与错误密码返回相同提示，避免攻击者枚举有效账号。"""
         from app.models.user import User
         from app.core.security import get_password_hash
 
@@ -61,7 +61,8 @@ class TestAuthLogin:
             json={"username": "disabled_user", "password": "test123456"},
         )
 
-        assert resp.status_code == 403
+        assert resp.status_code == 401
+        assert resp.json()["detail"] == "用户名或密码错误"
 
 
 class TestGetUserInfo:

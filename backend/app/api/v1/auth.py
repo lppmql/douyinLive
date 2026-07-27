@@ -1,7 +1,7 @@
 """Phase 8: 认证 API — 登录 / 获取用户信息 / 刷新 Token"""
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -17,20 +17,20 @@ from app.core.security import (
     MEDIA_ACCESS_COOKIE,
 )
 from app.models.user import User
-from pydantic import BaseModel
-from app.schemas.auth import LoginRequest, SoybeanResponse, TokenData, UserInfoData
-
-
-class SendCodeRequest(BaseModel):
-    """发送验证码请求"""
-    phone: str
-
-
-class CodeLoginRequest(BaseModel):
-    """验证码登录请求"""
-    phone: str
-    code: str
+from app.schemas.auth import (
+    CodeLoginRequest,
+    LoginRequest,
+    SendCodeRequest,
+    SoybeanResponse,
+    TokenData,
+    UserInfoData,
+)
 from app.services.sms import send_sms_code, verify_sms_code, TencentSmsError
+from app.services.security.rate_limit import (
+    RateLimitExceeded,
+    clear_rate_limit,
+    hit_rate_limit,
+)
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -51,8 +51,15 @@ def _set_media_access_cookie(response: Response, user_id: int) -> None:
 
 
 @router.post("/login", response_model=SoybeanResponse[TokenData])
-def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
+def login(req: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
     """用户登录 → 返回 JWT Token"""
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        hit_rate_limit("login-ip", client_ip, limit=20, window_seconds=300)
+        hit_rate_limit("login-account", req.username, limit=8, window_seconds=300)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
     user = db.query(User).filter(User.username == req.username).first()
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(
@@ -61,13 +68,15 @@ def login(req: LoginRequest, response: Response, db: Session = Depends(get_db)):
         )
     if user.status != "active":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="账号已被禁用",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户名或密码错误",
         )
 
     # 更新最后登录时间
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
+    clear_rate_limit("login-account", req.username)
+    clear_rate_limit("login-ip", client_ip)
 
     token_data = {"sub": str(user.id)}
     _set_media_access_cookie(response, user.id)
@@ -130,19 +139,31 @@ def get_user_info(response: Response, current_user: User = Depends(get_current_u
 
 
 @router.post("/send-code", response_model=SoybeanResponse)
-def send_sms_code_endpoint(req: SendCodeRequest):
+def send_sms_code_endpoint(req: SendCodeRequest, request: Request):
     """发送短信验证码"""
     try:
         import asyncio
-        result = asyncio.run(send_sms_code(req.phone))
+        client_ip = request.client.host if request.client else "unknown"
+        result = asyncio.run(send_sms_code(req.phone, client_ip))
         return ok_response(result)
     except TencentSmsError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/code-login", response_model=SoybeanResponse[TokenData])
-def code_login(req: CodeLoginRequest, response: Response, db: Session = Depends(get_db)):
+def code_login(
+    req: CodeLoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     """手机号 + 验证码登录"""
+    client_ip = request.client.host if request.client else "unknown"
+    try:
+        hit_rate_limit("code-login-ip", client_ip, limit=10, window_seconds=600)
+    except RateLimitExceeded as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
     if not verify_sms_code(req.phone, req.code):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -154,7 +175,7 @@ def code_login(req: CodeLoginRequest, response: Response, db: Session = Depends(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="该手机号未注册，请先联系管理员创建账号",
+            detail="手机号或验证码无效",
         )
     if user.status != "active":
         raise HTTPException(
@@ -164,6 +185,7 @@ def code_login(req: CodeLoginRequest, response: Response, db: Session = Depends(
 
     user.last_login_at = datetime.now(timezone.utc)
     db.commit()
+    clear_rate_limit("code-login-ip", client_ip)
 
     token_data = {"sub": str(user.id)}
     _set_media_access_cookie(response, user.id)

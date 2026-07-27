@@ -13,6 +13,27 @@ from app.services.tasks.runtime import ensure_task_identity
 from app.core.status import TaskStatus
 
 
+def recover_interrupted_chunk(chunk: AsrAudioChunk) -> None:
+    """恢复被 Worker 重启打断的分片，不消耗正常业务重试次数。"""
+    chunk.status = TaskStatus.PENDING
+    chunk.retry_count = max(0, int(chunk.retry_count or 0) - 1)
+    chunk.error_message = "Worker 中断，已保留完成内容并等待断点续传"
+    chunk.completed_at = None
+    chunk.worker_id = None
+    chunk.heartbeat_at = datetime.utcnow()
+
+
+def requeue_offline_task_for_live_priority(task: AsrTask) -> None:
+    """离线任务在分片边界礼让实时直播，并退还本次任务级重试次数。"""
+    task.status = TaskStatus.QUEUED
+    task.retry_count = max(0, int(task.retry_count or 0) - 1)
+    task.error_message = "检测到正在直播的任务，已保存断点并主动礼让"
+    task.started_at = None
+    task.completed_at = None
+    task.worker_id = None
+    task.heartbeat_at = datetime.utcnow()
+
+
 def reset_failed_task_for_retry(task: AsrTask, failed_chunks: list[AsrAudioChunk], stream_id: int) -> None:
     """手动重试失败任务，保留完成分片，只重置失败部分。"""
     for chunk in failed_chunks:
@@ -66,7 +87,9 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
         .order_by(AsrTask.created_at.desc())
         .first()
     )
+    expected_task_type = "realtime" if session.live_status == "live" else "offline"
     if existing:
+        existing.task_type = expected_task_type
         if existing.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
             failed_chunks = db.query(AsrAudioChunk).filter(
                 AsrAudioChunk.task_id == existing.id,
@@ -77,7 +100,12 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
             return existing, True
         return existing, False
 
-    task = AsrTask(session_id=session.id, stream_id=stream.id, status=TaskStatus.QUEUED, task_type="offline")
+    task = AsrTask(
+        session_id=session.id,
+        stream_id=stream.id,
+        status=TaskStatus.QUEUED,
+        task_type=expected_task_type,
+    )
     ensure_task_identity(task, "asr", f"asr:session:{session.id}")
     db.add(task)
     db.flush()
@@ -123,6 +151,25 @@ def queue_auto_transcriptions(
     )
     active_count = db.query(AsrTask).filter(AsrTask.status.in_([TaskStatus.QUEUED, "processing"])).count()
     available = max(0, capacity - active_count)
+    active_live_count = (
+        db.query(AsrTask.id)
+        .join(LiveSession, LiveSession.id == AsrTask.session_id)
+        .filter(
+            AsrTask.status.in_([TaskStatus.QUEUED, TaskStatus.PROCESSING]),
+            LiveSession.live_status == "live",
+        )
+        .count()
+    )
+    live_overflow_only = (
+        capacity > 0
+        and active_count >= capacity
+        and active_count > 0
+        and active_live_count == 0
+    )
+    # 单并发正在跑长离线回放时，仍允许一个真实直播任务进入等待队列。
+    # Worker 只有“看见已排队直播任务”才会在两分钟分片边界主动礼让。
+    if live_overflow_only:
+        available = 1
     if limit is not None:
         available = min(available, max(0, limit))
     if available == 0:
@@ -153,6 +200,8 @@ def queue_auto_transcriptions(
     )
     if session_ids is not None:
         resumable_query = resumable_query.filter(LiveSession.id.in_(session_ids))
+    if live_overflow_only:
+        resumable_query = resumable_query.filter(LiveSession.live_status == "live")
     resumed_session_ids = []
     for session in resumable_query.limit(available).all():
         try:
@@ -174,6 +223,8 @@ def queue_auto_transcriptions(
         )
     if session_ids is not None:
         query = query.filter(LiveSession.id.in_(session_ids))
+    if live_overflow_only:
+        query = query.filter(LiveSession.live_status == "live")
     sessions = []
     if available:
         sessions = (

@@ -104,3 +104,58 @@ def test_auto_queue_and_worker_default_to_latest_real_session(monkeypatch):
 
     assert queued_ids == [live_task.id, oldest_task.id, latest_task.id]
     db.close()
+
+
+def test_live_task_can_wait_when_single_slot_is_used_by_offline_task():
+    """单并发被离线任务占用时，直播任务仍要先入队，Worker 才能在分片边界礼让。"""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            LiveRoom.__table__,
+            LiveSession.__table__,
+            StreamSource.__table__,
+            AsrTask.__table__,
+            AsrAudioChunk.__table__,
+        ],
+    )
+    db = sessionmaker(bind=engine)()
+    room = LiveRoom(account_name="account", anchor_name="主播", platform="douyin", status=True)
+    db.add(room)
+    db.flush()
+
+    offline_session = LiveSession(
+        room_id=room.id,
+        anchor_name="离线主播",
+        live_status="ended",
+        detail_collection_status="complete",
+    )
+    live_session = LiveSession(
+        room_id=room.id,
+        anchor_name="实时主播",
+        live_status="live",
+        detail_collection_status="pending",
+    )
+    db.add_all([offline_session, live_session])
+    db.flush()
+    for session in (offline_session, live_session):
+        db.add(
+            StreamSource(
+                session_id=session.id,
+                m3u8_url=f"https://example.invalid/{session.id}.m3u8",
+                status="active",
+                fetched_at=datetime(2026, 7, 27, 20, 0),
+            )
+        )
+    db.flush()
+    offline_task, _created = queue_session_transcription(db, offline_session)
+    offline_task.status = "processing"
+    db.commit()
+
+    result = queue_auto_transcriptions(db, limit=1, queue_capacity=1)
+
+    live_task = db.query(AsrTask).filter(AsrTask.session_id == live_session.id).one()
+    assert result["session_ids"] == [live_session.id]
+    assert live_task.status == "queued"
+    assert offline_task.status == "processing"
+    db.close()

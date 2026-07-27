@@ -40,7 +40,8 @@ export function getStatusLabel(status?: string): string {
     pending: '待处理',
     processing: '转写中',
     completed: '已完成',
-    failed: '失败'
+    failed: '失败',
+    cancelled: '已暂停'
   };
   return map[status] || status;
 }
@@ -53,7 +54,8 @@ export function getStatusType(status?: string): 'success' | 'warning' | 'error' 
     pending: 'info',
     processing: 'warning',
     completed: 'success',
-    failed: 'error'
+    failed: 'error',
+    cancelled: 'info'
   };
   return map[status] || 'default';
 }

@@ -57,10 +57,12 @@ class Settings(BaseSettings):
     ASR_SAMPLE_RATE: int = 16000
     ASR_AUTO_START: bool = True
     ASR_MAX_QUEUED: int = 5
-    ASR_ENGINE_READY_TIMEOUT_SECONDS: int = 300
+    # FunASR 容器崩溃后可能需要重新校验或加载 1.6GB 模型，低内存电脑预留 15 分钟。
+    ASR_ENGINE_READY_TIMEOUT_SECONDS: int = 900
     ASR_TASK_TIMEOUT_SECONDS: int = 600
     ASR_NO_AUDIO_TIMEOUT_SECONDS: int = 30
-    ASR_CHUNK_SECONDS: int = 300
+    # 每 2 分钟形成一个可恢复检查点，避免长直播一直占住 ffmpeg 和识别资源。
+    ASR_CHUNK_SECONDS: int = 120
     ASR_CHUNK_MAX_RETRIES: int = 2
     ASR_ALLOW_MOCK: bool = False
 
@@ -109,6 +111,19 @@ class Settings(BaseSettings):
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     # 原生图片、视频标签不能添加 Authorization 请求头，因此使用短时只读媒体 Cookie。
     MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # ASR Worker 调用后端刷新流地址时使用。留空时从 JWT 密钥安全派生，避免公开接口。
+    INTERNAL_WORKER_TOKEN: str = ""
+
+    # 腾讯云短信。密钥只放根目录 .env，代码和日志都不能输出。
+    TENCENT_SMS_APP_ID: str = ""
+    TENCENT_SMS_APP_KEY: str = ""
+    TENCENT_SMS_SIGN: str = ""
+    TENCENT_SMS_TEMPLATE_CODE: str = ""
+    SMS_CODE_EXPIRE_MINUTES: int = 5
+    SMS_CODE_REDIS_PREFIX: str = "sms_code:"
+    # 只在全新数据库没有任何用户时使用；创建成功后仍建议从用户管理页更换密码。
+    BOOTSTRAP_ADMIN_USERNAME: str = ""
+    BOOTSTRAP_ADMIN_PASSWORD: str = ""
 
     # 跨域与部署
     CORS_ORIGINS: str = "http://localhost:9527,http://127.0.0.1:9527"
@@ -170,6 +185,8 @@ class Settings(BaseSettings):
             errors.append("JWT_SECRET_INSECURE")
         if not 1 <= self.MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES <= 120:
             errors.append("MEDIA_ACCESS_TOKEN_EXPIRE_INVALID")
+        if not 1 <= self.SMS_CODE_EXPIRE_MINUTES <= 10:
+            errors.append("SMS_CODE_EXPIRE_INVALID")
 
         if self.DB_USER.lower() == "root":
             warnings.append("DATABASE_ROOT_USER")

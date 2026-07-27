@@ -10,9 +10,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-# 使用 bcrypt 直接生成密码哈希（避免 passlib 与 bcrypt 5.x 兼容问题）
-import bcrypt as _bcrypt
-
 revision: str = 'g1d2e3f4a5b6'
 down_revision: Union[str, None] = 'f2d3e4f5a6b7'
 branch_labels: Union[str, Sequence[str], None] = None
@@ -38,23 +35,8 @@ def upgrade() -> None:
         sa.UniqueConstraint('username', name='uq_users_username')
     )
 
-    # 插入默认管理员账号 (admin / Admin123456)
-    admin_pwd = _bcrypt.hashpw(b"Admin123456", _bcrypt.gensalt()).decode()
-    op.execute(
-        sa.text("""
-            INSERT INTO users (username, password_hash, nickname, roles, status, created_at, updated_at)
-            VALUES ('admin', :pwd, '系统管理员', :roles, 'active', NOW(), NOW())
-        """).bindparams(pwd=admin_pwd, roles='["R_SUPER"]')
-    )
-
-    # 插入默认普通用户 (user / User123456)
-    user_pwd = _bcrypt.hashpw(b"User123456", _bcrypt.gensalt()).decode()
-    op.execute(
-        sa.text("""
-            INSERT INTO users (username, password_hash, nickname, roles, status, created_at, updated_at)
-            VALUES ('user', :pwd, '普通用户', :roles, 'active', NOW(), NOW())
-        """).bindparams(pwd=user_pwd, roles='["R_USER"]')
-    )
+    # 不创建固定密码账号。全新安装由启动流程读取根目录 .env 中的
+    # BOOTSTRAP_ADMIN_USERNAME / BOOTSTRAP_ADMIN_PASSWORD 安全初始化管理员。
 
 
 def downgrade() -> None:

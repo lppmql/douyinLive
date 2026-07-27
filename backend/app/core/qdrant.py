@@ -5,7 +5,6 @@ Qdrant 挂了不影响现有功能——所有方法都降级返回空结果。"
 
 import logging
 from qdrant_client import QdrantClient
-from qdrant_client.http.exceptions import UnexpectedResponse
 
 from app.core.config import settings
 

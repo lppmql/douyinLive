@@ -4,7 +4,7 @@ v1_router 统一要求登录鉴权（auth 路由因含 public 接口单独注册
 """
 from fastapi import APIRouter, Depends
 
-from app.core.security import get_current_user
+from app.core.permissions import enforce_business_permissions
 from app.api.v1.live_rooms import router as live_rooms_router
 from app.api.v1.live_sessions import router as live_sessions_router
 from app.api.v1.live_metrics import router as live_metrics_router
@@ -26,7 +26,7 @@ from app.api.v1.reviews import router as reviews_router
 from app.api.v1.anchor_schedules import router as anchor_schedules_router
 
 # 所有业务 API 统一要求登录（auth 路由含 login/refreshToken 公开接口，单独注册）
-v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(get_current_user)])
+v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(enforce_business_permissions)])
 v1_router.include_router(live_rooms_router)
 v1_router.include_router(live_sessions_router)
 v1_router.include_router(live_metrics_router)

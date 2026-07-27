@@ -42,6 +42,8 @@ import { useTranscriptRealtime } from './useTranscriptRealtime';
 // ========== 类型别名 ==========
 
 type TaskStatus = Api.Douyin.TranscriptTask['status'];
+/** 顶部汇总接口只展示四种主状态；cancelled 仍会出现在任务明细中。 */
+type TaskSummaryStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
 // ========== Composable ==========
 
@@ -58,7 +60,12 @@ export function useTranscriptWorkbench() {
   const segments = ref<Api.Douyin.TranscriptSegment[]>([]);
   const fullText = ref('');
   const selectedSessionId = ref<number | null>(null);
-  const taskSummary = ref<Record<TaskStatus, number>>({ queued: 0, processing: 0, completed: 0, failed: 0 });
+  const taskSummary = ref<Record<TaskSummaryStatus, number>>({
+    queued: 0,
+    processing: 0,
+    completed: 0,
+    failed: 0
+  });
   const loading = ref(true);
   const refreshing = ref(false);
   const queueLoading = ref(false);

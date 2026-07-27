@@ -14,10 +14,17 @@ import {
   formatDate,
   formatDuration
 } from '@/utils/transcriptHelpers';
+import { computed } from 'vue';
+import { useAuthStore } from '@/store/modules/auth';
 
 defineOptions({ name: 'TranscriptTaskDrawer' });
 
 type TaskStatus = Api.Douyin.TranscriptTask['status'];
+const authStore = useAuthStore();
+/** 删除会清理技术任务数据，因此只给超级管理员显示。 */
+const canDeleteTasks = computed(() =>
+  authStore.userInfo.roles.some(role => role === 'R_SUPER' || role === 'R_ADMIN')
+);
 
 defineProps<{
   /** 抽屉是否可见 */
@@ -65,7 +72,7 @@ defineEmits<{
       </div>
 
       <!-- 清空全部失败任务（仅筛选到「失败」tab 时显示） -->
-      <div v-if="taskFilter === 'failed' && filteredTasks.length > 0" class="mb-12px">
+      <div v-if="canDeleteTasks && taskFilter === 'failed' && filteredTasks.length > 0" class="mb-12px">
         <NButton
           type="error"
           size="small"
@@ -90,6 +97,9 @@ defineEmits<{
                 <NTag size="tiny" :type="getStatusType(task.status)" :bordered="false">
                   {{ getStatusLabel(task.status) }}
                 </NTag>
+                <NTag size="tiny" type="info" :bordered="false">
+                  {{ task.task_type === 'realtime' ? '实时滚动转写' : '结束后转写' }}
+                </NTag>
                 <NTag
                   v-if="task.status === 'completed'"
                   size="tiny"
@@ -112,10 +122,16 @@ defineEmits<{
               <!-- 转写进度条（仅处理中的任务显示） -->
               <div v-if="task.status === 'processing' && task.total_chunks > 0" class="mt-8px">
                 <div class="mb-3px flex items-center justify-between text-11px text-gray-500">
-                  <span>转写进度</span>
-                  <span>{{ task.completed_chunks }} / {{ task.total_chunks }} 分片（{{ task.progress_percent }}%）</span>
+                  <span>{{ task.task_type === 'realtime' ? '实时窗口' : '转写进度' }}</span>
+                  <span v-if="task.task_type === 'realtime'">
+                    已处理 {{ task.completed_chunks }} 个两分钟窗口
+                  </span>
+                  <span v-else>
+                    {{ task.completed_chunks }} / {{ task.total_chunks }} 分片（{{ task.progress_percent }}%）
+                  </span>
                 </div>
                 <NProgress
+                  v-if="task.task_type !== 'realtime'"
                   :percentage="task.progress_percent"
                   :height="6"
                   :border-radius="3"
@@ -127,7 +143,7 @@ defineEmits<{
             <NButton size="tiny" secondary @click="$emit('selectTask', task)">查看话术</NButton>
             <!-- 失败/已取消任务显示删除按钮 -->
             <NButton
-              v-if="task.status === 'failed' || task.status === 'cancelled'"
+              v-if="canDeleteTasks && (task.status === 'failed' || task.status === 'cancelled')"
               size="tiny"
               type="error"
               :loading="deletingTaskIds?.has(task.id)"
