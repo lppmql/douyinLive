@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { NButton, NCard, NGi, NGrid, NSpace, NSwitch, NTag, NTooltip } from 'naive-ui';
+import CollectorLeadSyncCard from './CollectorLeadSyncCard.vue';
 import CollectorResourceOverview from './CollectorResourceOverview.vue';
 
 defineOptions({ name: 'CollectorControlCenter' });
@@ -12,6 +13,8 @@ defineProps<{
   hasAvailableAccount: boolean;
   refreshing: boolean;
   resourceUsage: Api.Douyin.ComputerResourceUsage | null;
+  leadSyncStatus: Api.Douyin.LeadSyncStatus | null;
+  leadSyncLoading: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -19,6 +22,7 @@ const emit = defineEmits<{
   (e: 'run', module: Api.Douyin.CollectorModuleStatus): void;
   (e: 'openTasks'): void;
   (e: 'refresh'): void;
+  (e: 'syncLeads'): void;
 }>();
 
 const moduleMeta: Record<
@@ -112,7 +116,7 @@ function intervalLabel(seconds: number): string {
             数据处理控制中心
           </div>
           <div class="mt-4px text-12px leading-20px text-gray-500">
-            补齐刷新按需执行；直播监控与 ASR 可随时关闭；知识库和 DataEase 在后台自动增量同步。
+            补齐刷新按需执行；直播监控与 ASR 可随时关闭；知识库、DataEase 和客资在后台自动增量同步。
           </div>
         </div>
         <NSpace align="center" wrap>
@@ -206,6 +210,17 @@ function intervalLabel(seconds: number): string {
           </div>
           <div class="mt-5px truncate text-11px text-gray-400" :title="module.summary">{{ module.summary }}</div>
         </div>
+      </NGi>
+      <!--
+        客资同步使用独立的后台定时器，所以不伪装成任务队列模块。
+        视觉上放进同一个网格，并紧跟后端返回列表末尾的 DataEase，方便用户按数据流顺序查看。
+      -->
+      <NGi>
+        <CollectorLeadSyncCard
+          :status="leadSyncStatus"
+          :loading="leadSyncLoading"
+          @sync="emit('syncLeads')"
+        />
       </NGi>
     </NGrid>
   </NCard>

@@ -137,12 +137,12 @@ export function fetchCollectorControlCenter() {
   return backendRequest<Api.Douyin.CollectorControlCenter>({ url: `${API_PREFIX}/collector/control-center` });
 }
 
-/** 获取客资增量同步状态；响应只含数量和游标，不含手机号等隐私。 */
+/** 获取客资同步状态；响应只含数量和游标，不含手机号等隐私。 */
 export function fetchLeadSyncStatus() {
   return backendRequest<Api.Douyin.LeadSyncStatus>({ url: `${API_PREFIX}/leads/sync-status` });
 }
 
-/** 立即从客资服务拉取新增数据。 */
+/** 立即从客资服务增量同步新增数据。 */
 export function syncKeziLeads() {
   return backendRequest<Api.Douyin.LeadSyncResult>({
     url: `${API_PREFIX}/leads/sync`,

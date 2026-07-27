@@ -37,7 +37,7 @@ class KeziLeadItem(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     source_id: int = Field(alias="sourceId", gt=0)
-    phone: str = Field(default="", max_length=20)
+    phone: str = Field(default="", max_length=100)
     douyin_id: str = Field(default="", alias="douyinId", max_length=100)
     anchor: str = Field(default="", max_length=100)
     created_at: datetime = Field(alias="createdAt")
