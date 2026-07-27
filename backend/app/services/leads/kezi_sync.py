@@ -193,16 +193,45 @@ def _get_session_end_time(session: LiveSession) -> datetime | None:
     return None
 
 
-def match_live_session(db: Session, item: KeziLeadItem) -> LiveSession | None:
-    """两级匹配客资到直播场次。
+def _pick_closest_session(sessions: list[LiveSession], lead_time: datetime) -> LiveSession | None:
+    """同天多场次时，找离客资时间最近的一场。
 
-    第 1 级（优先）：主播名模糊匹配 + 时间窗匹配 —— 精确归属到场次
-    第 2 级（兜底）：同一天、同主播 —— 不管具体时间窗
+    优先找"刚下播的"（end_time < lead_time 且时间差最小），
+    其次找"马上要播的"（start_time > lead_time 且时间差最小）。
+    """
+    # 优先：lead_time 之前结束的场次中，结束时间最晚的那个
+    ended_before: list[tuple[LiveSession, timedelta]] = []
+    for s in sessions:
+        end = _get_session_end_time(s)
+        if end and end < lead_time:
+            ended_before.append((s, lead_time - end))
+    if ended_before:
+        ended_before.sort(key=lambda x: x[1])
+        return ended_before[0][0]
 
-    都匹配不上或匹配到多个 -> 返回 None，进入"待归属"。
+    # 其次：lead_time 之后开始的场次中，开始时间最早的那个
+    starts_after: list[tuple[LiveSession, timedelta]] = []
+    for s in sessions:
+        if s.live_start_time and s.live_start_time > lead_time:
+            starts_after.append((s, s.live_start_time - lead_time))
+    if starts_after:
+        starts_after.sort(key=lambda x: x[1])
+        return starts_after[0][0]
+
+    return None
+
+
+def match_live_session(db: Session, item: KeziLeadItem) -> tuple[LiveSession | None, str | None]:
+    """三级匹配客资到直播场次。返回 (场次, 匹配方式)。
+
+    匹配方式（用于设置备注）：
+    - "time_window": 时间窗精确匹配，无需备注
+    - "same_day": 同天仅 1 场，兜底归属
+    - "gap": 同天多场次间隙，就近匹配，备注"下播后留资"
+    - None: 无法匹配，进入"待归属"
     """
     if not item.anchor or not item.anchor.strip():
-        return None
+        return None, None
 
     anchor_name = item.anchor.strip()
 
@@ -210,7 +239,7 @@ def match_live_session(db: Session, item: KeziLeadItem) -> LiveSession | None:
     candidates = _query_candidates(db, anchor_name)
 
     if not candidates:
-        return None
+        return None, None
 
     # ── 第 1 级：时间窗匹配（含缓冲） ────────────────────────
     BUFFER_BEFORE = timedelta(minutes=30)   # 开播前 30 分钟
@@ -228,25 +257,31 @@ def match_live_session(db: Session, item: KeziLeadItem) -> LiveSession | None:
 
     # 恰好 1 个时间窗匹配 -> 精确归属
     if len(time_matched) == 1:
-        return time_matched[0]
+        return time_matched[0], "time_window"
 
     # 多个时间窗同时覆盖 -> 证据不足，不瞎猜
     if len(time_matched) > 1:
-        return None
+        return None, None
 
     # ── 第 2 级：同一天兜底 ──────────────────────────────────
     if item.created_at is None:
-        return None
+        return None, None
 
     lead_date = item.created_at.date()
     same_day = [s for s in candidates if s.live_start_time.date() == lead_date]
 
     # 同一天恰好 1 个场次 -> 兜底归属
     if len(same_day) == 1:
-        return same_day[0]
+        return same_day[0], "same_day"
 
-    # 0 个（主播当天没播）或多于 1 个 -> 待归属
-    return None
+    # ── 第 3 级：同天多场次，就近匹配 ────────────────────────
+    if len(same_day) > 1:
+        closest = _pick_closest_session(same_day, item.created_at)
+        if closest:
+            return closest, "gap"
+
+    # 0 个同天场次 -> 主播当天没播
+    return None, None
 
 
 def _save_item(db: Session, item: KeziLeadItem) -> tuple[bool, int | None]:
@@ -262,7 +297,23 @@ def _save_item(db: Session, item: KeziLeadItem) -> tuple[bool, int | None]:
     if existing:
         return False, existing.session_id
 
-    session = match_live_session(db, item)
+    session, match_reason = match_live_session(db, item)
+
+    # 根据匹配方式设置备注
+    if session:
+        if match_reason == "gap":
+            remark = "下播后留资（自动匹配到最近场次）"
+        else:
+            remark = None
+    else:
+        # 无法匹配：检查是"换号播"（从未有此主播的直播记录）还是"当天没播"
+        anchor = (item.anchor or "").strip()
+        any_candidates = _query_candidates(db, anchor)
+        if any_candidates:
+            remark = "未找到同主播且时间覆盖的真实直播场次，等待人工归属"
+        else:
+            remark = "换号播的"
+
     lead = Lead(
         session_id=session.id if session else None,
         lead_phone=item.phone or None,
@@ -274,7 +325,7 @@ def _save_item(db: Session, item: KeziLeadItem) -> tuple[bool, int | None]:
         attribution_status="matched" if session else "pending",
         is_valid=1,
         create_time=item.created_at,
-        remark=None if session else "未找到同主播且时间覆盖的真实直播场次，等待人工归属",
+        remark=remark,
     )
     db.add(lead)
     return True, session.id if session else None
@@ -329,14 +380,18 @@ def rematch_pending_leads(db: Session) -> dict:
             anchor=lead.anchor_name or "",
             createdAt=lead.create_time or datetime.min,
         )
-        session = match_live_session(db, item)
+        session, match_reason = match_live_session(db, item)
         if session:
             lead.session_id = session.id
             lead.attribution_status = "matched"
-            lead.remark = None  # 清除旧备注
+            lead.remark = "下播后留资（自动匹配到最近场次）" if match_reason == "gap" else None
             matched_count += 1
             affected_sessions.add(session.id)
         else:
+            # 更新备注：区分"换号播"和"当天没播"
+            anchor = (lead.anchor_name or "").strip()
+            any_candidates = _query_candidates(db, anchor)
+            lead.remark = "未找到同主播且时间覆盖的真实直播场次，等待人工归属" if any_candidates else "换号播的"
             still_pending += 1
 
     _refresh_session_lead_counts(db, affected_sessions)

@@ -82,7 +82,10 @@ def test_match_live_session_by_anchor_and_real_time(db):
         createdAt=datetime(2026, 7, 27, 10, 30),
     )
 
-    assert match_live_session(db, item).id == matched.id
+    session, reason = match_live_session(db, item)
+    assert session is not None
+    assert session.id == matched.id
+    assert reason == "time_window"
 
 
 def test_unmatched_lead_stays_pending_instead_of_faking_session(db):
@@ -95,7 +98,8 @@ def test_unmatched_lead_stays_pending_instead_of_faking_session(db):
         createdAt=datetime(2026, 7, 27, 10, 30),
     )
 
-    assert match_live_session(db, item) is None
+    session, _ = match_live_session(db, item)
+    assert session is None
 
 
 def test_overlapping_same_anchor_sessions_stay_pending(db):
@@ -136,7 +140,8 @@ def test_overlapping_same_anchor_sessions_stay_pending(db):
         createdAt=datetime(2026, 7, 27, 10, 30),
     )
 
-    assert match_live_session(db, item) is None
+    session, _ = match_live_session(db, item)
+    assert session is None
 
 
 def test_match_checks_all_same_anchor_sessions_before_deciding(db):
@@ -189,7 +194,8 @@ def test_match_checks_all_same_anchor_sessions_before_deciding(db):
         createdAt=datetime(2026, 7, 27, 10, 30),
     )
 
-    assert match_live_session(db, item) is None
+    session, _ = match_live_session(db, item)
+    assert session is None
 
 
 def test_incremental_sync_persists_cursor_and_deduplicates(db, monkeypatch):
