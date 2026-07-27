@@ -196,10 +196,22 @@ def _get_session_end_time(session: LiveSession) -> datetime | None:
 def _pick_closest_session(sessions: list[LiveSession], lead_time: datetime) -> LiveSession | None:
     """同天多场次时，找离客资时间最近的一场。
 
-    优先找"刚下播的"（end_time < lead_time 且时间差最小），
-    其次找"马上要播的"（start_time > lead_time 且时间差最小）。
+    优先级（从高到低）：
+    1. 客资落在直播时段内（start <= lead <= end）→ 最佳匹配，选最接近结束时间的
+    2. 刚下播的（end_time < lead_time 且时间差最小）
+    3. 马上要播的（start_time > lead_time 且时间差最小）
     """
-    # 优先：lead_time 之前结束的场次中，结束时间最晚的那个
+    # 最高优先：客资落在直播时段内（不含缓冲），越接近结束越可能是直播中留资
+    during_live: list[tuple[LiveSession, timedelta]] = []
+    for s in sessions:
+        end = _get_session_end_time(s)
+        if end and s.live_start_time and s.live_start_time <= lead_time <= end:
+            during_live.append((s, end - lead_time))
+    if during_live:
+        during_live.sort(key=lambda x: x[1])
+        return during_live[0][0]
+
+    # 其次：lead_time 之前结束的场次中，结束时间最晚的那个
     ended_before: list[tuple[LiveSession, timedelta]] = []
     for s in sessions:
         end = _get_session_end_time(s)
@@ -209,7 +221,7 @@ def _pick_closest_session(sessions: list[LiveSession], lead_time: datetime) -> L
         ended_before.sort(key=lambda x: x[1])
         return ended_before[0][0]
 
-    # 其次：lead_time 之后开始的场次中，开始时间最早的那个
+    # 再次：lead_time 之后开始的场次中，开始时间最早的那个
     starts_after: list[tuple[LiveSession, timedelta]] = []
     for s in sessions:
         if s.live_start_time and s.live_start_time > lead_time:
@@ -260,8 +272,12 @@ def match_live_session(db: Session, item: KeziLeadItem) -> tuple[LiveSession | N
     if len(time_matched) == 1:
         return time_matched[0], "time_window"
 
-    # 多个时间窗同时覆盖 -> 证据不足，不瞎猜
+    # 多个时间窗同时覆盖 -> 用 _pick_closest_session 去重
+    # 优先选客资落在直播时段内的，其次选最近场次
     if len(time_matched) > 1:
+        closest = _pick_closest_session(time_matched, item.created_at)
+        if closest:
+            return closest, "time_window"
         return None, None
 
     # ── 第 2 级：同一天兜底 ──────────────────────────────────

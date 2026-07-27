@@ -102,8 +102,8 @@ def test_unmatched_lead_stays_pending_instead_of_faking_session(db):
     assert session is None
 
 
-def test_overlapping_same_anchor_sessions_stay_pending(db):
-    """同主播两个重叠场次都覆盖提交时间时证据有歧义，不能按最新 ID 猜。"""
+def test_overlapping_sessions_pick_closest_by_proximity(db):
+    """同主播两个重叠场次都覆盖时间时，选客资最接近结束时间的那场。"""
     room = LiveRoom(
         room_id_str="room-ambiguous-test",
         account_name="歧义测试账号",
@@ -113,24 +113,22 @@ def test_overlapping_same_anchor_sessions_stay_pending(db):
     )
     db.add(room)
     db.flush()
-    db.add_all(
-        [
-            LiveSession(
-                room_id=room.id,
-                anchor_name="主播甲",
-                live_status="ended",
-                live_start_time=datetime(2026, 7, 27, 10, 0),
-                live_end_time=datetime(2026, 7, 27, 11, 0),
-            ),
-            LiveSession(
-                room_id=room.id,
-                anchor_name="主播甲",
-                live_status="ended",
-                live_start_time=datetime(2026, 7, 27, 10, 15),
-                live_end_time=datetime(2026, 7, 27, 10, 45),
-            ),
-        ]
+    # 场次 10:00-11:00（客资距结束 30min） vs 10:15-10:45（客资距结束 15min）
+    session_long = LiveSession(
+        room_id=room.id,
+        anchor_name="主播甲",
+        live_status="ended",
+        live_start_time=datetime(2026, 7, 27, 10, 0),
+        live_end_time=datetime(2026, 7, 27, 11, 0),
     )
+    session_short = LiveSession(
+        room_id=room.id,
+        anchor_name="主播甲",
+        live_status="ended",
+        live_start_time=datetime(2026, 7, 27, 10, 15),
+        live_end_time=datetime(2026, 7, 27, 10, 45),
+    )
+    db.add_all([session_long, session_short])
     db.commit()
     item = KeziLeadItem(
         sourceId=103,
@@ -140,12 +138,15 @@ def test_overlapping_same_anchor_sessions_stay_pending(db):
         createdAt=datetime(2026, 7, 27, 10, 30),
     )
 
-    session, _ = match_live_session(db, item)
-    assert session is None
+    session, reason = match_live_session(db, item)
+    assert session is not None
+    # 应该选 session_short：客资距其结束只有 15 分钟，比长场次更接近
+    assert session.id == session_short.id
+    assert reason == "time_window"
 
 
-def test_match_checks_all_same_anchor_sessions_before_deciding(db):
-    """即使重叠场次排在十条之后，也不能漏查后把客资错误归到唯一场次。"""
+def test_multiple_overlapping_sessions_pick_best_match(db):
+    """即使重叠场次很多，也能按客资在直播时段内的距离选最佳场次。"""
     room = LiveRoom(
         room_id_str="room-many-ambiguous-test",
         account_name="多场次歧义测试账号",
@@ -156,22 +157,24 @@ def test_match_checks_all_same_anchor_sessions_before_deciding(db):
     db.add(room)
     db.flush()
     # 两个长场次都覆盖 10:30；中间插入的短场次用于复现旧版 limit(10) 漏查。
+    wide = LiveSession(
+        room_id=room.id,
+        anchor_name="主播甲",
+        live_status="ended",
+        live_start_time=datetime(2026, 7, 27, 8, 0),
+        live_end_time=datetime(2026, 7, 27, 12, 0),
+    )
+    narrow = LiveSession(
+        room_id=room.id,
+        anchor_name="主播甲",
+        live_status="ended",
+        live_start_time=datetime(2026, 7, 27, 9, 0),
+        live_end_time=datetime(2026, 7, 27, 11, 0),
+    )
     db.add_all(
         [
-            LiveSession(
-                room_id=room.id,
-                anchor_name="主播甲",
-                live_status="ended",
-                live_start_time=datetime(2026, 7, 27, 8, 0),
-                live_end_time=datetime(2026, 7, 27, 12, 0),
-            ),
-            LiveSession(
-                room_id=room.id,
-                anchor_name="主播甲",
-                live_status="ended",
-                live_start_time=datetime(2026, 7, 27, 9, 0),
-                live_end_time=datetime(2026, 7, 27, 11, 0),
-            ),
+            wide,
+            narrow,
             *[
                 LiveSession(
                     room_id=room.id,
@@ -194,8 +197,13 @@ def test_match_checks_all_same_anchor_sessions_before_deciding(db):
         createdAt=datetime(2026, 7, 27, 10, 30),
     )
 
-    session, _ = match_live_session(db, item)
-    assert session is None
+    session, reason = match_live_session(db, item)
+    assert session is not None
+    # narrow (09:00-11:00): 客资 10:30 距结束 30min
+    # wide (08:00-12:00): 客资 10:30 距结束 90min
+    # 应选 narrow（距结束更近）
+    assert session.id == narrow.id
+    assert reason == "time_window"
 
 
 def test_incremental_sync_persists_cursor_and_deduplicates(db, monkeypatch):
