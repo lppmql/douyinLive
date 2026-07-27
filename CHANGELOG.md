@@ -4,6 +4,13 @@
 
 ---
 
+## [2026-07-27]
+
+### Fixed
+- **修复话术转写进度不显示的 Bug**：后端 `TranscriptTaskOut` Pydantic schema 缺少 `total_chunks`/`completed_chunks`/`progress_percent` 字段，FastAPI 序列化时把进度数据丢弃了，导致前端进度条一直不出现。已在 schema 中补上这三个字段。
+
+---
+
 ## [2026-07-25]
 
 ### Added
