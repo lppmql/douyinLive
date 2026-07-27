@@ -1,9 +1,8 @@
-"""
-FunASR WebSocket 客户端 — 连接 FunASR 服务进行实时语音识别
+"""FunASR WebSocket 客户端。
 
-支持两种模式:
-  - realtime: 通过 WebSocket 连接 FunASR 服务
-  - mock: 离线模式，返回模拟识别结果
+直播中使用 ``online`` 协议边说边出初稿；下播后使用 ``offline`` 协议
+重新生成最终稿。这里的“双通道”不是给任务换个名字，而是会向 FunASR
+发送不同的协议配置和不同的音频发送节奏。
 """
 import asyncio
 import json
@@ -29,6 +28,97 @@ _MOCK_TRANSCRIPTS = [
     "大家有任何问题可以在评论区提问",
     "最后再给大家一个限时福利",
 ]
+
+
+class RealtimeDraftBuffer:
+    """把在线模型逐字返回的小碎片合成一条可读初稿。
+
+    FunASR 双通道服务通常会在说话停顿时返回一条带标点的离线修正版；
+    如果某个部署只返回在线结果，本缓冲区也会每 10 秒或 80 个字输出一次，
+    因此直播初稿不会因为过滤碎片而变成空白。
+    """
+
+    MAX_WAIT_SECONDS = 10.0
+    MAX_TEXT_LENGTH = 80
+
+    def __init__(self) -> None:
+        self._text = ""
+        self._started_at: float | None = None
+        self._segment_start = 0.0
+        # 有些 FunASR 版本会一直返回“从本句开头到现在”的累计文本。
+        # 记住已经落盘的前缀，下一次只保存新增后缀，避免每 10 秒重复整句。
+        self._emitted_text = ""
+        self._last_emitted_end = 0.0
+
+    def push(self, result: dict, response_mode: str | None, elapsed_seconds: float) -> Optional[dict]:
+        """加入一次识别响应；准备好完整句子时返回，否则继续等待。"""
+        if response_mode not in {"online", "2pass-online"}:
+            # 停顿后的修正版比逐字碎片更完整，优先展示它并清空临时缓冲。
+            self.clear()
+            result["is_final"] = True
+            return result
+
+        text = str(result.get("text") or "")
+        if not text:
+            return None
+
+        # 如果服务端返回的是累计文本，先扣掉已经落盘的部分。
+        # 收到落后于当前进度的旧响应时直接等待下一条，不能重复写入。
+        if self._emitted_text:
+            if text.startswith(self._emitted_text):
+                text = text[len(self._emitted_text) :]
+            elif self._emitted_text.startswith(text):
+                return None
+        if not text:
+            return None
+
+        if self._started_at is None:
+            self._started_at = elapsed_seconds
+            self._segment_start = max(
+                float(result.get("segment_start") or 0),
+                self._last_emitted_end,
+            )
+
+        # 不同 FunASR 版本可能返回“新增片段”或“从句首累计到现在”。
+        # 两种格式都兼容，避免把累计文本重复拼接。
+        if text.startswith(self._text):
+            self._text = text
+        elif not self._text.endswith(text):
+            self._text += text
+
+        waited = elapsed_seconds - self._started_at
+        if waited >= self.MAX_WAIT_SECONDS or len(self._text) >= self.MAX_TEXT_LENGTH:
+            return self.flush(elapsed_seconds)
+        return None
+
+    def flush(self, elapsed_seconds: float) -> Optional[dict]:
+        """流结束或等待到上限时，把剩余真实文字作为临时初稿输出。"""
+        text = self._text.strip()
+        if not text:
+            self.clear()
+            return None
+        result = {
+            "text": text,
+            "segment_start": self._segment_start,
+            "segment_end": max(self._segment_start, elapsed_seconds),
+            "is_final": False,
+        }
+        self._emitted_text += text
+        self._last_emitted_end = float(result["segment_end"])
+        self._clear_pending()
+        return result
+
+    def clear(self) -> None:
+        """开始新句子时清空累计历史；离线修正版已经替代当前在线草稿。"""
+        self._clear_pending()
+        self._emitted_text = ""
+        self._last_emitted_end = 0.0
+
+    def _clear_pending(self) -> None:
+        """只清空尚未落盘的窗口，保留已落盘前缀用于累计响应去重。"""
+        self._text = ""
+        self._started_at = None
+        self._segment_start = 0.0
 
 
 class FunasrClient:
@@ -69,8 +159,40 @@ class FunasrClient:
     def connected(self) -> bool:
         return self._ws is not None and self._ws.state is State.OPEN
 
+    @staticmethod
+    def protocol_mode_for(task_type: str) -> str:
+        """把业务任务类型翻译成 FunASR 真正认识的协议模式。"""
+        modes = {
+            "realtime": "online",
+            "offline": "offline",
+        }
+        try:
+            return modes[task_type]
+        except KeyError as exc:
+            raise ValueError(f"不支持的 ASR 任务类型: {task_type}") from exc
+
+    def build_start_message(self, task_type: str) -> dict:
+        """生成一条可测试的握手消息，避免协议选择散落在发送循环里。"""
+        return {
+            "mode": self.protocol_mode_for(task_type),
+            "chunk_size": [5, 10, 5],
+            "chunk_interval": 10,
+            "encoder_chunk_look_back": 4,
+            "decoder_chunk_look_back": 0,
+            "audio_fs": settings.ASR_SAMPLE_RATE,
+            "wav_name": str(self._session_id),
+            "wav_format": "pcm",
+            "is_speaking": True,
+            "hotwords": "",
+            "itn": True,
+        }
+
     async def transcribe(
-        self, session_id: int, pcm_frames: AsyncGenerator[bytes, None]
+        self,
+        session_id: int,
+        pcm_frames: AsyncGenerator[bytes, None],
+        *,
+        task_type: str = "offline",
     ) -> AsyncGenerator[dict, None]:
         """
         实时转写 PCM 流
@@ -78,6 +200,7 @@ class FunasrClient:
         Args:
             session_id: 直播场次 ID
             pcm_frames: PCM s16le 帧异步生成器
+            task_type: realtime 表示直播初稿，offline 表示下播最终稿
 
         Yields:
             dict: {"text": str, "segment_start": float, "segment_end": float, "is_final": bool}
@@ -93,15 +216,27 @@ class FunasrClient:
                 yield result
             return
 
-        async for result in self._realtime_transcribe(pcm_frames):
+        async for result in self._transcribe_pcm(pcm_frames, task_type=task_type):
             yield result
 
     async def _realtime_transcribe(
         self, pcm_frames: AsyncGenerator[bytes, None]
     ) -> AsyncGenerator[dict, None]:
-        """真实 FunASR WebSocket 转写"""
+        """兼容旧调用：历史代码没有任务类型时按离线最终稿处理。"""
+        async for result in self._transcribe_pcm(pcm_frames, task_type="offline"):
+            yield result
+
+    async def _transcribe_pcm(
+        self,
+        pcm_frames: AsyncGenerator[bytes, None],
+        *,
+        task_type: str,
+    ) -> AsyncGenerator[dict, None]:
+        """按直播状态选择协议，消费真实 PCM 音频。"""
+        protocol_mode = self.protocol_mode_for(task_type)
         result_queue: asyncio.Queue = asyncio.Queue()
         receiver_task = None
+        draft_buffer = RealtimeDraftBuffer()
 
         async def receive_results():
             try:
@@ -120,8 +255,9 @@ class FunasrClient:
         def normalize_result(data: dict, elapsed_seconds: float) -> Optional[dict]:
             text = str(data.get("text") or "").strip()
             mode = data.get("mode")
-            # 兼容历史 2-pass 返回；当前回放转写只使用最终离线结果，避免重复话术。
-            if not text or mode in {"online", "2pass-online"}:
+            if not text:
+                return None
+            if protocol_mode == "offline" and mode in {"online", "2pass-online"}:
                 return None
 
             start = max(0.0, elapsed_seconds - 3.0)
@@ -140,28 +276,26 @@ class FunasrClient:
                     if isinstance(last, (list, tuple)) and len(last) >= 2:
                         end = float(last[1]) / 1000
 
-            return {
+            result = {
                 "text": text,
                 "segment_start": start,
                 "segment_end": max(start, end),
-                "is_final": bool(data.get("is_final", mode in {"offline", "2pass-offline"})),
+                "is_final": bool(
+                    data.get(
+                        "is_final",
+                        protocol_mode == "offline" or mode in {"offline", "2pass-offline"},
+                    )
+                ),
             }
+            if protocol_mode == "online":
+                return draft_buffer.push(result, mode, elapsed_seconds)
+            return result
 
         try:
             await self._ws.send(json.dumps({
-                # 本项目处理的是历史直播回放，离线模式比 2-pass 少加载一套在线模型，
-                # 在 8GB 电脑上更稳定，且保留最终离线识别结果。
-                "mode": "offline",
-                "chunk_size": [5, 10, 5],
-                "chunk_interval": 10,
-                "encoder_chunk_look_back": 4,
-                "decoder_chunk_look_back": 0,
-                "audio_fs": settings.ASR_SAMPLE_RATE,
-                "wav_name": str(self._session_id),
-                "wav_format": "pcm",
-                "is_speaking": True,
-                "hotwords": "",  # 暂不发送热词：200+ 中文词会使 JSON 过大，触发 FunASR C++ segfault
-                "itn": True,
+                # 直播中发 online，FunASR 会持续返回初稿；下播后发 offline，
+                # 让完整音频经过 VAD、标点和离线模型生成最终稿。
+                **self.build_start_message(task_type),
             }))
             # ⚠️ 延迟：确保 FunASR C++ 服务端处理完 JSON 配置消息，
             # 再开始发送 PCM 二进制帧，避免第一条消息被当作二进制 parse error
@@ -172,7 +306,9 @@ class FunasrClient:
             async for frame in pcm_frames:
                 frame_count += 1
                 await self._ws.send(frame)
-                await asyncio.sleep(0.005)
+                # 在线模式必须跟真实讲话速度同步发送，否则模型会把几十秒音频瞬间
+                # 塞进缓冲区；离线模式无需等真实时间，只做很短的让步避免饿死事件循环。
+                await asyncio.sleep(0.06 if protocol_mode == "online" else 0.001)
 
                 while not result_queue.empty():
                     data = result_queue.get_nowait()
@@ -194,12 +330,20 @@ class FunasrClient:
                 except asyncio.TimeoutError:
                     if receiver_task.done() and not self.connected:
                         raise RuntimeError("FunASR 连接提前结束，本分片将从断点重试")
+                    if protocol_mode == "online":
+                        buffered_result = draft_buffer.flush(frame_count * 0.06)
+                        if buffered_result:
+                            yield buffered_result
                     break
                 raise_if_connection_error(data)
                 result = normalize_result(data, frame_count * 0.06)
                 if result:
                     yield result
                 if data.get("is_final"):
+                    if protocol_mode == "online":
+                        buffered_result = draft_buffer.flush(frame_count * 0.06)
+                        if buffered_result:
+                            yield buffered_result
                     break
         except websockets.ConnectionClosed as exc:
             logger.warning("FunASR 连接断开，本分片将从断点重试")

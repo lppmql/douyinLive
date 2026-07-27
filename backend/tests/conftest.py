@@ -23,7 +23,8 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, Text
+from sqlalchemy import BigInteger, create_engine, Text
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -38,6 +39,12 @@ from app.core.security import get_password_hash
 
 # 确保所有模型已注册到 Base.metadata（create_all 需要）
 import app.models  # noqa: F401 — 触发 models/__init__.py 中的全部模型导入
+
+
+@compiles(BigInteger, "sqlite")
+def compile_big_integer_for_sqlite(_type, _compiler, **_kwargs):
+    """SQLite 只有 INTEGER 主键支持自增，统一兼容生产环境的 MySQL BIGINT。"""
+    return "INTEGER"
 
 
 def _patch_longtext_for_sqlite() -> dict:

@@ -1,7 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, create_engine
-from sqlalchemy.ext.compiler import compiles
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
@@ -16,13 +15,6 @@ from app.services.asr.queue import (
     queue_auto_transcriptions,
     queue_session_transcription,
 )
-
-
-@compiles(BigInteger, "sqlite")
-def compile_big_integer_for_sqlite(_type, _compiler, **_kwargs):
-    """SQLite 只有 INTEGER 主键支持自增，测试时兼容 MySQL BIGINT 主键。"""
-    return "INTEGER"
-
 
 def test_auto_queue_and_worker_default_to_latest_real_session(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
@@ -158,4 +150,59 @@ def test_live_task_can_wait_when_single_slot_is_used_by_offline_task():
     assert result["session_ids"] == [live_session.id]
     assert live_task.status == "queued"
     assert offline_task.status == "processing"
+    db.close()
+
+
+def test_finished_live_creates_separate_offline_final_task():
+    """直播初稿完成后，下播必须再创建独立最终稿，不能把初稿当最终结果。"""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            LiveRoom.__table__,
+            LiveSession.__table__,
+            StreamSource.__table__,
+            AsrTask.__table__,
+            AsrAudioChunk.__table__,
+        ],
+    )
+    db = sessionmaker(bind=engine)()
+    room = LiveRoom(account_name="account", anchor_name="主播", platform="douyin", status=True)
+    db.add(room)
+    db.flush()
+    session = LiveSession(
+        room_id=room.id,
+        anchor_name="主播",
+        live_start_time=datetime(2026, 7, 27, 10, 0),
+        live_status="live",
+        detail_collection_status="complete",
+    )
+    db.add(session)
+    db.flush()
+    db.add(
+        StreamSource(
+            session_id=session.id,
+            m3u8_url="https://example.invalid/handoff.m3u8",
+            status="active",
+            fetched_at=datetime(2026, 7, 27, 10, 0),
+        )
+    )
+    db.flush()
+    live_task, created = queue_session_transcription(db, session)
+    live_task.status = "completed"
+    db.commit()
+    assert created is True
+    assert live_task.task_type == "realtime"
+
+    session.live_status = "ended"
+    session.live_end_time = datetime(2026, 7, 27, 11, 0)
+    session.live_duration_seconds = 3600
+    db.commit()
+    offline_task, created = queue_session_transcription(db, session)
+    db.commit()
+
+    assert created is True
+    assert offline_task.id != live_task.id
+    assert offline_task.task_type == "offline"
+    assert offline_task.idempotency_key == f"asr:offline:session:{session.id}"
     db.close()

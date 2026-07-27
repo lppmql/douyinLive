@@ -98,6 +98,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/send-code": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Sms Code Endpoint
+         * @description 发送短信验证码
+         */
+        post: operations["send_sms_code_endpoint_api_v1_auth_send_code_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/code-login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Code Login
+         * @description 手机号 + 验证码登录
+         */
+        post: operations["code_login_api_v1_auth_code_login_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/live-sessions/{session_id}/refresh-stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Session Stream
+         * @description 自动刷新场次流地址（用已保存的 Cookie 重新从抖音抓取 m3u8）。
+         *
+         *     ASR Worker 转写前 / 前端播放失败时调用此接口，
+         *     成功时返回新流地址，失败时返回原因。
+         *     登录用户使用 Bearer Token；ASR Worker 使用专用内部凭证，接口不再公开。
+         */
+        post: operations["refresh_session_stream_api_v1_live_sessions__session_id__refresh_stream_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/live-sessions/{session_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Session Video
+         * @description H.264 MPEG-TS 流——前端 mpegts.js 通过 MSE 解码。
+         *     VideoToolbox 硬件编码 H.265→H.264，所有浏览器通用。
+         */
+        get: operations["stream_session_video_api_v1_live_sessions__session_id__stream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/live-sessions/{session_id}/playback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Playback Session Video
+         * @description 将真实 H.265 回放按需转换为浏览器兼容的 H.264 流。
+         */
+        get: operations["playback_session_video_api_v1_live_sessions__session_id__playback_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/live-rooms/": {
         parameters: {
             query?: never;
@@ -274,26 +379,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/live-sessions/{session_id}/playback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Playback Session Video
-         * @description 将真实 H.265 回放按需转换为浏览器兼容的 H.264 流。
-         */
-        get: operations["playback_session_video_api_v1_live_sessions__session_id__playback_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/live-sessions/{session_id}": {
         parameters: {
             query?: never;
@@ -314,7 +399,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Session
-         * @description 删除直播场次
+         * @description 删除直播场次（级联删除关联的评论、指标、话术、知识库等所有子表数据）
          */
         delete: operations["delete_session_api_v1_live_sessions__session_id__delete"];
         options?: never;
@@ -420,6 +505,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/leads/sync-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Lead Sync Status
+         * @description 返回游标和待归属数量，不把任何客户联系方式带到状态卡。
+         */
+        get: operations["get_lead_sync_status_api_v1_leads_sync_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/leads/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Lead Sync
+         * @description 立即拉取新增客资；密钥缺失时给出可操作提示。
+         */
+        post: operations["run_lead_sync_api_v1_leads_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/leads/{lead_id}": {
         parameters: {
             query?: never;
@@ -436,6 +561,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/leads/{lead_id}/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Attribute Lead
+         * @description 人工归属必须选择数据库里真实存在的场次。
+         */
+        patch: operations["attribute_lead_api_v1_leads__lead_id__attribution_patch"];
         trace?: never;
     };
     "/api/v1/transcript-segments/": {
@@ -1200,6 +1345,9 @@ export interface paths {
         /**
          * Queue Transcription
          * @description 为指定场次排队转写，复用已采集流源并避免重复任务。
+         *
+         *     如果 ASR Worker 未运行（比如之前在采集页关闭了 ASR），自动拉起运行时，
+         *     避免任务创建后无人处理一直卡在 queued 状态。
          */
         post: operations["queue_transcription_api_v1_transcripts__session_id__queue_post"];
         delete?: never;
@@ -1268,6 +1416,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/transcripts/tasks/failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear Failed Transcription Tasks
+         * @description 一键清空全部失败和已取消的转写任务，同时清理关联的音频分片和话术分段。
+         *
+         *     只允许删除 failed / cancelled 状态的任务，防止误删正常任务。
+         */
+        delete: operations["clear_failed_transcription_tasks_api_v1_transcripts_tasks_failed_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transcripts/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Transcription Task
+         * @description 删除单条转写任务（仅限 failed / cancelled 状态），同时清理关联的音频分片。
+         */
+        delete: operations["delete_transcription_task_api_v1_transcripts_tasks__task_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/transcripts/{session_id}/segments": {
         parameters: {
             query?: never;
@@ -1302,6 +1492,26 @@ export interface paths {
         get: operations["get_full_text_api_v1_transcripts__session_id__full_text_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/prompts/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Prompt
+         * @description 用最近真实场次数据测试提示词效果
+         */
+        post: operations["test_prompt_api_v1_ai_prompts_test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1352,6 +1562,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/prompts/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Active Prompts
+         * @description 返回项目注册的所有类型的最新版提示词
+         */
+        get: operations["get_active_prompts_api_v1_ai_prompts_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ai/prompts/{prompt_id}": {
         parameters: {
             query?: never;
@@ -1359,8 +1589,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
+        /**
+         * Get Prompt By Id
+         * @description 按 ID 获取单条提示词
+         */
+        get: operations["get_prompt_by_id_api_v1_ai_prompts__prompt_id__get"];
+        /**
+         * Update Prompt Template
+         * @description 编辑提示词 — 自动创建新版本，保留旧版本历史
+         */
+        put: operations["update_prompt_template_api_v1_ai_prompts__prompt_id__put"];
         post?: never;
         /**
          * Delete Prompt Template
@@ -1586,6 +1824,34 @@ export interface paths {
          * @description 知识库问答
          */
         post: operations["knowledge_qa_api_v1_ai_qa_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/qa/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Knowledge Qa Stream
+         * @description 知识库问答（流式输出）
+         *
+         *     返回 SSE（Server-Sent Events）流，每个事件格式：
+         *         data: {"type": "token", "content": "文字片段"}
+         *
+         *     最后一条事件包含引用来源：
+         *         data: {"type": "done", "sources": [...], "has_result": true}
+         *
+         *     前端用 fetch + ReadableStream 逐字读取并实时显示，像 ChatGPT 一样的打字效果。
+         */
+        post: operations["knowledge_qa_stream_api_v1_ai_qa_stream_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2550,6 +2816,22 @@ export interface components {
             /** Reply */
             reply: string;
         };
+        /**
+         * CodeLoginRequest
+         * @description 手机号验证码登录请求。
+         */
+        CodeLoginRequest: {
+            /**
+             * Phone
+             * @description 中国大陆 11 位手机号
+             */
+            phone: string;
+            /**
+             * Code
+             * @description 6 位数字验证码
+             */
+            code: string;
+        };
         /** CollectAllResponse */
         CollectAllResponse: {
             /**
@@ -3469,11 +3751,25 @@ export interface components {
              */
             unmapped_comments: number;
         };
-        /** LeadCreate */
+        /**
+         * LeadAttributionUpdate
+         * @description 人工把待归属客资绑定到真实场次。
+         */
+        LeadAttributionUpdate: {
+            /**
+             * Session Id
+             * @description 要绑定的真实直播场次 ID
+             */
+            session_id: number;
+        };
+        /**
+         * LeadCreate
+         * @description 人工新增客资只接收业务字段，外部来源编号只能由可信同步服务写入。
+         */
         LeadCreate: {
             /**
              * Session Id
-             * @description 场次 ID
+             * @description 真实归属场次 ID
              */
             session_id: number;
             /**
@@ -3487,6 +3783,16 @@ export interface components {
              */
             lead_phone?: string | null;
             /**
+             * Douyin Id
+             * @description 客户抖音号
+             */
+            douyin_id?: string | null;
+            /**
+             * Anchor Name
+             * @description 客资记录的主播
+             */
+            anchor_name?: string | null;
+            /**
              * Lead Source
              * @description 留资来源
              */
@@ -3497,16 +3803,58 @@ export interface components {
              * @default 1
              */
             is_valid: number;
+            /**
+             * Remark
+             * @description 备注
+             */
+            remark?: string | null;
             /** Create Time */
             create_time?: string | null;
+        };
+        /**
+         * LeadDetailResponse
+         * @description 客资详情；接口本身已有登录鉴权，页面仍应按需展示。
+         */
+        LeadDetailResponse: {
+            /** Id */
+            id: number;
+            /** Session Id */
+            session_id: number | null;
+            /** Lead Name */
+            lead_name: string | null;
+            /** Lead Phone */
+            lead_phone: string | null;
+            /** Douyin Id */
+            douyin_id: string | null;
+            /** Anchor Name */
+            anchor_name: string | null;
+            /** Lead Source */
+            lead_source: string | null;
+            /** External Source */
+            external_source: string | null;
+            /** External Id */
+            external_id: number | null;
+            /** Attribution Status */
+            attribution_status: string;
+            /** Is Valid */
+            is_valid: number;
+            /** Remark */
+            remark: string | null;
+            /** Create Time */
+            create_time: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** LeadResponse */
         LeadResponse: {
             /**
              * Session Id
-             * @description 场次 ID
+             * @description 真实归属场次 ID
              */
-            session_id: number;
+            session_id?: number | null;
             /**
              * Lead Name
              * @description 留资姓名
@@ -3518,16 +3866,47 @@ export interface components {
              */
             lead_phone?: string | null;
             /**
+             * Douyin Id
+             * @description 客户抖音号
+             */
+            douyin_id?: string | null;
+            /**
+             * Anchor Name
+             * @description 客资记录的主播
+             */
+            anchor_name?: string | null;
+            /**
              * Lead Source
              * @description 留资来源
              */
             lead_source?: string | null;
+            /**
+             * External Source
+             * @description 外部来源系统
+             */
+            external_source?: string | null;
+            /**
+             * External Id
+             * @description 外部来源唯一编号
+             */
+            external_id?: number | null;
+            /**
+             * Attribution Status
+             * @description 场次归属状态
+             * @default matched
+             */
+            attribution_status: string;
             /**
              * Is Valid
              * @description 是否有效
              * @default 1
              */
             is_valid: number;
+            /**
+             * Remark
+             * @description 备注
+             */
+            remark?: string | null;
             /** Create Time */
             create_time?: string | null;
             /** Id */
@@ -3537,6 +3916,88 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * LeadSyncResponse
+         * @description 一次同步执行结果。
+         */
+        LeadSyncResponse: {
+            /** Success */
+            success: boolean;
+            /**
+             * Added Count
+             * @default 0
+             */
+            added_count: number;
+            /**
+             * Duplicate Count
+             * @default 0
+             */
+            duplicate_count: number;
+            /**
+             * Matched Count
+             * @default 0
+             */
+            matched_count: number;
+            /**
+             * Pending Count
+             * @default 0
+             */
+            pending_count: number;
+            /**
+             * Last External Id
+             * @default 0
+             */
+            last_external_id: number;
+            /**
+             * Page Count
+             * @default 0
+             */
+            page_count: number;
+        };
+        /**
+         * LeadSyncStatusResponse
+         * @description 前端状态卡所需信息，不返回手机号或抖音号。
+         */
+        LeadSyncStatusResponse: {
+            /** Configured */
+            configured: boolean;
+            /**
+             * Source System
+             * @default kezi
+             */
+            source_system: string;
+            /**
+             * Status
+             * @default not_configured
+             */
+            status: string;
+            /**
+             * Last External Id
+             * @default 0
+             */
+            last_external_id: number;
+            /** Last Synced At */
+            last_synced_at?: string | null;
+            /** Last Error */
+            last_error?: string | null;
+            /**
+             * Synced Count
+             * @default 0
+             */
+            synced_count: number;
+            /**
+             * Duplicate Count
+             * @default 0
+             */
+            duplicate_count: number;
+            /**
+             * Pending Count
+             * @default 0
+             */
+            pending_count: number;
+            /** Interval Seconds */
+            interval_seconds: number;
         };
         /**
          * LiveAudienceProfileResponse
@@ -4471,6 +4932,13 @@ export interface components {
             /** Created At */
             created_at?: string | null;
         };
+        /** PromptTestRequest */
+        PromptTestRequest: {
+            /** Type */
+            type: string;
+            /** Content */
+            content: string;
+        };
         /** QaHistoryMessage */
         QaHistoryMessage: {
             /**
@@ -5051,6 +5519,43 @@ export interface components {
             /** Status */
             status?: ("candidate" | "approved" | "archived") | null;
         };
+        /**
+         * SendCodeRequest
+         * @description 发送短信验证码请求。
+         */
+        SendCodeRequest: {
+            /**
+             * Phone
+             * @description 中国大陆 11 位手机号
+             */
+            phone: string;
+        };
+        /**
+         * SoybeanResponse
+         * @description SoybeanAdmin 前端兼容的成功响应格式
+         *
+         *     所有 API 返回 `{"code": "0000", "data": ..., "msg": "success"}` 格式。
+         *     通过泛型 T 指定 data 字段类型，让 Swagger 自动生成准确的文档。
+         *
+         *     使用示例：
+         *         @router.post("/login", response_model=SoybeanResponse[TokenData])
+         *         def login(...):
+         *             return ok_response(data=TokenData(...).model_dump())
+         */
+        SoybeanResponse: {
+            /**
+             * Code
+             * @default 0000
+             */
+            code: string;
+            /** Data */
+            data?: unknown | null;
+            /**
+             * Msg
+             * @default success
+             */
+            msg: string;
+        };
         /** SoybeanResponse[NoneType] */
         SoybeanResponse_NoneType_: {
             /**
@@ -5172,6 +5677,22 @@ export interface components {
             status: string;
             /** Created */
             created: boolean;
+        };
+        /**
+         * TranscriptFailedClearResponse
+         * @description DELETE /transcripts/tasks/failed
+         */
+        TranscriptFailedClearResponse: {
+            /**
+             * Deleted Count
+             * @default 0
+             */
+            deleted_count: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
         };
         /**
          * TranscriptFullTextResponse
@@ -5323,6 +5844,24 @@ export interface components {
             created_at: string;
         };
         /**
+         * TranscriptTaskDeleteResponse
+         * @description DELETE /transcripts/tasks/{task_id}
+         */
+        TranscriptTaskDeleteResponse: {
+            /** Task Id */
+            task_id: number;
+            /**
+             * Deleted
+             * @default true
+             */
+            deleted: boolean;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+        };
+        /**
          * TranscriptTaskOut
          * @description GET /transcripts/tasks 单条任务
          */
@@ -5401,6 +5940,21 @@ export interface components {
             created_at?: string | null;
             /** Updated At */
             updated_at?: string | null;
+            /**
+             * Total Chunks
+             * @default 0
+             */
+            total_chunks: number;
+            /**
+             * Completed Chunks
+             * @default 0
+             */
+            completed_chunks: number;
+            /**
+             * Progress Percent
+             * @default 0
+             */
+            progress_percent: number;
         };
         /**
          * TranscriptTaskStatusResponse
@@ -5806,6 +6360,169 @@ export interface operations {
             };
         };
     };
+    send_sms_code_endpoint_api_v1_auth_send_code_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendCodeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoybeanResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    code_login_api_v1_auth_code_login_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeLoginRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SoybeanResponse_TokenData_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_session_stream_api_v1_live_sessions__session_id__refresh_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stream_session_video_api_v1_live_sessions__session_id__stream_get: {
+        parameters: {
+            query?: {
+                start_seconds?: number;
+            };
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    playback_session_video_api_v1_live_sessions__session_id__playback_get: {
+        parameters: {
+            query?: {
+                start_seconds?: number;
+            };
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_rooms_api_v1_live_rooms__get: {
         parameters: {
             query?: never;
@@ -6185,39 +6902,6 @@ export interface operations {
             };
         };
     };
-    playback_session_video_api_v1_live_sessions__session_id__playback_get: {
-        parameters: {
-            query?: {
-                start_seconds?: number;
-            };
-            header?: never;
-            path: {
-                session_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_session_api_v1_live_sessions__session_id__get: {
         parameters: {
             query?: never;
@@ -6546,6 +7230,7 @@ export interface operations {
             query?: {
                 session_id?: number | null;
                 is_valid?: number | null;
+                attribution_status?: string | null;
                 skip?: number;
                 limit?: number;
             };
@@ -6561,7 +7246,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LeadResponse"][];
+                    "application/json": components["schemas"]["LeadDetailResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -6608,6 +7293,46 @@ export interface operations {
             };
         };
     };
+    get_lead_sync_status_api_v1_leads_sync_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadSyncStatusResponse"];
+                };
+            };
+        };
+    };
+    run_lead_sync_api_v1_leads_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadSyncResponse"];
+                };
+            };
+        };
+    };
     get_lead_api_v1_leads__lead_id__get: {
         parameters: {
             query?: never;
@@ -6625,7 +7350,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LeadResponse"];
+                    "application/json": components["schemas"]["LeadDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6657,6 +7382,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attribute_lead_api_v1_leads__lead_id__attribution_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lead_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeadAttributionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -8127,6 +8887,57 @@ export interface operations {
             };
         };
     };
+    clear_failed_transcription_tasks_api_v1_transcripts_tasks_failed_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptFailedClearResponse"];
+                };
+            };
+        };
+    };
+    delete_transcription_task_api_v1_transcripts_tasks__task_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptTaskDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_transcript_segments_api_v1_transcripts__session_id__segments_get: {
         parameters: {
             query?: {
@@ -8178,6 +8989,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TranscriptFullTextResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_prompt_api_v1_ai_prompts_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -8267,6 +9111,92 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_active_prompts_api_v1_ai_prompts_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptResponse"][];
+                };
+            };
+        };
+    };
+    get_prompt_by_id_api_v1_ai_prompts__prompt_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_prompt_template_api_v1_ai_prompts__prompt_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                prompt_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptCreate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -8644,6 +9574,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiQaResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    knowledge_qa_stream_api_v1_ai_qa_stream_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QaRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

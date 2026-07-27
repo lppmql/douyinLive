@@ -29,6 +29,7 @@ from app.core.observability import (
 )
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from app.core.status import TaskStatus
+from app.services.leads import kezi_lead_sync_manager
 
 
 def recover_interrupted_collector_tasks() -> int:
@@ -106,6 +107,7 @@ async def lifespan(app: FastAPI):
 
     await collector_task_control.start()
     await collector_module_service.start()
+    await kezi_lead_sync_manager.start()
     logger.info("✅ 数据采集控制中心已恢复监控、ASR 与后台自动同步状态")
 
     # Phase 36: 初始化 Qdrant 向量集合（知识库 RAG 语义检索）
@@ -137,6 +139,7 @@ async def lifespan(app: FastAPI):
 
     # 先关掉所有“任务生产者”，再等待控制任务和实时页面完成，避免停机期间又创建浏览器。
     await collector_module_service.stop_scheduling()
+    await kezi_lead_sync_manager.stop()
     scheduler_manager.pause_scheduling()
     await collector_task_control.stop()
     await scheduler_manager.stop()

@@ -1,5 +1,6 @@
 """话术分段 CRUD API"""
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -18,7 +19,13 @@ def list_segments(
     db: Session = Depends(get_db),
 ):
     """获取话术分段列表"""
-    q = db.query(TranscriptSegment)
+    # 下播终稿处理中会逐分片暂存，完成前不能让页面读到半成品。
+    q = db.query(TranscriptSegment).filter(
+        or_(
+            TranscriptSegment.segment_type.is_(None),
+            TranscriptSegment.segment_type != "asr_offline_pending",
+        )
+    )
     if session_id:
         q = q.filter(TranscriptSegment.session_id == session_id)
     if asr_status:
@@ -28,7 +35,17 @@ def list_segments(
 
 @router.get("/{seg_id}", response_model=TranscriptSegmentResponse)
 def get_segment(seg_id: int, db: Session = Depends(get_db)):
-    s = db.query(TranscriptSegment).get(seg_id)
+    s = (
+        db.query(TranscriptSegment)
+        .filter(
+            TranscriptSegment.id == seg_id,
+            or_(
+                TranscriptSegment.segment_type.is_(None),
+                TranscriptSegment.segment_type != "asr_offline_pending",
+            ),
+        )
+        .first()
+    )
     if not s:
         raise HTTPException(404, "话术分段不存在")
     return s

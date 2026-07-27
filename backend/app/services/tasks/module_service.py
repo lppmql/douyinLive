@@ -397,7 +397,7 @@ class CollectorModuleServiceManager:
         if module_key == "knowledge":
             return pending_knowledge_session_count(db)
         if module_key == "dataease":
-            return pending_complete_session_count(db, force=False, include_live=True)
+            return pending_complete_session_count(db, force=False, include_live=False)
         return 1
 
     @staticmethod

@@ -7,12 +7,19 @@ import pytest
 
 from app.core.config import settings
 from app.core.status import TaskStatus
+from app.models.asr_tasks import AsrTask
 from app.models.collector_module_states import CollectorModuleState
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
 from app.models.scraper_tasks import ScraperTask
+from app.models.transcript_segments import TranscriptSegment
 from app.services.resources.system_usage import _parse_size, _pressure, get_system_usage
-from app.services.sync.de_sync import pending_complete_session_count, pending_complete_session_ids
+from app.services.sync.de_sync import pending_complete_session_count, pending_complete_session_ids, sync_all
+from app.services.tasks.batch_runners import (
+    _pending_ai_session_ids,
+    _pending_knowledge_session_ids,
+    pending_ai_session_count,
+)
 from app.services.tasks.module_service import CollectorModuleServiceManager, MODULE_KEYS
 
 
@@ -127,7 +134,7 @@ def test_initial_state_table_contains_action_switches_and_automatic_modules(db, 
     assert states_by_key["dataease"].enabled is True
 
 
-def test_live_and_latest_sessions_are_selected_first_for_dataease(db):
+def test_only_finished_session_with_offline_final_is_selected_for_dataease(db, monkeypatch):
     room = LiveRoom(account_name="真实测试账号", anchor_name="测试主播", room_id_str="room-order")
     db.add(room)
     db.flush()
@@ -154,12 +161,86 @@ def test_live_and_latest_sessions_are_selected_first_for_dataease(db):
         live_start_time=now - timedelta(hours=1),
     )
     db.add_all([oldest_live, latest_finished, older_finished])
+    db.flush()
+    db.add(
+        AsrTask(
+            session_id=latest_finished.id,
+            status="completed",
+            task_type="offline",
+            idempotency_key=f"asr:offline:session:{latest_finished.id}",
+        )
+    )
     db.commit()
 
     selected = pending_complete_session_ids(db, limit=2, include_live=True)
 
-    assert selected == [oldest_live.id, latest_finished.id]
-    assert pending_complete_session_count(db, include_live=True) == 3
+    assert selected == [latest_finished.id]
+    assert pending_complete_session_count(db, include_live=True) == 1
+
+    captured: dict[str, list[int]] = {}
+    monkeypatch.setattr(
+        "app.services.sync.de_sync.sync_sessions",
+        lambda _db, session_ids: captured.update(session_ids=session_ids)
+        or {"synced_count": len(session_ids), "failed_count": 0},
+    )
+    sync_all(db)
+    assert captured["session_ids"] == [latest_finished.id]
+
+
+def test_live_draft_never_enters_ai_or_knowledge_candidates(db):
+    """直播初稿只供页面观察，自动 AI 和知识库必须等待离线终稿。"""
+    room = LiveRoom(account_name="终稿隔离账号", anchor_name="测试主播", room_id_str="room-final-only")
+    db.add(room)
+    db.flush()
+    realtime_session = LiveSession(
+        room_id=room.id,
+        anchor_name="直播中主播",
+        live_status="live",
+        detail_collection_status="complete",
+        live_start_time=datetime.utcnow(),
+    )
+    offline_session = LiveSession(
+        room_id=room.id,
+        anchor_name="已下播主播",
+        live_status="ended",
+        detail_collection_status="complete",
+        live_start_time=datetime.utcnow() - timedelta(hours=1),
+    )
+    db.add_all([realtime_session, offline_session])
+    db.flush()
+    db.add_all(
+        [
+            AsrTask(
+                session_id=realtime_session.id,
+                status="completed",
+                task_type="realtime",
+                idempotency_key=f"asr:realtime:session:{realtime_session.id}",
+            ),
+            AsrTask(
+                session_id=offline_session.id,
+                status="completed",
+                task_type="offline",
+                idempotency_key=f"asr:offline:session:{offline_session.id}",
+            ),
+            TranscriptSegment(
+                session_id=realtime_session.id,
+                text_content="直播临时初稿",
+                segment_type="asr_realtime",
+                asr_status="completed",
+            ),
+            TranscriptSegment(
+                session_id=offline_session.id,
+                text_content="下播后的最终稿",
+                segment_type="asr_offline",
+                asr_status="completed",
+            ),
+        ]
+    )
+    db.commit()
+
+    assert _pending_ai_session_ids(db) == [offline_session.id]
+    assert pending_ai_session_count(db) == 1
+    assert _pending_knowledge_session_ids(db) == [offline_session.id]
 
 
 def test_resource_snapshot_uses_real_system_values_and_pressure_thresholds():

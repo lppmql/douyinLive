@@ -254,7 +254,7 @@ def build_control_center(
             active.get("dataease_sync"),
             states.get("dataease"),
             counts.get("dataease_sync", {}),
-            pending_complete_session_count(db, force=False, include_live=True),
+            pending_complete_session_count(db, force=False, include_live=False),
             ),
             "mode": "automatic",
             "enabled": True,

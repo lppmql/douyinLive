@@ -1,6 +1,6 @@
 """Phase 5: WebSocket 转写 + REST 话术接口"""
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
@@ -225,6 +225,12 @@ def list_transcription_tasks(
             TranscriptSegment.session_id.label("session_id"),
             func.count(TranscriptSegment.id).label("segment_count"),
         )
+        .filter(
+            or_(
+                TranscriptSegment.segment_type.is_(None),
+                TranscriptSegment.segment_type != "asr_offline_pending",
+            )
+        )
         .group_by(TranscriptSegment.session_id)
         .subquery()
     )
@@ -273,14 +279,20 @@ def clear_failed_transcription_tasks(db: Session = Depends(get_db)):
         return {"deleted_count": 0, "message": "没有需要清理的失败任务"}
 
     task_ids = [t.id for t in failed_tasks]
-    session_ids = list({t.session_id for t in failed_tasks})
-
     # ⚠️ 外键依赖链：transcript_segments.asr_chunk_id → asr_audio_chunks.id → asr_tasks.id
     # 必须按「孙子→儿子→爷爷」顺序删，否则 MySQL 外键约束报错
-    # 1. 先删话术分段（引用 asr_audio_chunks）
-    db.query(TranscriptSegment).filter(
-        TranscriptSegment.session_id.in_(session_ids)
-    ).delete(synchronize_session=False)
+    # 1. 只删这些任务自己分片产生的话术。实时与离线现在是同场两条独立任务，
+    # 按 session_id 删除会把另一条正常通道一并误删。
+    chunk_ids = [
+        row[0]
+        for row in db.query(AsrAudioChunk.id)
+        .filter(AsrAudioChunk.task_id.in_(task_ids))
+        .all()
+    ]
+    if chunk_ids:
+        db.query(TranscriptSegment).filter(
+            TranscriptSegment.asr_chunk_id.in_(chunk_ids)
+        ).delete(synchronize_session=False)
 
     # 2. 再删音频分片（引用 asr_tasks）
     db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id.in_(task_ids)).delete(synchronize_session=False)
@@ -308,10 +320,17 @@ def delete_transcription_task(task_id: int, db: Session = Depends(get_db)):
 
     # ⚠️ 外键依赖链：transcript_segments.asr_chunk_id → asr_audio_chunks.id → asr_tasks.id
     # 必须按「孙子→儿子→爷爷」顺序删
-    # 1. 先删话术分段（引用 asr_audio_chunks）
-    db.query(TranscriptSegment).filter(
-        TranscriptSegment.session_id == task.session_id
-    ).delete(synchronize_session=False)
+    # 1. 只删当前任务自己的分片话术，不能伤及同场另一条实时/离线任务。
+    chunk_ids = [
+        row[0]
+        for row in db.query(AsrAudioChunk.id)
+        .filter(AsrAudioChunk.task_id == task_id)
+        .all()
+    ]
+    if chunk_ids:
+        db.query(TranscriptSegment).filter(
+            TranscriptSegment.asr_chunk_id.in_(chunk_ids)
+        ).delete(synchronize_session=False)
 
     # 2. 再删音频分片（引用 asr_tasks）
     db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id == task_id).delete(synchronize_session=False)
@@ -332,7 +351,13 @@ def list_transcript_segments(
     """获取某场直播的话术分段列表"""
     segments = (
         db.query(TranscriptSegment)
-        .filter(TranscriptSegment.session_id == session_id)
+        .filter(
+            TranscriptSegment.session_id == session_id,
+            or_(
+                TranscriptSegment.segment_type.is_(None),
+                TranscriptSegment.segment_type != "asr_offline_pending",
+            ),
+        )
         .order_by(TranscriptSegment.segment_start.asc())
         .limit(limit)
         .all()
@@ -363,7 +388,13 @@ def get_full_text(session_id: int, db: Session = Depends(get_db)):
     if not record:
         segments = (
             db.query(TranscriptSegment)
-            .filter(TranscriptSegment.session_id == session_id)
+            .filter(
+                TranscriptSegment.session_id == session_id,
+                or_(
+                    TranscriptSegment.segment_type.is_(None),
+                    TranscriptSegment.segment_type != "asr_offline_pending",
+                ),
+            )
             .order_by(TranscriptSegment.segment_start.asc(), TranscriptSegment.id.asc())
             .limit(5000)
             .all()

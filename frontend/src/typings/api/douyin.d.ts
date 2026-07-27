@@ -506,6 +506,29 @@ declare namespace Api {
       resource_usage: ComputerResourceUsage;
     }
 
+    interface LeadSyncStatus {
+      configured: boolean;
+      source_system: 'kezi';
+      status: 'not_configured' | 'idle' | 'running' | 'completed' | 'failed';
+      last_external_id: number;
+      last_synced_at: string | null;
+      last_error: string | null;
+      synced_count: number;
+      duplicate_count: number;
+      pending_count: number;
+      interval_seconds: number;
+    }
+
+    interface LeadSyncResult {
+      success: boolean;
+      added_count: number;
+      duplicate_count: number;
+      matched_count: number;
+      pending_count: number;
+      last_external_id: number;
+      page_count: number;
+    }
+
     interface CollectorTaskAction {
       success: boolean;
       message: string;
@@ -601,7 +624,7 @@ declare namespace Api {
       live_duration_seconds: number;
       segment_count: number;
       error_message: string | null;
-      postprocess_status: 'pending' | 'processing' | 'completed' | 'failed';
+      postprocess_status: 'pending' | 'processing' | 'completed' | 'failed' | 'skipped';
       postprocess_error: string | null;
       postprocess_result: Record<string, unknown> | null;
       postprocess_attempt_count: number;

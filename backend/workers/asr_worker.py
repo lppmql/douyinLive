@@ -42,6 +42,7 @@ from app.services.asr.funasr_client import FunasrClient
 from app.services.asr.queue import (
     list_queued_task_ids_latest_first,
     queue_auto_transcriptions,
+    queue_session_transcription,
     recover_interrupted_chunk,
     requeue_offline_task_for_live_priority,
 )
@@ -70,6 +71,21 @@ class _YieldToLiveTask(Exception):
 def is_full_text_too_long_error(exc: DataError) -> bool:
     """识别迁移前 MySQL TEXT 容量不足错误。"""
     return bool(getattr(exc, "orig", None) and getattr(exc.orig, "args", ()) and exc.orig.args[0] == 1406)
+
+
+def segment_type_for_task(task_type: str) -> str:
+    """离线终稿完成前先写入隐藏暂存类型，实时初稿则立即可见。"""
+    return "asr_offline_pending" if task_type == "offline" else "asr_realtime"
+
+
+def should_handoff_realtime_task(task_type: str, live_status: str) -> bool:
+    """实时任务被领取时若已经下播，就交给新离线任务而不是篡改任务类型。"""
+    return task_type == "realtime" and live_status != "live"
+
+
+def postprocess_status_for_task(task_type: str) -> str:
+    """直播初稿不生成最终复盘，只有下播终稿进入 AI 后处理。"""
+    return TaskStatus.PENDING if task_type == "offline" else "skipped"
 
 
 class AsrWorker:
@@ -234,6 +250,7 @@ class AsrWorker:
                 db.query(AsrTask)
                 .filter(
                     AsrTask.status == "completed",
+                    AsrTask.task_type == "offline",
                     AsrTask.postprocess_status.in_(["pending", "failed"]),
                     AsrTask.postprocess_attempt_count < AsrTask.max_retries,
                 )
@@ -349,7 +366,11 @@ class AsrWorker:
                 task = db.get(AsrTask, task_id)
                 if not task or task.status != "processing":
                     return
-                ensure_task_identity(task, "asr", f"asr:session:{task.session_id}")
+                ensure_task_identity(
+                    task,
+                    "asr",
+                    f"asr:{task.task_type}:session:{task.session_id}",
+                )
                 task.error_message = None
                 touch_task(task, self._worker_id)
                 db.commit()
@@ -362,6 +383,25 @@ class AsrWorker:
                 if not stream or not stream.m3u8_url:
                     raise RuntimeError("ASR 任务缺少真实直播流地址，请先刷新场次流地址")
 
+                if should_handoff_realtime_task(task.task_type, session.live_status):
+                    # 任务等候期间可能已经下播。实时任务的身份不能偷偷改成离线任务，
+                    # 否则同一行任务会同时代表两种业务。这里明确结束初稿任务，再创建
+                    # 一条独立的离线终稿任务。
+                    task.status = TaskStatus.CANCELLED
+                    task.error_message = "领取任务时直播已结束，已转交独立离线终稿任务"
+                    task.completed_at = datetime.utcnow()
+                    task.postprocess_status = "skipped"
+                    touch_task(task, self._worker_id)
+                    offline_task, _created = queue_session_transcription(db, session)
+                    db.commit()
+                    publish_task_event(
+                        "asr",
+                        task,
+                        "handed_off_to_offline",
+                        {"offline_task_id": offline_task.id},
+                    )
+                    return
+
                 m3u8_url = stream.m3u8_url
                 headers = dict(stream.headers_json) if stream and stream.headers_json else {}
 
@@ -370,9 +410,7 @@ class AsrWorker:
                     db, task, m3u8_url, headers
                 )
 
-                is_live = session.live_status == "live"
-                task.task_type = "realtime" if is_live else "offline"
-                db.commit()
+                is_live = task.task_type == "realtime"
                 chunks = self._prepare_chunks(db, task, session, m3u8_url)
 
                 while True:
@@ -453,10 +491,28 @@ class AsrWorker:
                     raise RuntimeError("全部真实音频分片均未识别到有效话术，直播流可能已过期或没有人声")
 
                 self._save_full_text(db, task, chunks)
+                if task.task_type == "offline":
+                    chunk_ids = [chunk.id for chunk in chunks]
+                    # 离线分段处理期间使用隐藏暂存类型。只有全文成功写入后，才在同一
+                    # 事务里公开终稿并删除直播初稿，页面不会看到两版混合或空窗。
+                    db.query(TranscriptSegment).filter(
+                        TranscriptSegment.asr_chunk_id.in_(chunk_ids),
+                        TranscriptSegment.segment_type == "asr_offline_pending",
+                    ).update(
+                        {
+                            TranscriptSegment.segment_type: "asr_offline",
+                            TranscriptSegment.asr_status: "completed",
+                        },
+                        synchronize_session=False,
+                    )
+                    db.query(TranscriptSegment).filter(
+                        TranscriptSegment.session_id == task.session_id,
+                        TranscriptSegment.segment_type == "asr_realtime",
+                    ).delete(synchronize_session=False)
                 task.status = "completed"
                 task.error_message = None
                 task.completed_at = datetime.utcnow()
-                task.postprocess_status = "pending"
+                task.postprocess_status = postprocess_status_for_task(task.task_type)
                 task.postprocess_started_at = None
                 task.postprocess_completed_at = None
                 task.postprocess_error = None
@@ -482,6 +538,7 @@ class AsrWorker:
                     task.status = TaskStatus.CANCELLED
                     task.error_message = str(exc)[:500]
                     task.completed_at = datetime.utcnow()
+                    task.postprocess_status = "skipped"
                     touch_task(task, self._worker_id)
                     db.commit()
                     publish_task_event("asr", task, "cancelled", {"message": task.error_message})
@@ -496,6 +553,7 @@ class AsrWorker:
                         task.status = "failed"
                         task.error_message = str(exc)[:500]
                         task.completed_at = datetime.utcnow()
+                        task.postprocess_status = "skipped"
                         touch_task(task, self._worker_id)
                         db.commit()
                         publish_task_event("asr", task, "failed", {"error": task.error_message})
@@ -735,15 +793,6 @@ class AsrWorker:
                 db.refresh(chunk)
             existing.sort(key=lambda item: int(item.chunk_index))
             return existing
-
-        db.query(TranscriptSegment).filter(
-            TranscriptSegment.session_id == task.session_id,
-            TranscriptSegment.asr_chunk_id.is_(None),
-            TranscriptSegment.segment_type.in_(["asr_realtime", "asr_offline"]),
-        ).delete(synchronize_session=False)
-        db.query(TranscriptFullText).filter(
-            TranscriptFullText.session_id == task.session_id
-        ).delete(synchronize_session=False)
 
         duration = max(0, int(session.live_duration_seconds or 0))
         ranges = build_chunk_ranges(
@@ -987,7 +1036,11 @@ class AsrWorker:
         """消费一个分片的 ASR 结果，并换算为整场绝对时间。"""
         segment_count = 0
         offset = float(chunk.start_seconds or 0)
-        async for result in client.transcribe(task.session_id, pipe.read_frames()):
+        async for result in client.transcribe(
+            task.session_id,
+            pipe.read_frames(),
+            task_type=task.task_type,
+        ):
             self._ensure_task_running(db, task)
             absolute_result = dict(result)
             absolute_result["segment_start"] = offset + float(result.get("segment_start") or 0)
@@ -995,14 +1048,15 @@ class AsrWorker:
             # 行业知识纠错：对 ASR 输出的原始文本做品牌名和术语校正
             raw_text = absolute_result.get("text", "")
             corrected_text = correct_asr_text(raw_text) if raw_text else ""
+            absolute_result["text"] = corrected_text
             segment = TranscriptSegment(
                 session_id=task.session_id,
                 asr_chunk_id=chunk.id,
                 segment_start=absolute_result["segment_start"],
                 segment_end=absolute_result["segment_end"],
                 text_content=corrected_text,
-                asr_status="completed",
-                segment_type="asr_offline" if task.task_type == "offline" else "asr_realtime",
+                asr_status="processing" if task.task_type == "offline" else "completed",
+                segment_type=segment_type_for_task(task.task_type),
             )
             db.add(segment)
             chunk.segment_count = segment_count + 1
@@ -1010,7 +1064,9 @@ class AsrWorker:
             touch_task(task, self._worker_id)
             db.commit()
             segment_count += 1
-            await ws_manager.publish_asr_result(task.session_id, absolute_result)
+            if task.task_type == "realtime":
+                # 离线终稿在完整成功以前必须保持隐藏，不能通过 WebSocket 偷跑半成品。
+                await ws_manager.publish_asr_result(task.session_id, absolute_result)
 
         return segment_count
 

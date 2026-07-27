@@ -8,9 +8,10 @@ DataEase 同步主入口
     sync_session(db, 1)   # 单场同步（下播时触发）
 """
 from app.core.logger import logger
-from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select
 
 from app.models.analysis_reports import AnalysisReport
+from app.models.asr_tasks import AsrTask
 from app.models.comments import Comment
 from app.models.de_tables import (
     DeAnchorAiAnalysisSummary,
@@ -89,11 +90,25 @@ def source_data_outdated_condition():
     )
 
 
+def completed_offline_transcript_exists():
+    """只有成功完成的下播终稿，才能进入复盘、知识库和 DataEase。"""
+    return exists().where(
+        and_(
+            AsrTask.session_id == LiveSession.id,
+            AsrTask.task_type == "offline",
+            AsrTask.status == "completed",
+        )
+    )
+
+
 def _pending_complete_session_query(db, force: bool, include_live: bool):
-    """构造待同步查询，让列表和数量使用完全相同的筛选规则。"""
-    eligible = LiveSession.detail_collection_status == "complete"
-    if include_live:
-        eligible = or_(eligible, LiveSession.live_status == "live")
+    """构造待同步查询；兼容旧参数，但直播初稿永远不能进入 DataEase。"""
+    del include_live
+    eligible = and_(
+        LiveSession.detail_collection_status == "complete",
+        LiveSession.live_status != "live",
+        completed_offline_transcript_exists(),
+    )
     query = db.query(LiveSession.id).outerjoin(
         DeLiveSessionAnchorSummary,
         DeLiveSessionAnchorSummary.session_id == LiveSession.id,
@@ -112,7 +127,7 @@ def pending_complete_session_ids(
     force: bool = False,
     include_live: bool = False,
 ) -> list[int]:
-    """选择待同步场次；持续服务可把正在直播的最新场次放在最前面。"""
+    """只选择已有完整离线终稿的下播场次。"""
     query = _pending_complete_session_query(db, force, include_live)
     query = query.order_by(
         case((LiveSession.live_status == "live", 0), else_=1),
@@ -136,9 +151,13 @@ def pending_complete_session_count(
 
 
 def cleanup_stale_dataease_rows(db) -> int:
-    """保留完整场次和正在直播场次，清理其余历史脏宽表。"""
+    """只保留已有离线终稿的完整场次，移除历史实时初稿宽表。"""
     valid_ids = select(LiveSession.id).where(
-        or_(LiveSession.detail_collection_status == "complete", LiveSession.live_status == "live")
+        and_(
+            LiveSession.detail_collection_status == "complete",
+            LiveSession.live_status != "live",
+            completed_offline_transcript_exists(),
+        )
     )
     removed = 0
     for model in (
@@ -164,15 +183,14 @@ def sync_pending_complete_sessions(db, limit: int | None = 100, force: bool = Fa
 
 
 def sync_all(db):
-    """维护脚本全量重建所有完整场次，并清除不完整场次的历史宽表。"""
+    """维护脚本全量重建已有离线终稿的场次，不绕过自动同步门禁。"""
     removed = cleanup_stale_dataease_rows(db)
-    session_ids = [
-        row[0]
-        for row in db.query(LiveSession.id)
-        .filter(LiveSession.detail_collection_status == "complete")
-        .order_by(LiveSession.id)
-        .all()
-    ]
+    session_ids = pending_complete_session_ids(
+        db,
+        limit=None,
+        force=True,
+        include_live=False,
+    )
     logger.info("开始全量同步，共 %s 个场次", len(session_ids))
     result = sync_sessions(db, session_ids)
     result["removed_stale_row_count"] = removed

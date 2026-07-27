@@ -6,6 +6,7 @@ from app.models.live_metrics import LiveMetric
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.comments import Comment
 from app.models.leads import Lead
+from app.models.lead_sync_states import LeadSyncState
 from app.models.transcript_segments import TranscriptSegment
 from app.models.anchor_schedules import AnchorSchedule
 from app.models.transcript_full_texts import TranscriptFullText
@@ -32,6 +33,7 @@ __all__ = [
     "LiveAudienceProfile",
     "Comment",
     "Lead",
+    "LeadSyncState",
     "TranscriptSegment",
     "AnchorSchedule",
     "TranscriptFullText",

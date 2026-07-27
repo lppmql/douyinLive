@@ -6,6 +6,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
+def is_valid_kezi_api_key(value: str) -> bool:
+    """外部请求头密钥必须是无空格 ASCII，中文占位词不能冒充真实配置。"""
+    return len(value) >= 32 and value.isascii() and value.isprintable() and not any(char.isspace() for char in value)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(PROJECT_ROOT / ".env"),
@@ -94,6 +99,12 @@ class Settings(BaseSettings):
     AI_REVIEW_INTERVAL_SECONDS: int = 120
     KNOWLEDGE_SYNC_INTERVAL_SECONDS: int = 120
     DATAEASE_SYNC_INTERVAL_SECONDS: int = 30
+    # 客资查询密钥只放后端根目录 .env；前端只看到同步后的脱敏业务数据。
+    KEZI_BASE_URL: str = "https://kezi.lpp6.com"
+    KEZI_API_KEY: str = ""
+    KEZI_SYNC_INTERVAL_SECONDS: int = 60
+    KEZI_SYNC_PAGE_SIZE: int = 100
+    KEZI_REQUEST_TIMEOUT_SECONDS: int = 15
     # 0 表示每次处理全部待同步场次；执行器仍逐场顺序写入，不会并发冲击 MySQL。
     CONTINUOUS_TASK_BATCH_SIZE: int = 0
 
@@ -176,6 +187,13 @@ class Settings(BaseSettings):
             errors.append("COLLECTOR_SERVICE_TICK_TOO_SMALL")
         if self.CONTINUOUS_TASK_BATCH_SIZE < 0:
             errors.append("CONTINUOUS_TASK_BATCH_INVALID")
+        if not 10 <= self.KEZI_SYNC_INTERVAL_SECONDS <= 3600:
+            errors.append("KEZI_SYNC_INTERVAL_INVALID")
+        if not 1 <= self.KEZI_SYNC_PAGE_SIZE <= 500:
+            errors.append("KEZI_SYNC_PAGE_SIZE_INVALID")
+        if self.KEZI_API_KEY and not is_valid_kezi_api_key(self.KEZI_API_KEY):
+            # 客资接入是可选模块：无效密钥只关闭该模块，不阻断直播、复盘等主功能。
+            warnings.append("KEZI_API_KEY_INSECURE")
         if not 50 <= self.RESOURCE_HIGH_MEMORY_PERCENT < self.RESOURCE_CRITICAL_MEMORY_PERCENT <= 99:
             errors.append("RESOURCE_MEMORY_THRESHOLD_INVALID")
         if not self.DEBUG and (

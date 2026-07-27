@@ -25,7 +25,12 @@ from app.services.ai.review_service import generate_findings
 from app.services.ai.scoring import score_session_transcript
 from app.services.collector.log_service import add_collector_log
 from app.services.collector.manual_collect import collect_all
-from app.services.sync.de_sync import cleanup_stale_dataease_rows, pending_complete_session_ids, sync_session
+from app.services.sync.de_sync import (
+    cleanup_stale_dataease_rows,
+    completed_offline_transcript_exists,
+    pending_complete_session_ids,
+    sync_session,
+)
 from app.services.tasks.exceptions import TaskBatchFailed, TaskCancellationRequested
 
 
@@ -66,63 +71,47 @@ async def run_data_refresh(
 
 
 def _pending_ai_session_ids(db: Session, limit: int | None = None) -> list[int]:
-    transcript_ids = {
-        row[0]
-        for row in db.query(TranscriptSegment.session_id)
-        .filter(TranscriptSegment.asr_status == "completed")
-        .distinct()
-        .all()
-    }
-    if not transcript_ids:
-        return []
-    scored_ids = {
-        row[0]
-        for row in db.query(AnalysisReport.session_id)
-        .filter(
-            AnalysisReport.session_id.in_(transcript_ids),
-            AnalysisReport.report_type == "speech_score",
-        )
-        .distinct()
-        .all()
-    }
-    finding_ids = {
-        row[0]
-        for row in db.query(ReviewFinding.session_id)
-        .filter(ReviewFinding.session_id.in_(transcript_ids))
-        .distinct()
-        .all()
-    }
-    pending = transcript_ids - (scored_ids & finding_ids)
-    if not pending:
-        return []
-    query = (
-        db.query(LiveSession.id)
-        .filter(LiveSession.id.in_(pending))
-        .order_by(
-            case((LiveSession.live_status == "live", 0), else_=1),
-            LiveSession.live_start_time.desc(),
-            LiveSession.id.desc(),
-        )
+    query = _pending_ai_query(db).order_by(
+        LiveSession.live_start_time.desc(),
+        LiveSession.id.desc(),
     )
     if limit is not None:
         query = query.limit(max(1, limit))
     return [row[0] for row in query.all()]
 
 
-def pending_ai_session_count(db: Session) -> int:
-    """返回已有话术但尚未补齐 AI 复盘的真实场次数。"""
-    has_transcript = exists().where(
+def _pending_ai_query(db: Session):
+    """AI 状态数量和实际候选共用同一套“下播终稿”门禁。"""
+    has_offline_transcript = exists().where(
         TranscriptSegment.session_id == LiveSession.id,
         TranscriptSegment.asr_status == "completed",
+        or_(
+            TranscriptSegment.segment_type.is_(None),
+            TranscriptSegment.segment_type == "asr_offline",
+        ),
     )
     has_score = exists().where(
         AnalysisReport.session_id == LiveSession.id,
         AnalysisReport.report_type == "speech_score",
     )
     has_finding = exists().where(ReviewFinding.session_id == LiveSession.id)
+    return (
+        db.query(LiveSession.id)
+        .filter(
+            LiveSession.live_status != "live",
+            completed_offline_transcript_exists(),
+            has_offline_transcript,
+            or_(~has_score, ~has_finding),
+        )
+    )
+
+
+def pending_ai_session_count(db: Session) -> int:
+    """返回已有离线终稿但尚未补齐 AI 复盘的真实场次数。"""
     return int(
-        db.query(func.count(LiveSession.id))
-        .filter(has_transcript, or_(~has_score, ~has_finding))
+        _pending_ai_query(db)
+        .order_by(None)
+        .with_entities(func.count(LiveSession.id))
         .scalar()
         or 0
     )
@@ -246,7 +235,9 @@ def _pending_knowledge_query(db: Session):
         db.query(LiveSession.id)
         .outerjoin(latest_kb, latest_kb.c.session_id == LiveSession.id)
         .filter(
-            or_(LiveSession.detail_collection_status == "complete", LiveSession.live_status == "live"),
+            LiveSession.detail_collection_status == "complete",
+            LiveSession.live_status != "live",
+            completed_offline_transcript_exists(),
             or_(
                 latest_kb.c.session_id.is_(None),
                 LiveSession.updated_at > latest_kb.c.latest_updated_at,
@@ -397,7 +388,7 @@ def run_dataease_sync_batch(
         db,
         limit=batch_size,
         force=False,
-        include_live=True,
+        include_live=False,
     )
     total = len(session_ids)
     completed = 0

@@ -12,10 +12,12 @@ import {
   fetchCollectorControlCenter,
   fetchCollectorLogs,
   fetchCollectorTaskQueue,
+  fetchLeadSyncStatus,
   retryCollectorQueueTask,
   startCollectorModule,
   stopCollectorModule,
-  stopCollectorQueueTask
+  stopCollectorQueueTask,
+  syncKeziLeads
 } from '@/service/api/douyin';
 
 function errorText(error: unknown, fallback: string): string {
@@ -29,6 +31,7 @@ export function useCollectorData(message: MessageApi, dialog: DialogApi) {
   const accounts = ref<Api.Douyin.CollectorAccount[]>([]);
   const logs = ref<Api.Douyin.CollectorLog[]>([]);
   const tasks = ref<Api.Douyin.UnifiedCollectorTask[]>([]);
+  const leadSyncStatus = ref<Api.Douyin.LeadSyncStatus | null>(null);
   const dataLoadFailedCount = ref(0);
   const lastDataUpdatedAt = ref<number | null>(null);
 
@@ -36,6 +39,7 @@ export function useCollectorData(message: MessageApi, dialog: DialogApi) {
   const taskActionLoadingKey = ref<string | null>(null);
   const accountHealthLoadingId = ref<number | null>(null);
   const clearLogsLoading = ref(false);
+  const leadSyncLoading = ref(false);
 
   const accountSectionRef = ref<HTMLElement | null>(null);
   const logSectionRef = ref<HTMLElement | null>(null);
@@ -84,13 +88,17 @@ export function useCollectorData(message: MessageApi, dialog: DialogApi) {
           level: logLevel.value === 'all' ? undefined : logLevel.value,
           task_id: logTaskId.value || undefined
         }),
-        fetchCollectorTaskQueue(150)
+        fetchCollectorTaskQueue(150),
+        fetchLeadSyncStatus()
       ]);
-      const [centerResult, accountsResult, logsResult, tasksResult] = results;
+      const [centerResult, accountsResult, logsResult, tasksResult, leadSyncResult] = results;
       if (centerResult.status === 'fulfilled' && centerResult.value.data) controlCenter.value = centerResult.value.data;
       if (accountsResult.status === 'fulfilled' && accountsResult.value?.data) accounts.value = accountsResult.value.data;
       if (logsResult.status === 'fulfilled' && logsResult.value.data) logs.value = logsResult.value.data;
       if (tasksResult.status === 'fulfilled' && tasksResult.value.data) tasks.value = tasksResult.value.data;
+      if (leadSyncResult.status === 'fulfilled' && leadSyncResult.value.data) {
+        leadSyncStatus.value = leadSyncResult.value.data;
+      }
 
       dataLoadFailedCount.value = results.filter((result, index) => {
         if (!includeAccounts && index === 1) return false;
@@ -101,11 +109,28 @@ export function useCollectorData(message: MessageApi, dialog: DialogApi) {
         message.warning(`${dataLoadFailedCount.value} 项状态暂时未更新，其余真实数据已正常展示`);
       }
     } catch (error) {
-      dataLoadFailedCount.value = 4;
+      dataLoadFailedCount.value = 5;
       if (!silent) message.error(errorText(error, '加载数据采集页面失败'));
     } finally {
       if (silent) silentRefreshing.value = false;
       else loading.value = false;
+    }
+  }
+
+  async function handleLeadSync() {
+    leadSyncLoading.value = true;
+    try {
+      const response = await syncKeziLeads();
+      const result = unwrapServiceData(response, '客资增量同步失败');
+      message.success(
+        `新增 ${result.added_count} 条，匹配场次 ${result.matched_count} 条，待归属 ${result.pending_count} 条`
+      );
+      await loadData(true);
+    } catch (error) {
+      message.error(errorText(error, '客资增量同步失败'));
+      await loadData(true);
+    } finally {
+      leadSyncLoading.value = false;
     }
   }
 
@@ -316,12 +341,14 @@ export function useCollectorData(message: MessageApi, dialog: DialogApi) {
     accounts,
     logs,
     tasks,
+    leadSyncStatus,
     dataLoadFailedCount,
     lastDataUpdatedAt,
     moduleLoadingKeys,
     taskActionLoadingKey,
     accountHealthLoadingId,
     clearLogsLoading,
+    leadSyncLoading,
     accountSectionRef,
     logSectionRef,
     accountHighlight,
@@ -349,6 +376,7 @@ export function useCollectorData(message: MessageApi, dialog: DialogApi) {
     handleClearLogs,
     handleAccountHealth,
     handleDeleteAccount,
+    handleLeadSync,
     openLogDetail
   };
 }

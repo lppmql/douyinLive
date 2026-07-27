@@ -66,7 +66,8 @@ export function getPostprocessLabel(status: string): string {
     pending: '待复盘',
     processing: '复盘入库中',
     completed: '已复盘入库',
-    failed: '复盘入库失败'
+    failed: '复盘入库失败',
+    skipped: '初稿无需复盘'
   };
   return map[status] || status;
 }
@@ -77,7 +78,8 @@ export function getPostprocessType(status: string): 'info' | 'warning' | 'succes
     pending: 'info',
     processing: 'warning',
     completed: 'success',
-    failed: 'error'
+    failed: 'error',
+    skipped: 'info'
   };
   return map[status] || 'info';
 }

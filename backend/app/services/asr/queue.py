@@ -1,7 +1,7 @@
 """ASR 转写任务排队，供接口、采集完成和下播处理共用。"""
 from datetime import datetime
 
-from sqlalchemy import case, exists, or_
+from sqlalchemy import and_, case, exists, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -81,15 +81,17 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
     if not stream:
         raise ValueError("该场次暂无可用直播流，请先重新采集流地址")
 
+    expected_task_type = "realtime" if session.live_status == "live" else "offline"
     existing = (
         db.query(AsrTask)
-        .filter(AsrTask.session_id == session.id)
+        .filter(
+            AsrTask.session_id == session.id,
+            AsrTask.task_type == expected_task_type,
+        )
         .order_by(AsrTask.created_at.desc())
         .first()
     )
-    expected_task_type = "realtime" if session.live_status == "live" else "offline"
     if existing:
-        existing.task_type = expected_task_type
         if existing.status in (TaskStatus.FAILED, TaskStatus.CANCELLED):
             failed_chunks = db.query(AsrAudioChunk).filter(
                 AsrAudioChunk.task_id == existing.id,
@@ -106,7 +108,7 @@ def queue_session_transcription(db: Session, session: LiveSession) -> tuple[AsrT
         status=TaskStatus.QUEUED,
         task_type=expected_task_type,
     )
-    ensure_task_identity(task, "asr", f"asr:session:{session.id}")
+    ensure_task_identity(task, "asr", f"asr:{expected_task_type}:session:{session.id}")
     db.add(task)
     db.flush()
     return task, True
@@ -212,14 +214,24 @@ def queue_auto_transcriptions(
             resumed_session_ids.append(session.id)
     available = max(0, available - len(resumed_session_ids))
 
-    has_any_task = exists().where(AsrTask.session_id == LiveSession.id)
+    has_realtime_task = exists().where(
+        AsrTask.session_id == LiveSession.id,
+        AsrTask.task_type == "realtime",
+    )
+    has_offline_task = exists().where(
+        AsrTask.session_id == LiveSession.id,
+        AsrTask.task_type == "offline",
+    )
     query = db.query(LiveSession).filter(
             or_(
                 LiveSession.live_status == "live",
                 LiveSession.detail_collection_status == "complete",
             ),
             has_stream,
-            ~has_any_task,
+            or_(
+                and_(LiveSession.live_status == "live", ~has_realtime_task),
+                and_(LiveSession.live_status != "live", ~has_offline_task),
+            ),
         )
     if session_ids is not None:
         query = query.filter(LiveSession.id.in_(session_ids))

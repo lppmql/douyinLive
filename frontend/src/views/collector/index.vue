@@ -5,6 +5,7 @@ import CollectorAccountTable from './modules/CollectorAccountTable.vue';
 import CollectorControlCenter from './modules/CollectorControlCenter.vue';
 import CollectorLogDetailModal from './modules/CollectorLogDetailModal.vue';
 import CollectorLogTable from './modules/CollectorLogTable.vue';
+import CollectorKeziCard from './modules/CollectorKeziCard.vue';
 import CollectorQRLogin from './modules/CollectorQRLogin.vue';
 import CollectorTaskDrawer from './modules/CollectorTaskDrawer.vue';
 import { useCollectorData } from './composables/useCollectorData';
@@ -66,6 +67,12 @@ onUnmounted(() => {
           @run="data.handleDataRefresh"
           @open-tasks="data.taskDrawerVisible.value = true"
           @refresh="data.loadData(true)"
+        />
+
+        <CollectorKeziCard
+          :status="data.leadSyncStatus.value"
+          :loading="data.leadSyncLoading.value"
+          @sync="data.handleLeadSync"
         />
 
         <div

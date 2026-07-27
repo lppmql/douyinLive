@@ -31,7 +31,10 @@ class AsrTask(Base, TimestampMixin):
     max_retries = Column(Integer, nullable=False, default=3, comment="最大执行次数")
     priority = Column(Integer, nullable=False, default=50, comment="优先级，数值越小越优先")
     postprocess_status = Column(
-        String(20), nullable=False, default="pending", comment="后处理状态: pending/processing/completed/failed"
+        String(20),
+        nullable=False,
+        default="pending",
+        comment="后处理状态: pending/processing/completed/failed/skipped",
     )
     postprocess_started_at = Column(DateTime, nullable=True, comment="话术评分与复盘处理开始时间")
     postprocess_completed_at = Column(DateTime, nullable=True, comment="知识库同步完成时间")

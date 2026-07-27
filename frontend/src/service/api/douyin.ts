@@ -137,6 +137,19 @@ export function fetchCollectorControlCenter() {
   return backendRequest<Api.Douyin.CollectorControlCenter>({ url: `${API_PREFIX}/collector/control-center` });
 }
 
+/** 获取客资增量同步状态；响应只含数量和游标，不含手机号等隐私。 */
+export function fetchLeadSyncStatus() {
+  return backendRequest<Api.Douyin.LeadSyncStatus>({ url: `${API_PREFIX}/leads/sync-status` });
+}
+
+/** 立即从客资服务拉取新增数据。 */
+export function syncKeziLeads() {
+  return backendRequest<Api.Douyin.LeadSyncResult>({
+    url: `${API_PREFIX}/leads/sync`,
+    method: 'POST'
+  });
+}
+
 /** 获取采集与 ASR 的统一任务队列 */
 export function fetchCollectorTaskQueue(limit = 100) {
   return backendRequest<Api.Douyin.UnifiedCollectorTask[]>({

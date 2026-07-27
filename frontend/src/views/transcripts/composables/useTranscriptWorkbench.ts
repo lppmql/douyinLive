@@ -45,6 +45,30 @@ type TaskStatus = Api.Douyin.TranscriptTask['status'];
 /** 顶部汇总接口只展示四种主状态；cancelled 仍会出现在任务明细中。 */
 type TaskSummaryStatus = 'queued' | 'processing' | 'completed' | 'failed';
 
+function taskPriority(task: Api.Douyin.TranscriptTask): [number, number, number] {
+  const statusPriority: Record<string, number> = {
+    processing: 0,
+    queued: 1,
+    failed: 2,
+    completed: 3,
+    cancelled: 4
+  };
+  return [statusPriority[task.status] ?? 5, task.task_type === 'offline' ? 0 : 1, -task.id];
+}
+
+function isPreferredTask(
+  candidate: Api.Douyin.TranscriptTask,
+  current: Api.Douyin.TranscriptTask
+): boolean {
+  const left = taskPriority(candidate);
+  const right = taskPriority(current);
+  return (
+    left[0] < right[0]
+    || (left[0] === right[0] && left[1] < right[1])
+    || (left[0] === right[0] && left[1] === right[1] && left[2] < right[2])
+  );
+}
+
 // ========== Composable ==========
 
 export function useTranscriptWorkbench() {
@@ -98,17 +122,23 @@ export function useTranscriptWorkbench() {
     sessions.value.find(item => item.id === selectedSessionId.value) || null
   );
 
-  const selectedTask = computed(() =>
-    tasks.value.find(item => item.session_id === selectedSessionId.value) || null
-  );
+  /** 同场可能同时存在直播初稿与下播终稿，统一选出页面应该展示的那一条。 */
+  const taskBySession = computed(() => {
+    const result = new Map<number, Api.Douyin.TranscriptTask>();
+    for (const task of tasks.value) {
+      const current = result.get(task.session_id);
+      if (!current || isPreferredTask(task, current)) result.set(task.session_id, task);
+    }
+    return result;
+  });
+
+  const selectedTask = computed(() => {
+    const sessionId = selectedSessionId.value;
+    return sessionId === null ? null : taskBySession.value.get(sessionId) || null;
+  });
 
   const activeTaskCount = computed(() =>
     taskSummary.value.queued + taskSummary.value.processing
-  );
-
-  /** 场次 ID → 任务映射表（用于下拉选项构建） */
-  const taskBySession = computed(() =>
-    new Map(tasks.value.map(item => [item.session_id, item]))
   );
 
   /** 4 张任务状态卡片配置（含进度信息） */

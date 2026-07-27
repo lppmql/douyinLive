@@ -1,0 +1,245 @@
+"""直播中与下播后必须走不同的 FunASR 协议。"""
+
+from datetime import datetime
+
+from app.api.v1.ws import delete_transcription_task, list_transcript_segments
+from app.models.asr_audio_chunks import AsrAudioChunk
+from app.models.asr_tasks import AsrTask
+from app.models.live_rooms import LiveRoom
+from app.models.live_sessions import LiveSession
+from app.models.transcript_full_texts import TranscriptFullText
+from app.models.transcript_segments import TranscriptSegment
+from app.services.asr.funasr_client import FunasrClient, RealtimeDraftBuffer
+from workers.asr_worker import (
+    AsrWorker,
+    postprocess_status_for_task,
+    segment_type_for_task,
+    should_handoff_realtime_task,
+)
+
+
+def _run_and_read_start_message(task_type: str) -> dict:
+    """纯函数式读取握手配置，测试可以在毫秒内完成。"""
+    return FunasrClient("ws://test.invalid").build_start_message(task_type)
+
+
+def test_live_task_uses_online_protocol():
+    """直播中必须边说边转，不能继续冒充离线任务。"""
+    assert _run_and_read_start_message("realtime")["mode"] == "online"
+
+
+def test_finished_task_uses_offline_protocol():
+    """下播后必须使用离线精修协议。"""
+    assert _run_and_read_start_message("offline")["mode"] == "offline"
+
+
+def test_protocol_rejects_unknown_task_type():
+    """拼错任务类型时立即失败，避免默默走错识别通道。"""
+    client = FunasrClient("ws://test.invalid")
+    try:
+        client.protocol_mode_for("unknown")
+    except ValueError as exc:
+        assert "任务类型" in str(exc)
+    else:
+        raise AssertionError("未知任务类型不应该被接受")
+
+
+def test_live_draft_prefers_corrected_sentence_over_word_fragments():
+    """有停顿修正版时只输出完整句子，不把每个字都写成一条话术。"""
+    buffer = RealtimeDraftBuffer()
+    assert buffer.push({"text": "开零", "segment_start": 0, "segment_end": 1}, "online", 1) is None
+    assert buffer.push({"text": "食店", "segment_start": 1, "segment_end": 2}, "online", 2) is None
+    final = buffer.push(
+        {"text": "开零食店先算预算。", "segment_start": 0, "segment_end": 3},
+        "2pass-offline",
+        3,
+    )
+    assert final["text"] == "开零食店先算预算。"
+    assert final["is_final"] is True
+
+
+def test_live_draft_still_outputs_when_server_only_returns_online_results():
+    """只有 online 响应的服务也必须每 10 秒形成初稿，不能一直显示空白。"""
+    buffer = RealtimeDraftBuffer()
+    assert buffer.push({"text": "先看", "segment_start": 0, "segment_end": 1}, "online", 1) is None
+    draft = buffer.push({"text": "预算", "segment_start": 1, "segment_end": 11}, "online", 11)
+    assert draft["text"] == "先看预算"
+    assert draft["is_final"] is False
+
+
+def test_live_draft_removes_emitted_prefix_across_multiple_flushes():
+    """累计在线响应跨过两次落盘时，第二段只能保存新增后缀。"""
+    buffer = RealtimeDraftBuffer()
+    assert buffer.push({"text": "开零食店先看预算", "segment_start": 0}, "online", 1) is None
+    first = buffer.push(
+        {"text": "开零食店先看预算和选址", "segment_start": 0},
+        "online",
+        11,
+    )
+    assert first["text"] == "开零食店先看预算和选址"
+
+    assert buffer.push(
+        {"text": "开零食店先看预算和选址再看品牌", "segment_start": 0},
+        "online",
+        21,
+    ) is None
+    second = buffer.push(
+        {"text": "开零食店先看预算和选址再看品牌最后算回本", "segment_start": 0},
+        "online",
+        31,
+    )
+
+    assert second["text"] == "再看品牌最后算回本"
+    assert second["segment_start"] == first["segment_end"]
+
+
+def test_queued_live_task_keeps_identity_after_stream_ends():
+    """排队期间下播时要转交新终稿任务，不能把原任务从 realtime 改成 offline。"""
+    assert should_handoff_realtime_task("realtime", "ended") is True
+    assert should_handoff_realtime_task("realtime", "live") is False
+    assert should_handoff_realtime_task("offline", "ended") is False
+
+
+def test_offline_segments_use_hidden_staging_type():
+    """离线分段在整场成功前属于隐藏暂存，实时初稿仍然立即可见。"""
+    assert segment_type_for_task("realtime") == "asr_realtime"
+    assert segment_type_for_task("offline") == "asr_offline_pending"
+
+
+def test_only_offline_final_enters_ai_postprocess():
+    """实时初稿只供直播观察，评分、复盘和知识库必须等待下播终稿。"""
+    assert postprocess_status_for_task("realtime") == "skipped"
+    assert postprocess_status_for_task("offline") == "pending"
+
+
+def test_offline_prepare_keeps_old_full_text_until_atomic_switch(db):
+    """新终稿准备分片时必须保留页面当前可读全文，失败也不能出现空窗。"""
+    room = LiveRoom(account_name="全文保护账号", anchor_name="主播", platform="douyin", status=True)
+    db.add(room)
+    db.flush()
+    session = LiveSession(
+        room_id=room.id,
+        anchor_name="主播",
+        live_status="ended",
+        live_start_time=datetime(2026, 7, 27, 10, 0),
+        live_end_time=datetime(2026, 7, 27, 10, 2),
+        live_duration_seconds=120,
+    )
+    db.add(session)
+    db.flush()
+    task = AsrTask(
+        session_id=session.id,
+        status="processing",
+        task_type="offline",
+        idempotency_key=f"asr:offline:session:{session.id}",
+    )
+    db.add(task)
+    db.add(TranscriptFullText(session_id=session.id, full_text="直播初稿仍然可读"))
+    db.commit()
+
+    chunks = AsrWorker()._prepare_chunks(
+        db,
+        task,
+        session,
+        "https://example.invalid/replay.m3u8",
+    )
+
+    assert len(chunks) == 1
+    assert db.query(TranscriptFullText).filter_by(session_id=session.id).one().full_text == "直播初稿仍然可读"
+
+
+def test_pending_offline_segments_are_hidden_from_rest_page(db):
+    """离线半成品写入数据库用于断点恢复，但普通页面只能看到当前完整版本。"""
+    room = LiveRoom(account_name="暂存隐藏账号", anchor_name="主播", platform="douyin", status=True)
+    db.add(room)
+    db.flush()
+    session = LiveSession(room_id=room.id, anchor_name="主播", live_status="ended")
+    db.add(session)
+    db.flush()
+    db.add_all(
+        [
+            TranscriptSegment(
+                session_id=session.id,
+                text_content="当前可见初稿",
+                segment_type="asr_realtime",
+                asr_status="completed",
+            ),
+            TranscriptSegment(
+                session_id=session.id,
+                text_content="尚未完成的终稿",
+                segment_type="asr_offline_pending",
+                asr_status="processing",
+            ),
+        ]
+    )
+    db.commit()
+
+    result = list_transcript_segments(session.id, limit=200, db=db)
+
+    assert [item["text_content"] for item in result] == ["当前可见初稿"]
+
+
+def test_deleting_failed_offline_task_keeps_realtime_draft(db):
+    """清理失败终稿只能删自己的分片，不能把同场直播初稿一起删除。"""
+    room = LiveRoom(account_name="任务清理账号", anchor_name="主播", platform="douyin", status=True)
+    db.add(room)
+    db.flush()
+    session = LiveSession(room_id=room.id, anchor_name="主播", live_status="ended")
+    db.add(session)
+    db.flush()
+    realtime_task = AsrTask(
+        session_id=session.id,
+        status="completed",
+        task_type="realtime",
+        idempotency_key=f"asr:realtime:session:{session.id}",
+    )
+    offline_task = AsrTask(
+        session_id=session.id,
+        status="failed",
+        task_type="offline",
+        idempotency_key=f"asr:offline:session:{session.id}",
+    )
+    db.add_all([realtime_task, offline_task])
+    db.flush()
+    realtime_chunk = AsrAudioChunk(
+        task_id=realtime_task.id,
+        session_id=session.id,
+        chunk_index=0,
+        start_seconds=0,
+        end_seconds=120,
+        source_url_hash="realtime-source",
+        status="completed",
+    )
+    offline_chunk = AsrAudioChunk(
+        task_id=offline_task.id,
+        session_id=session.id,
+        chunk_index=0,
+        start_seconds=0,
+        end_seconds=120,
+        source_url_hash="offline-source",
+        status="failed",
+    )
+    db.add_all([realtime_chunk, offline_chunk])
+    db.flush()
+    db.add_all(
+        [
+            TranscriptSegment(
+                session_id=session.id,
+                asr_chunk_id=realtime_chunk.id,
+                text_content="必须保留的直播初稿",
+                segment_type="asr_realtime",
+            ),
+            TranscriptSegment(
+                session_id=session.id,
+                asr_chunk_id=offline_chunk.id,
+                text_content="失败的离线半成品",
+                segment_type="asr_offline_pending",
+            ),
+        ]
+    )
+    db.commit()
+
+    delete_transcription_task(offline_task.id, db=db)
+
+    remaining = db.query(TranscriptSegment).all()
+    assert [segment.text_content for segment in remaining] == ["必须保留的直播初稿"]

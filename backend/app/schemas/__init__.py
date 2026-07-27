@@ -255,16 +255,34 @@ class TranscriptSegmentResponse(TranscriptSegmentBase):
 
 # ===== 留资 =====
 class LeadBase(BaseModel):
-    session_id: int = Field(gt=0, description="场次 ID")
+    session_id: Optional[int] = Field(default=None, gt=0, description="真实归属场次 ID")
     lead_name: Optional[str] = Field(default=None, max_length=200, description="留资姓名")
     lead_phone: Optional[str] = Field(default=None, max_length=30, description="留资电话")
+    douyin_id: Optional[str] = Field(default=None, max_length=100, description="客户抖音号")
+    anchor_name: Optional[str] = Field(default=None, max_length=100, description="客资记录的主播")
     lead_source: Optional[str] = Field(default=None, max_length=200, description="留资来源")
+    external_source: Optional[str] = Field(default=None, max_length=50, description="外部来源系统")
+    external_id: Optional[int] = Field(default=None, gt=0, description="外部来源唯一编号")
+    attribution_status: str = Field(default="matched", max_length=20, description="场次归属状态")
     is_valid: int = Field(default=1, ge=0, le=1, description="是否有效")
+    remark: Optional[str] = Field(default=None, max_length=500, description="备注")
     create_time: Optional[datetime] = None
 
 
-class LeadCreate(LeadBase):
-    pass
+class LeadCreate(BaseModel):
+    """人工新增客资只接收业务字段，外部来源编号只能由可信同步服务写入。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: int = Field(gt=0, description="真实归属场次 ID")
+    lead_name: Optional[str] = Field(default=None, max_length=200, description="留资姓名")
+    lead_phone: Optional[str] = Field(default=None, max_length=30, description="留资电话")
+    douyin_id: Optional[str] = Field(default=None, max_length=100, description="客户抖音号")
+    anchor_name: Optional[str] = Field(default=None, max_length=100, description="客资记录的主播")
+    lead_source: Optional[str] = Field(default=None, max_length=200, description="留资来源")
+    is_valid: int = Field(default=1, ge=0, le=1, description="是否有效")
+    remark: Optional[str] = Field(default=None, max_length=500, description="备注")
+    create_time: Optional[datetime] = None
 
 
 class LeadResponse(LeadBase):

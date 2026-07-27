@@ -38,8 +38,9 @@ const missingEnvironment = requiredEnvironment.filter(name => !String(process.en
 if (missingEnvironment.length) {
   throw new Error(`缺少必要环境变量：${missingEnvironment.join(', ')}`);
 }
-if (process.env.KEZI_WRITE_TOKEN.length < 32 || process.env.KEZI_READ_TOKEN.length < 32) {
-  throw new Error('KEZI_WRITE_TOKEN 和 KEZI_READ_TOKEN 必须至少 32 位');
+const secureTokenPattern = /^[\x21-\x7E]{32,}$/;
+if (!secureTokenPattern.test(process.env.KEZI_WRITE_TOKEN) || !secureTokenPattern.test(process.env.KEZI_READ_TOKEN)) {
+  throw new Error('KEZI_WRITE_TOKEN 和 KEZI_READ_TOKEN 必须至少 32 位，且只能使用无空格 ASCII 字符');
 }
 if (process.env.KEZI_WRITE_TOKEN === process.env.KEZI_READ_TOKEN) {
   throw new Error('客资读密钥和写密钥不能相同');
@@ -139,13 +140,11 @@ app.post('/api/kezi', requireToken('KEZI_WRITE_TOKEN'), async (req, res) => {
   } catch (error) {
     return res.status(400).json({ error: error.message });
   }
-  const received = { phone, douyinId, anchor };
-
   if (!isValidPhone(phone)) {
     return res.status(400).json({ error: '手机号格式不正确' });
   }
   if (!phone && !douyinId) {
-    return res.status(200).json({ message: '接收成功（无有效数据，未写入）', received });
+    return res.status(200).json({ message: '接收成功（无有效数据，未写入）' });
   }
 
   try {
@@ -154,7 +153,7 @@ app.post('/api/kezi', requireToken('KEZI_WRITE_TOKEN'), async (req, res) => {
       [phone, douyinId, anchor]
     );
     console.info('客资写入成功');
-    return res.json({ message: '接收成功', received });
+    return res.json({ message: '接收成功' });
   } catch (error) {
     console.error('客资数据库写入失败', { code: error.code || 'UNKNOWN' });
     return res.status(500).json({ error: '服务器内部错误' });
@@ -173,7 +172,8 @@ app.get('/api/douyinhao', requireToken('KEZI_READ_TOKEN'), async (req, res) => {
     return res.status(400).json({ error: error.message });
   }
 
-  const where = ['id > ?', 'douyin_account != ""'];
+  // 手机号或抖音号任意一个存在都是真实留资，不能漏掉“只有手机号”的客户。
+  const where = ['id > ?', '(phone != "" OR douyin_account != "")'];
   const params = [lastId];
   if (anchor) {
     where.push('anchor = ?');

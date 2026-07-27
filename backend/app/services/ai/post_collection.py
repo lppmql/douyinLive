@@ -4,7 +4,6 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.models.analysis_reports import AnalysisReport
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
 from app.services.ai.kb_service import sync_session_to_kb
@@ -44,14 +43,14 @@ def process_session_post_collection(db: Session, session_id: int) -> dict[str, A
         raise ValueError("场次没有已完成的真实话术，暂不能生成复盘")
 
     errors: dict[str, str] = {}
-    existing_score_report = db.query(AnalysisReport).filter(
-        AnalysisReport.session_id == session_id,
-        AnalysisReport.report_type == "speech_score",
-    ).order_by(AnalysisReport.id.desc()).first()
-    score = existing_score_report.report_content if existing_score_report else _run_stage(
-        db, errors, "speech_score", lambda: score_session_transcript(session_id, db)
+    # 最终稿可能替换直播初稿。评分服务会更新已有 speech_score 报告，
+    # 因此每次终稿后处理都要重算，不能复用初稿时代的旧分数。
+    score = _run_stage(
+        db,
+        errors,
+        "speech_score",
+        lambda: score_session_transcript(session_id, db),
     )
-    score_report_count = int(existing_score_report is not None or score is not None)
     findings = _run_stage(db, errors, "review", lambda: generate_findings(db, session_id))
     knowledge = _run_stage(db, errors, "knowledge", lambda: sync_session_to_kb(db, session_id))
     dataease = _run_stage(db, errors, "dataease", lambda: (sync_session(db, session_id), True)[1])
@@ -60,7 +59,7 @@ def process_session_post_collection(db: Session, session_id: int) -> dict[str, A
     result = {
         "session_id": session_id,
         "transcript_count": transcript_count,
-        "speech_score_status": "completed" if score or score_report_count else "skipped",
+        "speech_score_status": "completed" if score else "skipped",
         "speech_score": (score or {}).get("total_score") if isinstance(score, dict) else None,
         "review_finding_count": len(findings or []),
         "knowledge": knowledge or {},
