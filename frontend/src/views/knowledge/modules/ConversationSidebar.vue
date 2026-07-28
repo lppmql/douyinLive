@@ -33,7 +33,8 @@ const emit = defineEmits<{
     <div class="sidebar-body">
       <NSpin :show="loading" size="small">
         <NScrollbar class="sidebar-scroll">
-          <div v-if="!conversations.length && !loading" class="sidebar-empty">
+          <!-- conversations 可能为 null（组件初始化时），加空值保护 -->
+          <div v-if="!conversations || (!conversations.length && !loading)" class="sidebar-empty">
             <SvgIcon icon="mdi:chat-outline" class="text-28px text-gray-300" />
             <span class="text-12px text-gray-400 mt-8px">暂无对话</span>
           </div>
