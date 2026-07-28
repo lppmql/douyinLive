@@ -104,10 +104,9 @@ function handleFeedback(msg: ChatMessage, type: 'like' | 'dislike') {
     <!-- 标题栏 -->
     <div class="chat-header">
       <span class="chat-header__title">直播经营知识问答</span>
-      <NPopconfirm @positive-click="emit('clearConversation')">
+      <NPopconfirm v-if="messages.length" @positive-click="emit('clearConversation')">
         <template #trigger>
           <NButton
-            v-if="messages.length"
             text
             size="small"
             aria-label="清空当前对话"
