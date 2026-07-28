@@ -907,6 +907,33 @@ declare namespace Api {
       updated_at: string;
     }
 
+    /* ---------- 对话历史 ---------- */
+    interface ConversationListItem {
+      id: number;
+      title: string | null;
+      message_count: number;
+      created_at: string | null;
+      updated_at: string | null;
+    }
+
+    interface ConversationMessage {
+      id: number;
+      role: 'user' | 'assistant';
+      content: string;
+      sources: KnowledgeSource[] | null;
+      feedback: 'like' | 'dislike' | null;
+      error: boolean;
+      created_at: string | null;
+    }
+
+    interface ConversationDetail {
+      id: number;
+      title: string | null;
+      messages: ConversationMessage[];
+      created_at: string | null;
+      updated_at: string | null;
+    }
+
     /* ---------- 刷新数据采集 ---------- */
     interface CollectRoomResult {
       room_id: string;

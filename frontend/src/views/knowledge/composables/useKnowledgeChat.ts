@@ -1,13 +1,17 @@
 /**
- * 知识库 — 聊天状态与操作管理
+ * 知识库 — 聊天状态与操作管理（2026-07-28 方案 C 升级）
  *
- * 职责：管理对话消息、发送问题、清空对话、复制文本。
- * 滚动逻辑由 ChatPanel 子组件自行管理。
+ * 新增：
+ * - 对话持久化（自动保存到后端）
+ * - 停止生成（AbortController）
+ * - 反馈（赞/踩）
+ * - 对话历史管理集成
  */
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useMessage } from 'naive-ui';
-import { askKnowledgeStream } from '@/service/api/douyin';
+import { askKnowledgeStream, setMessageFeedback } from '@/service/api/douyin';
+import { useConversations } from './useConversations';
 
 export type ChatMessage = {
   id: number;
@@ -17,11 +21,18 @@ export type ChatMessage = {
   error?: boolean;
   /** 消息发送时间（用户消息专用），格式如 "14:30" */
   timestamp?: string;
+  /** 赞/踩反馈 */
+  feedback?: 'like' | 'dislike' | null;
+  /** 后端消息 ID（用于反馈 API） */
+  backendMsgId?: number;
 };
 
 export function useKnowledgeChat() {
   const message = useMessage();
   const route = useRoute();
+
+  /* ===== 对话历史管理 ===== */
+  const conv = useConversations();
 
   /* ===== 状态 ===== */
   const question = ref('');
@@ -38,6 +49,9 @@ export function useKnowledgeChat() {
   const activeSources = ref<Api.Douyin.KnowledgeSource[]>([]);
   const activeSourceMsgId = ref<number | null>(null);
 
+  /** 流式取消控制器 */
+  let streamAbortController: AbortController | null = null;
+
   /* ===== 自动选中最后一条带来源的消息 ===== */
   watch(messages, () => {
     const lastWithSources = [...messages.value].reverse().find(m => m.role === 'ai' && m.sources?.length);
@@ -48,9 +62,9 @@ export function useKnowledgeChat() {
   }, { deep: true });
 
   /** 手动选择某条消息的来源 */
-  function selectSources(chatMessage: ChatMessage) {
-    activeSources.value = chatMessage.sources || [];
-    activeSourceMsgId.value = chatMessage.id;
+  function selectSources(chatMsg: ChatMessage) {
+    activeSources.value = chatMsg.sources || [];
+    activeSourceMsgId.value = chatMsg.id;
   }
 
   /* ===== 发送问题（流式） ===== */
@@ -58,7 +72,6 @@ export function useKnowledgeChat() {
     const content = (preset || question.value).trim();
     if (!content || chatting.value) return;
 
-    // 1. 先显示用户消息（带当前时间）
     console.log('[sendQuestion] 开始发送:', content.slice(0, 30));
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -66,16 +79,18 @@ export function useKnowledgeChat() {
     question.value = '';
     chatting.value = true;
 
-    // 2. 创建一个空的 AI 消息占位（内容会在流式回调中逐字填充）
+    // 创建 AbortController
+    streamAbortController = new AbortController();
+
+    // 创建空 AI 消息占位
     const aiMsgId = ++messageId;
     messages.value.push({
       id: aiMsgId,
       role: 'ai',
-      content: '',       // 空内容，token 到达后逐字追加
+      content: '',
       sources: [],
     });
 
-    /** 通过 messages 响应式数组获取 AI 消息引用（确保修改能被 Vue 追踪到） */
     const getAiMsg = (): ChatMessage | undefined =>
       messages.value.find(m => m.id === aiMsgId);
 
@@ -87,12 +102,10 @@ export function useKnowledgeChat() {
       await askKnowledgeStream(
         knowledgeQuestion,
         {
-          // 每收到一个文字片段，追加到消息内容
           onToken(token: string) {
             const msg = getAiMsg();
             if (msg) msg.content += token;
           },
-          // 流结束，设置引用来源
           onDone(sources, _hasResult) {
             const msg = getAiMsg();
             if (!msg) return;
@@ -104,8 +117,10 @@ export function useKnowledgeChat() {
               activeSources.value = msg.sources;
               activeSourceMsgId.value = msg.id;
             }
+
+            // 🆕 持久化：保存用户问题和 AI 回答到后端
+            saveMessages(content, msg.content, sources);
           },
-          // 流中出错
           onError(errorMsg: string) {
             const msg = getAiMsg();
             if (msg) {
@@ -113,9 +128,25 @@ export function useKnowledgeChat() {
               msg.error = true;
             }
           },
-        }
+        },
+        undefined,
+        // 历史消息转换为后端期望的格式 { role, content }
+        // slice(0, -1)：排除最后一条 AI 占位消息，不把自己的空内容传给后端当上下文
+        messages.value.slice(0, -1).map(m => ({
+          role: m.role === 'ai' ? 'assistant' as const : 'user' as const,
+          content: m.content,
+        })),
       );
-    } catch (error) {
+    } catch (error: any) {
+      // AbortController 主动取消不算错误
+      if (error?.name === 'AbortError' || error?.name === 'CanceledError') {
+        const msg = getAiMsg();
+        if (msg && !msg.content) {
+          msg.content = '已停止生成。';
+        }
+        return;
+      }
+
       console.error('[sendQuestion] 异常:', error);
       const msg = getAiMsg();
       if (msg) {
@@ -124,7 +155,41 @@ export function useKnowledgeChat() {
       }
     } finally {
       chatting.value = false;
+      streamAbortController = null;
     }
+  }
+
+  /** 🆕 持久化保存消息到后端 */
+  async function saveMessages(
+    questionText: string,
+    aiAnswer: string,
+    sources?: Api.Douyin.KnowledgeSource[],
+  ) {
+    try {
+      if (conv.activeConvId.value) {
+        // 已有对话：追加消息
+        await conv.appendMessages(conv.activeConvId.value, questionText, aiAnswer, sources);
+      } else {
+        // 新对话：创建对话 + 保存
+        const newId = await conv.createConvWithFirstMsg(questionText, aiAnswer, sources);
+        if (newId) {
+          // 更新消息列表中 AI 消息的 backend ID（以便后续反馈）
+          const lastAi = [...messages.value].reverse().find(m => m.role === 'ai');
+          if (lastAi) {
+            lastAi.backendMsgId = undefined; // 新对话时消息 ID 会变化
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[saveMessages] 保存失败:', err);
+      // 不影响用户体验，静默失败
+    }
+  }
+
+  /* ===== 停止生成 ===== */
+  function stopGeneration() {
+    streamAbortController?.abort();
+    chatting.value = false;
   }
 
   /* ===== 键盘事件 ===== */
@@ -139,13 +204,40 @@ export function useKnowledgeChat() {
     messages.value = [];
     activeSources.value = [];
     activeSourceMsgId.value = null;
+    conv.startNewConversation();
     message.success('对话已清空');
+  }
+
+  /* ===== 🆕 反馈（赞/踩） ===== */
+  async function handleFeedback(chatMsg: ChatMessage, type: 'like' | 'dislike') {
+    // 更新本地状态
+    chatMsg.feedback = type === chatMsg.feedback ? null : type; // 再次点击取消
+    message.success(chatMsg.feedback ? (type === 'like' ? '已点赞' : '已点踩') : '已取消反馈');
+
+    // 如果知道后端消息 ID，同步到后端
+    if (chatMsg.backendMsgId && conv.activeConvId.value && chatMsg.feedback) {
+      try {
+        await setMessageFeedback(conv.activeConvId.value, chatMsg.backendMsgId, chatMsg.feedback);
+      } catch (err) {
+        console.error('[handleFeedback] 后端同步失败:', err);
+      }
+    }
   }
 
   /* ===== 复制文本 ===== */
   async function copyText(content: string) {
     await navigator.clipboard.writeText(content);
     message.success('已复制');
+  }
+
+  /* ===== 🆕 加载历史对话 ===== */
+  async function loadConversation(convId: number) {
+    const msgs = await conv.selectConversation(convId);
+    if (msgs.length) {
+      messages.value = msgs;
+      // 恢复 messageId 计数器
+      messageId = Math.max(...msgs.map(m => m.id), 0) + 1;
+    }
   }
 
   return {
@@ -156,11 +248,23 @@ export function useKnowledgeChat() {
     messages,
     activeSources,
     activeSourceMsgId,
+    // 🆕 对话历史
+    conversations: conv.conversations,
+    activeConvId: conv.activeConvId,
+    listLoading: conv.listLoading,
+    detailLoading: conv.detailLoading,
     // 方法
     selectSources,
     sendQuestion,
+    stopGeneration,
     handleQuestionKeydown,
     clearConversation,
-    copyText
+    handleFeedback,
+    copyText,
+    // 🆕 对话管理
+    loadConversations: conv.loadConversations,
+    loadConversation,
+    startNewConversation: conv.startNewConversation,
+    removeConversation: conv.removeConversation,
   };
 }

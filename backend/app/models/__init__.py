@@ -23,6 +23,7 @@ from app.models.user import User
 from app.models.review import ReviewFinding, ReviewActionItem, ScriptAsset, ComplianceRule
 from app.models.ai_call_traces import AiCallTrace
 from app.models.collector_module_states import CollectorModuleState
+from app.models.conversations import Conversation, ConversationMessage
 
 __all__ = [
     "Base",
@@ -53,4 +54,6 @@ __all__ = [
     "ComplianceRule",
     "AiCallTrace",
     "CollectorModuleState",
+    "Conversation",
+    "ConversationMessage",
 ]

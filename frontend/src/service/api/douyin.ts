@@ -733,6 +733,60 @@ export function syncRecentKnowledge(limit = 20) {
   });
 }
 
+/* ---------- 对话历史 ---------- */
+
+/** 获取对话列表 */
+export function fetchConversations() {
+  return backendRequest<Api.Douyin.ConversationListItem[]>({
+    url: `${API_PREFIX}/ai/conversations`
+  });
+}
+
+/** 新建对话 */
+export function createConversation(title?: string, firstMessage?: string) {
+  return backendRequest<Api.Douyin.ConversationDetail>({
+    url: `${API_PREFIX}/ai/conversations`,
+    method: 'POST',
+    data: { title, first_message: firstMessage }
+  });
+}
+
+/** 获取对话详情（含消息列表） */
+export function fetchConversationDetail(convId: number) {
+  return backendRequest<Api.Douyin.ConversationDetail>({
+    url: `${API_PREFIX}/ai/conversations/${convId}`
+  });
+}
+
+/** 删除对话 */
+export function deleteConversation(convId: number) {
+  return backendRequest<{ ok: boolean; deleted_id: number }>({
+    url: `${API_PREFIX}/ai/conversations/${convId}`,
+    method: 'DELETE'
+  });
+}
+
+/** 向对话追加消息（用户问题 + AI 回答） */
+export function appendConversationMessages(
+  convId: number,
+  data: { question: string; ai_answer: string; sources?: Api.Douyin.KnowledgeSource[] }
+) {
+  return backendRequest<{ ok: boolean; conv_id: number; user_msg_id: number; ai_msg_id: number }>({
+    url: `${API_PREFIX}/ai/conversations/${convId}/messages`,
+    method: 'POST',
+    data
+  });
+}
+
+/** 给消息反馈（赞/踩） */
+export function setMessageFeedback(convId: number, msgId: number, feedback: 'like' | 'dislike') {
+  return backendRequest<{ ok: boolean; feedback: string }>({
+    url: `${API_PREFIX}/ai/conversations/${convId}/messages/${msgId}/feedback`,
+    method: 'POST',
+    data: { feedback }
+  });
+}
+
 /** 获取提示词模板列表 */
 export function fetchPrompts(type?: string) {
   return backendRequest<Api.Douyin.PromptTemplate[]>({ url: `${API_PREFIX}/ai/prompts/`, params: { type } });

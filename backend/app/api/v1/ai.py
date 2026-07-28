@@ -2,7 +2,7 @@
 import json
 import logging
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request as FastapiRequest
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -19,6 +19,7 @@ from app.services.ai.post_collection import process_session_post_collection
 from app.models.analysis_reports import AnalysisReport
 from app.models.live_sessions import LiveSession
 from app.models.comments import Comment
+from app.models.conversations import Conversation, ConversationMessage
 from app.models.transcript_segments import TranscriptSegment
 from app.schemas.ai import (
     AiTestResponse,
@@ -33,6 +34,13 @@ from app.schemas.ai import (
     AiQaResponse,
     AiKbSaveResponse,
     AiKbSyncRecentResponse,
+)
+from app.schemas.conversations import (
+    ConversationListItem,
+    ConversationDetail,
+    ConversationCreateRequest,
+    ConversationDeleteResponse,
+    FeedbackRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -355,3 +363,140 @@ def sync_recent_to_knowledge_base(
         for key, value in result.items():
             totals[key] += value
     return {"status": "ok", "session_count": len(sessions), **totals}
+
+
+# ── 对话历史管理 ──
+
+
+@router.get("/conversations", response_model=list[ConversationListItem])
+def list_conversations(db: Session = Depends(get_db)):
+    """获取所有对话列表（按更新时间倒序，最新在前）"""
+    conversations = (
+        db.query(Conversation)
+        .order_by(Conversation.updated_at.desc())
+        .all()
+    )
+    return conversations
+
+
+@router.post("/conversations", response_model=ConversationDetail)
+def create_conversation(req: ConversationCreateRequest, db: Session = Depends(get_db)):
+    """新建对话（可带首条消息）
+
+    如果 first_message 不为空，会自动创建对话并添加首条用户消息。
+    """
+    title = req.title or (req.first_message[:50] if req.first_message else "新对话")
+    conv = Conversation(title=title, message_count=1 if req.first_message else 0)
+    db.add(conv)
+    db.flush()  # 获取 conv.id
+
+    if req.first_message:
+        msg = ConversationMessage(
+            conversation_id=conv.id,
+            role="user",
+            content=req.first_message,
+        )
+        db.add(msg)
+
+    db.commit()
+    db.refresh(conv)
+
+    # 返回详情格式
+    return ConversationDetail(
+        id=conv.id,
+        title=conv.title,
+        messages=[
+            {
+                "id": conv.messages[0].id,
+                "role": conv.messages[0].role,
+                "content": conv.messages[0].content,
+                "sources": None,
+                "feedback": None,
+                "error": False,
+                "created_at": conv.messages[0].created_at,
+            }
+        ] if conv.messages else [],
+        created_at=conv.created_at,
+        updated_at=conv.updated_at,
+    )
+
+
+@router.get("/conversations/{conv_id}", response_model=ConversationDetail)
+def get_conversation(conv_id: int, db: Session = Depends(get_db)):
+    """获取对话详情（含所有消息）"""
+    conv = db.get(Conversation, conv_id)
+    if not conv:
+        raise HTTPException(404, "对话不存在")
+    return conv
+
+
+@router.delete("/conversations/{conv_id}", response_model=ConversationDeleteResponse)
+def delete_conversation(conv_id: int, db: Session = Depends(get_db)):
+    """删除对话（级联删除所有消息）"""
+    conv = db.get(Conversation, conv_id)
+    if not conv:
+        raise HTTPException(404, "对话不存在")
+    db.delete(conv)
+    db.commit()
+    return ConversationDeleteResponse(deleted_id=conv_id)
+
+
+@router.post("/conversations/{conv_id}/messages/{msg_id}/feedback")
+def set_message_feedback(
+    conv_id: int,
+    msg_id: int,
+    req: FeedbackRequest,
+    db: Session = Depends(get_db),
+):
+    """给某条助手消息点赞或踩"""
+    msg = db.get(ConversationMessage, msg_id)
+    if not msg or msg.conversation_id != conv_id:
+        raise HTTPException(404, "消息不存在")
+    if msg.role != "assistant":
+        raise HTTPException(400, "只能给 AI 回答反馈")
+    msg.feedback = req.feedback
+    db.commit()
+    return {"ok": True, "feedback": req.feedback}
+
+
+class AppendMessagesRequest(BaseModel):
+    """追加消息请求体（2026-07-28 方案 C）"""
+    question: str = Field(min_length=1, max_length=2000)
+    ai_answer: str = Field(min_length=1, max_length=8000)
+    sources: list[dict] | None = None
+
+
+@router.post("/conversations/{conv_id}/messages")
+async def append_messages(conv_id: int, req: AppendMessagesRequest, db: Session = Depends(get_db)):
+    """向对话追加用户消息和 AI 回答"""
+    conv = db.get(Conversation, conv_id)
+    if not conv:
+        raise HTTPException(404, "对话不存在")
+
+    question = req.question.strip()
+    ai_answer = req.ai_answer.strip()
+
+    # 保存用户消息
+    user_msg = ConversationMessage(
+        conversation_id=conv_id,
+        role="user",
+        content=question,
+    )
+    db.add(user_msg)
+
+    # 保存 AI 回答
+    ai_msg = ConversationMessage(
+        conversation_id=conv_id,
+        role="assistant",
+        content=ai_answer,
+        sources=req.sources,
+    )
+    db.add(ai_msg)
+
+    # 更新对话：标题取第一条用户消息，消息数+2
+    if not conv.title or conv.title == "新对话":
+        conv.title = question[:50]
+    conv.message_count = (conv.message_count or 0) + 2
+
+    db.commit()
+    return {"ok": True, "conv_id": conv_id, "user_msg_id": user_msg.id, "ai_msg_id": ai_msg.id}
