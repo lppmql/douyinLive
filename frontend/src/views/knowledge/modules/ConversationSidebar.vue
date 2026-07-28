@@ -119,6 +119,14 @@ const emit = defineEmits<{
   overflow: hidden;
 }
 
+/* 修复 NSpin 包裹导致的高度断裂：
+   NSpin 渲染 .n-spin-container > .n-spin-content，两者默认高度都由内容决定，
+   必须逐层传递 100% 高度，里面的 NScrollbar (height:100%) 才能拿到正确高度 */
+.sidebar-body :deep(.n-spin-container),
+.sidebar-body :deep(.n-spin-content) {
+  height: 100%;
+}
+
 .sidebar-scroll {
   height: 100%;
 }
