@@ -28,6 +28,9 @@
 ### Changed
 - 知识库页面布局从双栏 → 三栏（侧边栏 + 聊天 + 来源）
 - `ChatPanel.vue` 重写（约 400 行），移除微信绿色调
+
+### Fixed
+- **对话侧边栏高度自适应**：NSpin 组件的两层内部容器（`.n-spin-container`、`.n-spin-content`）阻断了高度传递链，导致 NScrollbar 只有内容高度（134px）而非容器高度（614px），多对话时滚动条不出现。修复方式：用 `:deep()` 穿透样式，逐层设置 `height: 100%`
 - `useKnowledgeChat.ts` 集成对话持久化和反馈功能
 
 ## [2026-07-27]
