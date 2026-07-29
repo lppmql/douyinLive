@@ -58,7 +58,7 @@ cd frontend && pnpm install && cd ..
 | Prometheus | http://localhost:9090（可选） |
 | Grafana | http://localhost:3000（可选） |
 
-> 首次使用建议先看[新手图文教程](docs/beginner-guide.md)。
+> 首次使用建议先看[新手上手指南](docs/beginner-guide.md)。
 
 ## 核心功能
 
@@ -98,10 +98,10 @@ douyinLive/
 | [开发指南](docs/开发.md) | 环境搭建、项目结构、开发流程、代码规范 |
 | [部署指南](docs/部署.md) | 首次部署、发布流程、回滚、备份 |
 | [故障排查](docs/故障排查.md) | 常见问题按症状→诊断→解决排查 |
-| [架构决策 (ADR)](docs/adr/) | 关键技术方案选型与原因 |
+| [架构决策 (ADR)](docs/adr/README.md) | 关键技术方案选型与原因 |
 | [架构文档](docs/架构/说明.md) | 架构导航与维护路线 |
 | [验收测试](docs/验收测试/) | 功能验收规程与自检报告 |
-| [新手教程](docs/beginner-guide.md) | 图文操作步骤 |
+| [新手上手指南](docs/beginner-guide.md) | 启动、登录、采集和排错的第一条路线 |
 | [CHANGELOG](CHANGELOG.md) | 版本变更记录 |
 
 ## 数据安全
