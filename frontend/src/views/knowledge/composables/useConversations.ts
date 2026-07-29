@@ -13,8 +13,30 @@ import {
   deleteConversation,
   appendConversationMessages,
 } from '@/service/api/douyin';
+import { unwrapServiceData } from '@/utils/service';
 import { formatRelativeTime } from '@/utils/format';
 import type { ChatMessage } from './useKnowledgeChat';
+
+function toChatRole(role: string): ChatMessage['role'] {
+  // 后端保存 AI 消息时使用 assistant，前端聊天气泡只认识 ai。
+  // 这里集中转换，避免历史消息加载后被当成用户消息显示。
+  return role === 'assistant' || role === 'ai' ? 'ai' : 'user';
+}
+
+function toChatMessage(msg: Api.Douyin.ConversationMessage): ChatMessage {
+  return {
+    id: msg.id,
+    role: toChatRole(msg.role),
+    content: msg.content,
+    sources: (msg.sources as Api.Douyin.KnowledgeSource[]) || [],
+    error: msg.error,
+    feedback: msg.feedback as ChatMessage['feedback'],
+    backendMsgId: msg.id,
+    timestamp: msg.created_at
+      ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+      : undefined,
+  };
+}
 
 export function useConversations() {
   const message = useMessage();
@@ -32,11 +54,11 @@ export function useConversations() {
   async function loadConversations() {
     listLoading.value = true;
     try {
-      const data = await fetchConversations();
-      // backendRequest 返回 FlatResponseData（联合类型），但运行时实际返回 T
-      conversations.value = (data as Api.Douyin.ConversationListItem[] | null) || [];
+      const response = await fetchConversations();
+      conversations.value = unwrapServiceData(response, '对话列表为空');
     } catch (err) {
       console.error('[useConversations] 加载对话列表失败:', err);
+      conversations.value = [];
     } finally {
       listLoading.value = false;
     }
@@ -47,24 +69,9 @@ export function useConversations() {
     activeConvId.value = convId;
     detailLoading.value = true;
     try {
-      const raw = await fetchConversationDetail(convId);
-      // 运行时实际返回 ConversationDetail
-      const detail = raw as Api.Douyin.ConversationDetail | null;
-      if (!detail) {
-        message.error('对话不存在');
-        return [];
-      }
-      // 把后端消息格式转为前端 ChatMessage 格式
-      return (detail.messages || []).map((msg: Api.Douyin.ConversationMessage) => ({
-        id: msg.id,
-        role: msg.role as 'user' | 'ai',
-        content: msg.content,
-        sources: (msg.sources as Api.Douyin.KnowledgeSource[]) || [],
-        error: msg.error,
-        timestamp: msg.created_at
-          ? new Date(msg.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-          : undefined,
-      }));
+      const response = await fetchConversationDetail(convId);
+      const detail = unwrapServiceData(response, '对话不存在');
+      return (detail.messages || []).map(toChatMessage);
     } catch (err) {
       console.error('[useConversations] 加载对话详情失败:', err);
       message.error('加载对话失败');
@@ -99,39 +106,37 @@ export function useConversations() {
     firstMessage: string,
     aiAnswer: string,
     sources?: Api.Douyin.KnowledgeSource[]
-  ): Promise<number> {
+  ): Promise<{ convId: number; aiMsgId?: number }> {
     try {
-      // 1. 创建对话（带首条用户消息）
+      // 1. 先创建空对话并设置标题；问答内容统一交给追加接口保存。
+      // 这样可以避免首条用户问题被“创建对话”和“追加消息”各保存一次。
       const raw = await createConversation(
-        firstMessage.slice(0, 50), // 标题 = 前50字
-        firstMessage
+        firstMessage.slice(0, 50) // 标题 = 前50字
       );
-      const conv = raw as Api.Douyin.ConversationDetail | null;
-      if (!conv) return 0;
+      const conv = unwrapServiceData(raw, '创建对话失败');
       activeConvId.value = conv.id;
+      let aiMsgId: number | undefined;
 
       // 2. 追加 AI 回答
       if (aiAnswer) {
-        const appendResult = await appendConversationMessages(conv.id, {
+        const appendResponse = await appendConversationMessages(conv.id, {
           question: firstMessage,
           ai_answer: aiAnswer,
           sources,
         });
         // 更新消息列表中的消息 ID（用于后续反馈）
-        if (appendResult) {
-          const result = appendResult as { ai_msg_id?: number };
-          if (result.ai_msg_id) {
-            return conv.id;
-          }
+        const appendResult = unwrapServiceData(appendResponse, '保存 AI 回答失败');
+        if (appendResult.ai_msg_id) {
+          aiMsgId = appendResult.ai_msg_id;
         }
       }
 
       // 3. 刷新列表
       await loadConversations();
-      return conv.id;
+      return { convId: conv.id, aiMsgId };
     } catch (err) {
       console.error('[useConversations] 创建对话失败:', err);
-      return 0;
+      return { convId: 0 };
     }
   }
 
@@ -141,13 +146,16 @@ export function useConversations() {
     question: string,
     aiAnswer: string,
     sources?: Api.Douyin.KnowledgeSource[]
-  ) {
+  ): Promise<number | undefined> {
     try {
-      await appendConversationMessages(convId, { question, ai_answer: aiAnswer, sources });
+      const response = await appendConversationMessages(convId, { question, ai_answer: aiAnswer, sources });
+      const data = unwrapServiceData(response, '保存对话消息失败');
       // 刷新列表以更新 message_count
       await loadConversations();
+      return data.ai_msg_id;
     } catch (err) {
       console.error('[useConversations] 追加消息失败:', err);
+      return undefined;
     }
   }
 

@@ -1,4 +1,5 @@
-<!-- 知识库 — 聊天面板（2026-07-28 方案 C 全面升级）
+<!--
+ 知识库 — 聊天面板（2026-07-28 方案 C 全面升级）
 
   升级内容：
   - Markdown 渲染（markdown-it）
@@ -14,7 +15,7 @@
   - 无障碍 aria-label
 -->
 <script setup lang="ts">
-import { computed, nextTick, ref, watch, onBeforeUnmount } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { NButton, NInput, NScrollbar, NAlert, NPopconfirm } from 'naive-ui';
 import type { ChatMessage } from '../composables/useKnowledgeChat';
 import { renderMarkdown } from '../adapters/markdown-renderer';
@@ -331,8 +332,8 @@ function handleFeedback(msg: ChatMessage, type: 'like' | 'dislike') {
           type="warning"
           size="small"
           round
-          @click="handleStop"
           aria-label="停止生成"
+          @click="handleStop"
         >
           <template #icon><SvgIcon icon="mdi:stop" /></template>
           停止生成

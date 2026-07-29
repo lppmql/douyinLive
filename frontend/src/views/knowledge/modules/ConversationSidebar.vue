@@ -5,7 +5,7 @@ import { formatRelativeTime } from '@/utils/format';
 
 defineOptions({ name: 'KnowledgeConversationSidebar' });
 
-const props = defineProps<{
+defineProps<{
   conversations: Api.Douyin.ConversationListItem[];
   activeConvId: number | null;
   loading: boolean;
@@ -23,7 +23,7 @@ const emit = defineEmits<{
     <!-- 标题栏 -->
     <div class="sidebar-header">
       <span class="sidebar-header__title">对话历史</span>
-      <NButton type="primary" size="small" round @click="emit('new')" aria-label="新建对话">
+      <NButton type="primary" size="small" round aria-label="新建对话" @click="emit('new')">
         <template #icon><SvgIcon icon="mdi:plus" /></template>
         新建
       </NButton>

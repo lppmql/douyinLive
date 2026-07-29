@@ -119,7 +119,7 @@ export function useKnowledgeChat() {
             }
 
             // 🆕 持久化：保存用户问题和 AI 回答到后端
-            saveMessages(content, msg.content, sources);
+            saveMessages(content, msg.content, sources, msg);
           },
           onError(errorMsg: string) {
             const msg = getAiMsg();
@@ -164,19 +164,24 @@ export function useKnowledgeChat() {
     questionText: string,
     aiAnswer: string,
     sources?: Api.Douyin.KnowledgeSource[],
+    targetAiMsg?: ChatMessage,
   ) {
     try {
       if (conv.activeConvId.value) {
         // 已有对话：追加消息
-        await conv.appendMessages(conv.activeConvId.value, questionText, aiAnswer, sources);
+        const aiMsgId = await conv.appendMessages(conv.activeConvId.value, questionText, aiAnswer, sources);
+        // 只回填本次生成的 AI 消息，避免保存期间用户切换对话后写到别的消息上。
+        if (targetAiMsg && aiMsgId) {
+          targetAiMsg.backendMsgId = aiMsgId;
+        }
       } else {
         // 新对话：创建对话 + 保存
-        const newId = await conv.createConvWithFirstMsg(questionText, aiAnswer, sources);
-        if (newId) {
+        const { convId, aiMsgId } = await conv.createConvWithFirstMsg(questionText, aiAnswer, sources);
+        if (convId) {
           // 更新消息列表中 AI 消息的 backend ID（以便后续反馈）
-          const lastAi = [...messages.value].reverse().find(m => m.role === 'ai');
-          if (lastAi) {
-            lastAi.backendMsgId = undefined; // 新对话时消息 ID 会变化
+          // 只回填本次生成的 AI 消息，避免保存期间用户切换对话后写到别的消息上。
+          if (targetAiMsg) {
+            targetAiMsg.backendMsgId = aiMsgId;
           }
         }
       }
@@ -233,11 +238,12 @@ export function useKnowledgeChat() {
   /* ===== 🆕 加载历史对话 ===== */
   async function loadConversation(convId: number) {
     const msgs = await conv.selectConversation(convId);
-    if (msgs.length) {
-      messages.value = msgs;
-      // 恢复 messageId 计数器
-      messageId = Math.max(...msgs.map(m => m.id), 0) + 1;
-    }
+    // 即使后端返回空消息，也要清空当前聊天区，避免旧对话内容残留。
+    messages.value = msgs;
+    activeSources.value = [];
+    activeSourceMsgId.value = null;
+    // 恢复 messageId 计数器；空对话从 0 重新开始。
+    messageId = msgs.length ? Math.max(...msgs.map(m => m.id), 0) + 1 : 0;
   }
 
   return {
