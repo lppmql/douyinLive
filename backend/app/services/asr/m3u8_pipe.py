@@ -5,6 +5,7 @@ ffmpeg pipe 管理器 — 将 m3u8 直播流转为 16kHz PCM 流
 按帧（60ms = 960 samples = 1920 bytes）切分 yield 给调用方。
 """
 import asyncio
+import re
 from typing import AsyncGenerator, Optional
 
 from app.core.config import settings
@@ -15,6 +16,12 @@ PCM_FRAME_MS = 60           # 每帧 60ms
 PCM_SAMPLE_RATE = 16000     # 16kHz
 PCM_SAMPLE_BYTES = 2        # s16le = 2 字节/采样
 PCM_FRAME_SIZE = int(PCM_SAMPLE_RATE * PCM_FRAME_MS / 1000 * PCM_SAMPLE_BYTES)  # 1920 bytes
+
+
+def sanitize_ffmpeg_error(stderr: str) -> str:
+    """清理 ffmpeg 错误，避免把带签名参数的真实流地址写入数据库。"""
+    cleaned = re.sub(r"https?://\S+", "[流地址已隐藏]", stderr or "")
+    return cleaned.strip()[:500]
 
 
 class M3u8Pipe:
@@ -42,6 +49,9 @@ class M3u8Pipe:
             max(0.1, float(duration_seconds)) if duration_seconds is not None else None
         )
         self._process: Optional[asyncio.subprocess.Process] = None
+        # 保存 ffmpeg 最近一次 stderr。Worker 会把它拼到任务失败原因里，
+        # 这样前端任务抽屉能直接看到 404、403、流失效等真实原因。
+        self.last_error_message: str = ""
 
     def _build_cmd(self) -> list[str]:
         """构建 ffmpeg 命令"""
@@ -114,7 +124,8 @@ class M3u8Pipe:
             await self._cleanup()
             stderr = await self._process.stderr.read()
             if stderr:
-                logger.warning(f"ffmpeg stderr: {stderr.decode(errors='ignore')[:200]}")
+                self.last_error_message = sanitize_ffmpeg_error(stderr.decode(errors="ignore"))
+                logger.warning(f"ffmpeg stderr: {self.last_error_message[:200]}")
 
         except asyncio.CancelledError:
             logger.info("ffmpeg pipe 被取消")

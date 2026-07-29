@@ -11,9 +11,9 @@ from app.services.asr.queue import (
     requeue_offline_task_for_live_priority,
     reset_failed_task_for_retry,
 )
-from app.services.asr.m3u8_pipe import M3u8Pipe
+from app.services.asr.m3u8_pipe import M3u8Pipe, sanitize_ffmpeg_error
 from app.services.tasks import runtime
-from workers.asr_worker import is_full_text_too_long_error
+from workers.asr_worker import build_chunk_failure_message, is_full_text_too_long_error
 
 
 def test_build_chunk_ranges_covers_real_duration_without_overlap():
@@ -228,6 +228,50 @@ def test_m3u8_pipe_adds_seek_and_duration_for_offline_chunk():
     assert command[command.index("-ss") + 1] == "300.000"
     assert command[command.index("-t") + 1] == "120.000"
     assert "https://example.invalid/real-playback.m3u8" in command
+
+
+def test_chunk_failure_message_includes_ffmpeg_stream_error():
+    """空音频失败要把 ffmpeg 的真实 404/403 原因带到任务抽屉。"""
+    pipe = SimpleNamespace(
+        last_error_message=(
+            "Error opening input: Server returned 404 Not Found\n"
+            "Error opening input file https://pull-flv.example.invalid/expired.flv"
+        )
+    )
+
+    message = build_chunk_failure_message(
+        RuntimeError("真实流未输出任何音频帧，请刷新流地址后从断点重试"),
+        pipe,
+    )
+
+    assert "真实流未输出任何音频帧" in message
+    assert "ffmpeg 错误" in message
+    assert "404 Not Found" in message
+
+
+def test_ffmpeg_error_hides_signed_stream_url():
+    """ffmpeg 错误可用于排查，但不能把带 sign 的真实流地址写进数据库。"""
+    message = sanitize_ffmpeg_error(
+        "Error opening input: Server returned 404 Not Found\n"
+        "Error opening input file https://pull-flv.example.invalid/live.flv?expire=1&sign=secret"
+    )
+
+    assert "404 Not Found" in message
+    assert "https://" not in message
+    assert "sign=secret" not in message
+    assert "[流地址已隐藏]" in message
+
+
+def test_chunk_failure_message_is_truncated_for_database_field():
+    """错误信息要限制长度，避免长 URL 或长日志撑爆数据库字段。"""
+    pipe = SimpleNamespace(last_error_message="x" * 1000)
+
+    message = build_chunk_failure_message(
+        RuntimeError("真实流未输出任何音频帧，请刷新流地址后从断点重试"),
+        pipe,
+    )
+
+    assert len(message) == 500
 
 
 def test_synthetic_data_requires_all_explicit_switches():

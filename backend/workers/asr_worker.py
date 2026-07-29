@@ -37,7 +37,7 @@ from app.services.asr.chunks import (
     next_live_chunk_range,
     reconcile_existing_chunks,
 )
-from app.services.asr.m3u8_pipe import M3u8Pipe
+from app.services.asr.m3u8_pipe import M3u8Pipe, sanitize_ffmpeg_error
 from app.services.asr.funasr_client import FunasrClient
 from app.services.asr.queue import (
     list_queued_task_ids_latest_first,
@@ -86,6 +86,20 @@ def should_handoff_realtime_task(task_type: str, live_status: str) -> bool:
 def postprocess_status_for_task(task_type: str) -> str:
     """直播初稿不生成最终复盘，只有下播终稿进入 AI 后处理。"""
     return TaskStatus.PENDING if task_type == "offline" else "skipped"
+
+
+def build_chunk_failure_message(error: Exception, pipe: M3u8Pipe | None = None) -> str:
+    """生成保存到任务抽屉里的分片失败原因。
+
+    ffmpeg 的 404/403/过期等底层取流错误以前只写在日志里，数据库只保存
+    “真实流未输出任何音频帧”，运营看到失败任务时不知道该刷新流地址还是重启
+    FunASR。这里把最近一次 ffmpeg stderr 拼进去，同时截断长度，避免错误信息过长。
+    """
+    message = str(error)
+    ffmpeg_error = (getattr(pipe, "last_error_message", "") or "").strip()
+    if "未输出任何音频帧" in message and ffmpeg_error:
+        message = f"{message}；ffmpeg 错误：{ffmpeg_error}"
+    return message[:500]
 
 
 class AsrWorker:
@@ -686,6 +700,7 @@ class AsrWorker:
 
         # ── 2. 调后端 API 自动刷新 ──
         refresh_url = f"{_BACKEND_BASE_URL}/live-sessions/{task.session_id}/refresh-stream"
+        refresh_error_detail = ""
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
                 response = await client.post(
@@ -722,6 +737,7 @@ class AsrWorker:
                         error_detail = response.json().get("detail", response.text[:200])
                     except Exception:
                         error_detail = response.text[:200]
+                    refresh_error_detail = sanitize_ffmpeg_error(str(error_detail or "未知错误"))[:300]
                     logger.warning(
                         "任务 %s: 流地址刷新 API 返回 %s: %s",
                         task.id,
@@ -729,6 +745,7 @@ class AsrWorker:
                         error_detail,
                     )
         except Exception as exc:
+            refresh_error_detail = sanitize_ffmpeg_error(str(exc))[:300]
             logger.error("任务 %s: 调用刷新 API 失败: %s", task.id, exc)
 
         # ── 3. 刷新失败，判断探测结果的确定性 ──
@@ -739,8 +756,13 @@ class AsrWorker:
             for keyword in ["403", "404", "410", "流地址已失效"]
         )
         if is_definitely_expired:
+            refresh_hint = (
+                f"自动刷新失败：{refresh_error_detail}。"
+                if refresh_error_detail
+                else "自动刷新失败。"
+            )
             raise RuntimeError(
-                f"流地址已失效（{error_msg}），且自动刷新也失败，无法继续转写。"
+                f"流地址已失效（{error_msg}），{refresh_hint}无法继续转写。"
                 "请检查直播回放是否仍可用，或手动重新采集流地址。"
             )
 
@@ -932,7 +954,7 @@ class AsrWorker:
             if not chunk or not task:
                 raise
             chunk.status = "failed"
-            chunk.error_message = str(exc)[:500]
+            chunk.error_message = build_chunk_failure_message(exc, pipe)
             chunk.completed_at = datetime.utcnow()
             chunk.heartbeat_at = datetime.utcnow()
             touch_task(task, self._worker_id)
