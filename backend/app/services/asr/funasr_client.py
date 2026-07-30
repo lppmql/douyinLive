@@ -316,7 +316,7 @@ class FunasrClient:
                 await self._ws.send(frame)
                 # 在线模式必须跟真实讲话速度同步发送，否则模型会把几十秒音频瞬间
                 # 塞进缓冲区；离线模式无需等真实时间，只做很短的让步避免饿死事件循环。
-                await asyncio.sleep(0.06 if protocol_mode == "online" else 0.001)
+                await asyncio.sleep(self.frame_interval_for(protocol_mode))
 
                 while not result_queue.empty():
                     data = result_queue.get_nowait()
@@ -334,7 +334,12 @@ class FunasrClient:
             # 流结束后，离线精修结果可能稍晚到达。
             while True:
                 try:
-                    data = await asyncio.wait_for(result_queue.get(), timeout=15)
+                    result_timeout = (
+                        settings.ASR_ONLINE_RESULT_TIMEOUT_SECONDS
+                        if protocol_mode == "online"
+                        else 15
+                    )
+                    data = await asyncio.wait_for(result_queue.get(), timeout=result_timeout)
                 except asyncio.TimeoutError:
                     if receiver_task.done() and not self.connected:
                         raise RuntimeError("FunASR 连接提前结束，本分片将从断点重试")
@@ -388,3 +393,11 @@ class FunasrClient:
         """关闭连接"""
         if self.connected:
             await self._ws.close()
+    @staticmethod
+    def frame_interval_for(protocol_mode: str) -> float:
+        """在线初稿略快于实时追赶缓存，离线终稿只做事件循环让步。"""
+        return (
+            settings.ASR_ONLINE_FRAME_INTERVAL_SECONDS
+            if protocol_mode == "online"
+            else 0.001
+        )

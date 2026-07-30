@@ -139,6 +139,38 @@ def list_queued_task_ids_latest_first(db: Session, limit: int) -> list[int]:
     ]
 
 
+def list_queued_task_ids_for_available_lanes(
+    db: Session,
+    limit: int,
+    *,
+    occupied_lanes: set[str] | None = None,
+) -> list[int]:
+    """每种逻辑通道最多领取一个任务，并保留各通道原有优先顺序。"""
+    occupied = set(occupied_lanes or set())
+    ordered_ids = list_queued_task_ids_latest_first(
+        db,
+        max(settings.ASR_MAX_QUEUED, limit),
+    )
+    if not ordered_ids:
+        return []
+    task_types = dict(
+        db.query(AsrTask.id, AsrTask.task_type)
+        .filter(AsrTask.id.in_(ordered_ids))
+        .all()
+    )
+    selected: list[int] = []
+    selected_lanes = set(occupied)
+    for task_id in ordered_ids:
+        lane = str(task_types.get(task_id) or "")
+        if lane not in {"realtime", "offline"} or lane in selected_lanes:
+            continue
+        selected.append(task_id)
+        selected_lanes.add(lane)
+        if len(selected) >= max(0, limit):
+            break
+    return selected
+
+
 def queue_auto_transcriptions(
     db: Session,
     limit: int | None = None,

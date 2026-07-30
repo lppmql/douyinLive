@@ -11,6 +11,7 @@ from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
 from app.models.stream_sources import StreamSource
 from app.services.asr.queue import (
+    list_queued_task_ids_for_available_lanes,
     list_queued_task_ids_latest_first,
     queue_auto_transcriptions,
     queue_session_transcription,
@@ -95,6 +96,13 @@ def test_auto_queue_and_worker_default_to_latest_real_session(monkeypatch):
     latest_task = db.query(AsrTask).filter(AsrTask.session_id == sessions[2].id).one()
 
     assert queued_ids == [live_task.id, oldest_task.id, latest_task.id]
+    lane_ids = list_queued_task_ids_for_available_lanes(db, 2)
+    assert lane_ids == [live_task.id, oldest_task.id]
+    assert list_queued_task_ids_for_available_lanes(
+        db,
+        2,
+        occupied_lanes={"realtime"},
+    ) == [oldest_task.id]
     db.close()
 
 

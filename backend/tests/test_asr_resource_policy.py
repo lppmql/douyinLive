@@ -18,19 +18,21 @@ def test_asr_keeps_single_funasr_connection_when_computer_has_headroom():
         max_concurrency=4,
     )
 
-    assert plan.target_concurrency == 1
-    assert plan.queue_capacity == 1
+    # 两个逻辑任务可以同时等待，但底层 FunASR 仍由连接锁严格串行。
+    assert plan.target_concurrency == 2
+    assert plan.queue_capacity == 2
     assert plan.pause_new_tasks is False
 
 
-def test_asr_reduces_to_one_worker_under_high_pressure():
+def test_asr_keeps_two_logical_lanes_under_high_pressure():
     plan = build_asr_resource_plan(
         _usage(cpu=87, memory=81, pressure="high"),
         cpu_count=12,
         max_concurrency=4,
     )
 
-    assert plan.target_concurrency == 1
+    assert plan.target_concurrency == 2
+    assert plan.queue_capacity == 2
     assert plan.pause_new_tasks is False
 
 

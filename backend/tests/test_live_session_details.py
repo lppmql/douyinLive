@@ -59,7 +59,7 @@ class LiveSessionDetailsTest(unittest.TestCase):
         self.assertEqual(profile.ratio, 44)
 
     def test_detail_endpoint_keeps_assets_after_video_route_addition(self):
-        session = SimpleNamespace(stream_url="https://example.test/fallback.m3u8")
+        session = SimpleNamespace(id=9, stream_url="https://example.test/fallback.m3u8")
         stream = SimpleNamespace(m3u8_url="https://example.test/live.m3u8", status="active")
         db = DetailDb(session, stream)
         session_data = {
@@ -93,6 +93,9 @@ class DetailQuery:
     def all(self):
         return self.rows
 
+    def first(self):
+        return self.rows[0] if self.rows else None
+
 
 class DetailDb:
     def __init__(self, session, stream):
@@ -103,11 +106,18 @@ class DetailDb:
         return self.session if model is LiveSession else None
 
     def query(self, model):
+        from app.models.asr_audio_chunks import AsrAudioChunk
+        from app.models.asr_tasks import AsrTask
+        from app.models.transcript_segments import TranscriptSegment
+
         rows = {
             LiveMetric: [],
             Comment: [],
             StreamSource: [self.stream],
             LiveAudienceProfile: [],
+            AsrTask: [],
+            AsrAudioChunk: [],
+            TranscriptSegment: [],
         }[model]
         return DetailQuery(rows)
 

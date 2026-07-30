@@ -302,6 +302,19 @@ declare namespace Api {
       profiles: LiveAudienceProfile[];
       stream_url: string | null;
       stream_source_count: number;
+      transcript_quality: TranscriptQuality;
+    }
+
+    interface TranscriptQuality {
+      status: 'complete' | 'incomplete' | 'repairing' | 'repair_failed' | 'waiting_duration' | 'waiting_transcript';
+      coverage_percent: number | null;
+      covered_seconds: number;
+      duration_seconds: number;
+      missing_ranges: [number, number][];
+      speech_char_count: number;
+      speech_seconds: number;
+      speech_rate_cpm: number | null;
+      rate_source: 'offline_final' | 'realtime_estimate';
     }
 
     interface LiveAudienceProfile {

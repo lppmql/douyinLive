@@ -536,7 +536,7 @@ export interface paths {
         put?: never;
         /**
          * Run Lead Sync
-         * @description 立即拉取新增客资；密钥缺失时给出可操作提示。
+         * @description 立即拉取新增客资；传 ?rematch=true 会先把待归属客资重新匹配一遍。
          */
         post: operations["run_lead_sync_api_v1_leads_sync_post"];
         delete?: never;
@@ -1898,6 +1898,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Conversations
+         * @description 获取所有对话列表（按更新时间倒序，最新在前）
+         */
+        get: operations["list_conversations_api_v1_ai_conversations_get"];
+        put?: never;
+        /**
+         * Create Conversation
+         * @description 新建对话（可带首条消息）
+         *
+         *     如果 first_message 不为空，会自动创建对话并添加首条用户消息。
+         */
+        post: operations["create_conversation_api_v1_ai_conversations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/conversations/{conv_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Conversation
+         * @description 获取对话详情（含所有消息）
+         */
+        get: operations["get_conversation_api_v1_ai_conversations__conv_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Conversation
+         * @description 删除对话（级联删除所有消息）
+         */
+        delete: operations["delete_conversation_api_v1_ai_conversations__conv_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/conversations/{conv_id}/messages/{msg_id}/feedback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Message Feedback
+         * @description 给某条助手消息点赞或踩
+         */
+        post: operations["set_message_feedback_api_v1_ai_conversations__conv_id__messages__msg_id__feedback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/conversations/{conv_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append Messages
+         * @description 向对话追加用户消息和 AI 回答
+         */
+        post: operations["append_messages_api_v1_ai_conversations__conv_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users/": {
         parameters: {
             query?: never;
@@ -2750,6 +2840,20 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * AppendMessagesRequest
+         * @description 追加消息请求体（2026-07-28 方案 C）
+         */
+        AppendMessagesRequest: {
+            /** Question */
+            question: string;
+            /** Ai Answer */
+            ai_answer: string;
+            /** Sources */
+            sources?: {
+                [key: string]: unknown;
+            }[] | null;
+        };
         /** AsrControlResponse */
         AsrControlResponse: {
             /** Enabled */
@@ -3310,6 +3414,89 @@ export interface components {
             components?: components["schemas"]["ResourceComponentUsage"][];
         };
         /**
+         * ConversationCreateRequest
+         * @description 新建对话请求 — 可带首条消息
+         */
+        ConversationCreateRequest: {
+            /** Title */
+            title?: string | null;
+            /** First Message */
+            first_message?: string | null;
+        };
+        /**
+         * ConversationDeleteResponse
+         * @description 删除对话响应
+         */
+        ConversationDeleteResponse: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /** Deleted Id */
+            deleted_id: number;
+        };
+        /**
+         * ConversationDetail
+         * @description 对话详情（含消息列表）
+         */
+        ConversationDetail: {
+            /** Id */
+            id: number;
+            /** Title */
+            title?: string | null;
+            /** Messages */
+            messages?: components["schemas"]["ConversationMessageOut"][];
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ConversationListItem
+         * @description 对话列表项（不含消息内容，只含摘要信息）
+         */
+        ConversationListItem: {
+            /** Id */
+            id: number;
+            /** Title */
+            title?: string | null;
+            /**
+             * Message Count
+             * @default 0
+             */
+            message_count: number;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ConversationMessageOut
+         * @description 单条消息输出
+         */
+        ConversationMessageOut: {
+            /** Id */
+            id: number;
+            /** Role */
+            role: string;
+            /** Content */
+            content: string;
+            /** Sources */
+            sources?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Feedback */
+            feedback?: string | null;
+            /**
+             * Error
+             * @default false
+             */
+            error: boolean;
+            /** Created At */
+            created_at?: string | null;
+        };
+        /**
          * DashboardSummaryResponse
          * @description GET /dashboard/summary
          */
@@ -3508,6 +3695,17 @@ export interface components {
              */
             removed_stale_row_count: number;
             dataease?: components["schemas"]["DataEaseStatusResponse"] | null;
+        };
+        /**
+         * FeedbackRequest
+         * @description 消息反馈请求
+         */
+        FeedbackRequest: {
+            /**
+             * Feedback
+             * @enum {string}
+             */
+            feedback: "like" | "dislike";
         };
         /** FindingStatusUpdate */
         FindingStatusUpdate: {
@@ -3954,6 +4152,10 @@ export interface components {
              * @default 0
              */
             page_count: number;
+            /** Rematch */
+            rematch?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * LeadSyncStatusResponse
@@ -4306,6 +4508,7 @@ export interface components {
              * @default 0
              */
             stream_source_count: number;
+            transcript_quality: components["schemas"]["TranscriptQualityResponse"];
         };
         /**
          * LiveSessionListItemResponse
@@ -5711,6 +5914,48 @@ export interface components {
              * @default false
              */
             available: boolean;
+        };
+        /**
+         * TranscriptQualityResponse
+         * @description 话术覆盖完整度与真实语速。
+         */
+        TranscriptQualityResponse: {
+            /** Status */
+            status: string;
+            /** Coverage Percent */
+            coverage_percent?: number | null;
+            /**
+             * Covered Seconds
+             * @default 0
+             */
+            covered_seconds: number;
+            /**
+             * Duration Seconds
+             * @default 0
+             */
+            duration_seconds: number;
+            /** Missing Ranges */
+            missing_ranges?: [
+                number,
+                number
+            ][];
+            /**
+             * Speech Char Count
+             * @default 0
+             */
+            speech_char_count: number;
+            /**
+             * Speech Seconds
+             * @default 0
+             */
+            speech_seconds: number;
+            /** Speech Rate Cpm */
+            speech_rate_cpm?: number | null;
+            /**
+             * Rate Source
+             * @default realtime_estimate
+             */
+            rate_source: string;
         };
         /**
          * TranscriptQueueResponse
@@ -7315,7 +7560,10 @@ export interface operations {
     };
     run_lead_sync_api_v1_leads_sync_post: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 先重匹配待归属客资，再拉取新增 */
+                rematch?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -7329,6 +7577,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LeadSyncResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -9669,6 +9926,192 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiKbSyncRecentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_conversations_api_v1_ai_conversations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationListItem"][];
+                };
+            };
+        };
+    };
+    create_conversation_api_v1_ai_conversations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_conversation_api_v1_ai_conversations__conv_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_conversation_api_v1_ai_conversations__conv_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_message_feedback_api_v1_ai_conversations__conv_id__messages__msg_id__feedback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: number;
+                msg_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeedbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    append_messages_api_v1_ai_conversations__conv_id__messages_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conv_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AppendMessagesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

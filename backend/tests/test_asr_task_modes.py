@@ -12,8 +12,10 @@ from app.models.transcript_segments import TranscriptSegment
 from app.services.asr.funasr_client import FunasrClient, RealtimeDraftBuffer
 from workers.asr_worker import (
     AsrWorker,
+    advance_completeness_repair_round,
     postprocess_status_for_task,
     segment_type_for_task,
+    should_handoff_realtime_failure,
     should_handoff_realtime_task,
 )
 
@@ -26,11 +28,13 @@ def _run_and_read_start_message(task_type: str) -> dict:
 def test_live_task_uses_online_protocol():
     """直播中必须边说边转，不能继续冒充离线任务。"""
     assert _run_and_read_start_message("realtime")["mode"] == "online"
+    assert FunasrClient.frame_interval_for("online") < 0.06
 
 
 def test_finished_task_uses_offline_protocol():
     """下播后必须使用离线精修协议。"""
     assert _run_and_read_start_message("offline")["mode"] == "offline"
+    assert FunasrClient.frame_interval_for("offline") == 0.001
 
 
 def test_protocol_rejects_unknown_task_type():
@@ -100,6 +104,25 @@ def test_queued_live_task_keeps_identity_after_stream_ends():
     assert should_handoff_realtime_task("offline", "ended") is False
 
 
+def test_realtime_stream_end_failure_handoffs_after_live_ends():
+    """最后一个直播分片撞上下播 404 时应转交终稿，不能标记整场失败。"""
+    assert should_handoff_realtime_failure(
+        "realtime",
+        "ended",
+        "真实流未输出任何音频帧；ffmpeg 错误：HTTP error 404 Not Found",
+    )
+    assert not should_handoff_realtime_failure(
+        "realtime",
+        "live",
+        "真实流未输出任何音频帧",
+    )
+    assert not should_handoff_realtime_failure(
+        "offline",
+        "ended",
+        "HTTP error 404 Not Found",
+    )
+
+
 def test_offline_segments_use_hidden_staging_type():
     """离线分段在整场成功前属于隐藏暂存，实时初稿仍然立即可见。"""
     assert segment_type_for_task("realtime") == "asr_realtime"
@@ -146,6 +169,61 @@ def test_offline_prepare_keeps_old_full_text_until_atomic_switch(db):
 
     assert len(chunks) == 1
     assert db.query(TranscriptFullText).filter_by(session_id=session.id).one().full_text == "直播初稿仍然可读"
+
+
+def test_offline_prepare_appends_range_when_real_duration_grows(db):
+    """终稿处理期间真实时长被修正变长时，只追加新缺口。"""
+    room = LiveRoom(account_name="时长修正账号", anchor_name="主播", platform="douyin", status=True)
+    db.add(room)
+    db.flush()
+    session = LiveSession(
+        room_id=room.id,
+        anchor_name="主播",
+        live_status="ended",
+        live_duration_seconds=120,
+    )
+    db.add(session)
+    db.flush()
+    task = AsrTask(session_id=session.id, status="processing", task_type="offline")
+    db.add(task)
+    db.commit()
+    worker = AsrWorker()
+    chunks = worker._prepare_chunks(
+        db,
+        task,
+        session,
+        "https://example.invalid/replay.m3u8",
+    )
+    chunks[0].status = "completed"
+    db.commit()
+
+    session.live_duration_seconds = 240
+    db.commit()
+    refreshed = worker._prepare_chunks(
+        db,
+        task,
+        session,
+        "https://example.invalid/replay.m3u8",
+    )
+
+    assert [(item.start_seconds, item.end_seconds, item.status) for item in refreshed] == [
+        (0.0, 120.0, "completed"),
+        (120.0, 240.0, "pending"),
+    ]
+
+
+def test_completeness_repair_stops_after_three_successful_append_rounds():
+    """真实时长持续增长也只能自动追加三轮，不能无限占用 Worker。"""
+    current = 0
+    for _ in range(3):
+        current = advance_completeness_repair_round(current, 3)
+    assert current == 3
+    try:
+        advance_completeness_repair_round(current, 3)
+    except RuntimeError as exc:
+        assert "已自动补齐 3 轮" in str(exc)
+    else:
+        raise AssertionError("第 4 轮完整度补齐必须被硬上限阻止")
 
 
 def test_pending_offline_segments_are_hidden_from_rest_page(db):

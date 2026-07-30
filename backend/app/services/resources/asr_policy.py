@@ -44,20 +44,21 @@ def build_asr_resource_plan(
         or memory_percent >= settings.RESOURCE_HIGH_MEMORY_PERCENT
     ):
         return AsrResourcePlan(
-            target_concurrency=1,
-            queue_capacity=1,
+            # 两个只是等待单模型的逻辑任务，真正推理始终单连接；高压力时仍需
+            # 让协调器同时看见直播和终稿，否则 3:1 会退化为直播永久独占。
+            target_concurrency=2,
+            queue_capacity=2,
             pressure_level="high",
             pause_new_tasks=False,
-            message="电脑资源偏高，ASR 已自动降为单任务运行",
+            message="电脑资源偏高，ASR 保留双逻辑队列并继续单模型串行",
         )
 
-    # 当前 FunASR C++ 服务端实测只支持一条稳定 WebSocket。即使电脑资源富余，
-    # 同时启动第二个识别任务也可能让容器崩溃，因此任务层固定单并发。
-    # CPU 和内存策略仍负责在严重压力时暂停新分片。
+    # 同时保留一个直播任务和一个最新下播终稿任务。它们只是两个逻辑任务，
+    # 真正进入 FunASR 时仍由 AsrLaneCoordinator 严格串行，不会加载第二份模型。
     return AsrResourcePlan(
-        target_concurrency=1,
-        queue_capacity=1,
+        target_concurrency=2,
+        queue_capacity=2,
         pressure_level="normal",
         pause_new_tasks=False,
-        message="资源状态正常，FunASR 按稳定单连接运行",
+        message="资源状态正常，ASR 按直播三片、最新终稿一片智能分时",
     )

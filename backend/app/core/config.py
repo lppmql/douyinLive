@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # ASR 并发。旧固定值仅保留环境兼容，真实 Worker 使用资源自适应上限。
     MAX_REALTIME_ASR_TASKS: int = 1
-    ASR_DYNAMIC_MAX_TASKS: int = 4
+    ASR_DYNAMIC_MAX_TASKS: int = 2
     ASR_WORKER_MODE: bool = False
     SAVE_AUDIO: bool = False
     SAVE_VIDEO: bool = False
@@ -69,6 +69,16 @@ class Settings(BaseSettings):
     # 每 2 分钟形成一个可恢复检查点，避免长直播一直占住 ffmpeg 和识别资源。
     ASR_CHUNK_SECONDS: int = 120
     ASR_CHUNK_MAX_RETRIES: int = 2
+    # 单模型分时：连续多少个直播分片后，让最新下播终稿推进一个分片。
+    ASR_LIVE_CHUNK_QUOTA: int = 3
+    # 直播音频独立落盘，避免 FunASR 处理离线终稿时漏掉正在直播的声音。
+    ASR_AUDIO_BUFFER_ENABLED: bool = True
+    ASR_AUDIO_BUFFER_RETENTION_HOURS: int = 24
+    ASR_AUDIO_BUFFER_MAX_GB: float = 2.0
+    # 60ms 音频帧每 50ms 发送，直播初稿约 1.2 倍速追赶；过快会挤爆在线模型。
+    ASR_ONLINE_FRAME_INTERVAL_SECONDS: float = 0.05
+    ASR_ONLINE_RESULT_TIMEOUT_SECONDS: int = 3
+    ASR_COMPLETENESS_REPAIR_ROUNDS: int = 3
     ASR_ALLOW_MOCK: bool = False
 
     # P1: 知识库时间片
@@ -179,7 +189,19 @@ class Settings(BaseSettings):
             errors.append("ASR_CHUNK_SECONDS_TOO_SMALL")
         if self.ASR_MAX_QUEUED < 1:
             errors.append("ASR_QUEUE_LIMIT_INVALID")
-        if not 1 <= self.ASR_DYNAMIC_MAX_TASKS <= 16:
+        if not 1 <= self.ASR_LIVE_CHUNK_QUOTA <= 10:
+            errors.append("ASR_LIVE_CHUNK_QUOTA_INVALID")
+        if not 1 <= self.ASR_AUDIO_BUFFER_RETENTION_HOURS <= 168:
+            errors.append("ASR_AUDIO_BUFFER_RETENTION_INVALID")
+        if not 0.25 <= self.ASR_AUDIO_BUFFER_MAX_GB <= 20:
+            errors.append("ASR_AUDIO_BUFFER_CAPACITY_INVALID")
+        if not 0.04 <= self.ASR_ONLINE_FRAME_INTERVAL_SECONDS <= 0.06:
+            errors.append("ASR_ONLINE_FRAME_INTERVAL_INVALID")
+        if not 1 <= self.ASR_ONLINE_RESULT_TIMEOUT_SECONDS <= 15:
+            errors.append("ASR_ONLINE_RESULT_TIMEOUT_INVALID")
+        if not 1 <= self.ASR_COMPLETENESS_REPAIR_ROUNDS <= 10:
+            errors.append("ASR_COMPLETENESS_REPAIR_ROUNDS_INVALID")
+        if not 2 <= self.ASR_DYNAMIC_MAX_TASKS <= 16:
             errors.append("ASR_DYNAMIC_MAX_TASKS_INVALID")
         if self.MONITOR_CHECK_INTERVAL < 10:
             errors.append("MONITOR_INTERVAL_TOO_SMALL")

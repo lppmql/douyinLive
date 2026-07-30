@@ -9,15 +9,17 @@ ASR Worker 进程 — 独立运行的话术转写服务
 
 环境变量:
     ASR_WORKER_MODE=true
-    ASR_DYNAMIC_MAX_TASKS=4
+    ASR_DYNAMIC_MAX_TASKS=2
 """
 import asyncio
 import hashlib
 import signal
+from pathlib import Path
 from time import monotonic
 from datetime import datetime, timedelta
 
 import httpx
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import DataError
 
 from app.core.config import settings
@@ -38,9 +40,16 @@ from app.services.asr.chunks import (
     reconcile_existing_chunks,
 )
 from app.services.asr.m3u8_pipe import M3u8Pipe, sanitize_ffmpeg_error
+from app.services.asr.audio_buffer import (
+    PCM_BYTES_PER_SECOND,
+    LiveAudioBuffer,
+    prune_audio_buffers,
+)
+from app.services.asr.transcript_quality import elapsed_live_seconds
 from app.services.asr.funasr_client import FunasrClient
+from app.services.asr.lane_scheduler import AsrLaneCoordinator
 from app.services.asr.queue import (
-    list_queued_task_ids_latest_first,
+    list_queued_task_ids_for_available_lanes,
     queue_auto_transcriptions,
     queue_session_transcription,
     recover_interrupted_chunk,
@@ -68,6 +77,21 @@ class _YieldToLiveTask(Exception):
     """离线任务在安全点主动礼让实时直播，不属于失败或人工取消。"""
 
 
+class _CompletenessRepairLimitExceeded(RuntimeError):
+    """真实时长连续增长超过自动补齐上限，需要人工核对采集时长。"""
+
+
+def advance_completeness_repair_round(current_round: int, max_rounds: int) -> int:
+    """推进完整度补齐轮次，超过硬上限立即停止自动循环。"""
+    next_round = max(0, int(current_round)) + 1
+    if next_round > max(1, int(max_rounds)):
+        raise _CompletenessRepairLimitExceeded(
+            f"话术完整度已自动补齐 {max_rounds} 轮，"
+            "真实直播时长仍在变化，请先核对场次结束时间"
+        )
+    return next_round
+
+
 def is_full_text_too_long_error(exc: DataError) -> bool:
     """识别迁移前 MySQL TEXT 容量不足错误。"""
     return bool(getattr(exc, "orig", None) and getattr(exc.orig, "args", ()) and exc.orig.args[0] == 1406)
@@ -83,12 +107,27 @@ def should_handoff_realtime_task(task_type: str, live_status: str) -> bool:
     return task_type == "realtime" and live_status != "live"
 
 
+def should_handoff_realtime_failure(
+    task_type: str,
+    live_status: str,
+    error_message: str,
+) -> bool:
+    """识别最后一段时刚好下播，应平滑转交终稿而不是把整场记为失败。"""
+    if task_type != "realtime" or live_status == "live":
+        return False
+    message = (error_message or "").lower()
+    return any(
+        marker in message
+        for marker in ("未输出任何音频帧", "404", "流地址已失效", "直播音频缓存等待超时")
+    )
+
+
 def postprocess_status_for_task(task_type: str) -> str:
     """直播初稿不生成最终复盘，只有下播终稿进入 AI 后处理。"""
     return TaskStatus.PENDING if task_type == "offline" else "skipped"
 
 
-def build_chunk_failure_message(error: Exception, pipe: M3u8Pipe | None = None) -> str:
+def build_chunk_failure_message(error: Exception, pipe: object | None = None) -> str:
     """生成保存到任务抽屉里的分片失败原因。
 
     ffmpeg 的 404/403/过期等底层取流错误以前只写在日志里，数据库只保存
@@ -117,9 +156,11 @@ class AsrWorker:
         self._active_task_ids: set[int] = set()
         self._active_chunk_task_ids: set[int] = set()
         self._resource_slot_lock = asyncio.Lock()
-        # 当前 FunASR C++ 容器实测只能稳定处理一条 WebSocket。
-        # 即使资源策略允许并行准备任务，也必须在这里串行进入模型连接。
-        self._funasr_connection_lock = asyncio.Lock()
+        # 两个逻辑任务可以同时准备，但真正连接 FunASR 时仍然严格单连接。
+        self._lane_coordinator = AsrLaneCoordinator(settings.ASR_LIVE_CHUNK_QUOTA)
+        self._audio_buffers: dict[int, LiveAudioBuffer] = {}
+        self._audio_buffer_lock = asyncio.Lock()
+        self._audio_buffer_dir = Path(__file__).resolve().parents[2] / "data" / "asr-buffer"
         self._last_resource_message = ""
         self._active_postprocess_tasks: set[asyncio.Task] = set()
         self._active_postprocess_ids: set[int] = set()
@@ -211,14 +252,24 @@ class AsrWorker:
             # 离线任务只有看见 queued 直播任务，才能在当前两分钟分片结束后礼让。
             queue_auto_transcriptions(
                 db,
-                limit=plan.queue_capacity,
-                queue_capacity=plan.queue_capacity,
+                limit=settings.ASR_MAX_QUEUED,
+                queue_capacity=settings.ASR_MAX_QUEUED,
             )
             if available_slots == 0:
                 return
-            queued_ids = list_queued_task_ids_latest_first(
+            occupied_lanes = {
+                str(row[0])
+                for row in (
+                    db.query(AsrTask.task_type)
+                    .filter(AsrTask.id.in_(self._active_task_ids))
+                    .distinct()
+                    .all()
+                )
+            } if self._active_task_ids else set()
+            queued_ids = list_queued_task_ids_for_available_lanes(
                 db,
                 min(plan.queue_capacity, available_slots),
+                occupied_lanes=occupied_lanes,
             )
 
             for task_id in queued_ids:
@@ -372,10 +423,144 @@ class AsrWorker:
         finally:
             db.close()
 
+    async def _start_live_audio_buffer(
+        self,
+        session: LiveSession,
+        m3u8_url: str,
+        headers: dict[str, str],
+    ) -> LiveAudioBuffer | None:
+        """串行完成容量分配和注册，避免两场直播重复领取同一份额度。"""
+        if not settings.ASR_AUDIO_BUFFER_ENABLED:
+            return None
+        async with self._audio_buffer_lock:
+            return await self._start_live_audio_buffer_locked(
+                session,
+                m3u8_url,
+                headers,
+            )
+
+    async def _start_live_audio_buffer_locked(
+        self,
+        session: LiveSession,
+        m3u8_url: str,
+        headers: dict[str, str],
+    ) -> LiveAudioBuffer | None:
+        """在容量锁内为直播启动独立录音。"""
+        existing = self._audio_buffers.get(session.id)
+        if existing and existing.is_running:
+            return existing
+
+        capacity_bytes = int(settings.ASR_AUDIO_BUFFER_MAX_GB * 1024**3)
+        protected_buffers = list(self._audio_buffers.values())
+        protected_paths = {item.audio_path for item in protected_buffers}
+        prune_audio_buffers(
+            self._audio_buffer_dir,
+            retention_hours=settings.ASR_AUDIO_BUFFER_RETENTION_HOURS,
+            max_bytes=capacity_bytes,
+            protected_paths=protected_paths,
+        )
+        running_allocated = sum(
+            item.max_bytes for item in protected_buffers if item.is_running
+        )
+        stopped_protected_size = sum(
+            int(item.audio_path.stat().st_size)
+            for item in protected_buffers
+            if not item.is_running and item.audio_path.exists()
+        )
+        known_paths = {item.resolve() for item in protected_paths}
+        unprotected_size = sum(
+            int(item.stat().st_size)
+            for item in self._audio_buffer_dir.glob("session-*.pcm")
+            if item.is_file() and item.resolve() not in known_paths
+        )
+        available_bytes = max(
+            0,
+            capacity_bytes
+            - running_allocated
+            - stopped_protected_size
+            - unprotected_size,
+        )
+        minimum_buffer_bytes = settings.ASR_CHUNK_SECONDS * PCM_BYTES_PER_SECOND
+        if available_bytes < minimum_buffer_bytes and unprotected_size:
+            # 新直播至少要能保存一个完整分片；空间不足时优先清理不再被当前
+            # Worker 引用的旧文件，运行中和待终稿复用的文件绝不删除。
+            prune_audio_buffers(
+                self._audio_buffer_dir,
+                retention_hours=settings.ASR_AUDIO_BUFFER_RETENTION_HOURS,
+                max_bytes=running_allocated + stopped_protected_size,
+                protected_paths=protected_paths,
+            )
+            # 清理函数会保留受保护文件，也可能保留仍未超过目标的旧文件；
+            # 必须重新读取真实磁盘占用，不能假设旧缓存已经全部删除。
+            unprotected_size = sum(
+                int(item.stat().st_size)
+                for item in self._audio_buffer_dir.glob("session-*.pcm")
+                if item.is_file() and item.resolve() not in known_paths
+            )
+            available_bytes = max(
+                0,
+                capacity_bytes
+                - running_allocated
+                - stopped_protected_size
+                - unprotected_size,
+            )
+        if available_bytes < minimum_buffer_bytes:
+            logger.warning(
+                "场次 %s 无法启动连续缓存：2GB 总额度已被运行中或待补齐场次占用",
+                session.id,
+            )
+            return None
+
+        elapsed_seconds = elapsed_live_seconds(session.live_start_time)
+        audio_buffer = LiveAudioBuffer(
+            session.id,
+            m3u8_url,
+            headers,
+            timeline_start_seconds=elapsed_seconds,
+            buffer_dir=self._audio_buffer_dir,
+            max_bytes=available_bytes,
+        )
+        await audio_buffer.start()
+        self._audio_buffers[session.id] = audio_buffer
+        return audio_buffer
+
+    def _handoff_realtime_to_offline(
+        self,
+        db,
+        task: AsrTask,
+        session: LiveSession,
+        message: str,
+    ) -> AsrTask:
+        """保留已完成直播初稿并创建独立终稿任务。"""
+        completed_chunk_exists = (
+            db.query(AsrAudioChunk.id)
+            .filter(
+                AsrAudioChunk.task_id == task.id,
+                AsrAudioChunk.status == TaskStatus.COMPLETED,
+            )
+            .first()
+            is not None
+        )
+        task.status = TaskStatus.COMPLETED if completed_chunk_exists else TaskStatus.CANCELLED
+        task.error_message = message[:500]
+        task.completed_at = datetime.utcnow()
+        task.postprocess_status = "skipped"
+        touch_task(task, self._worker_id)
+        offline_task, _created = queue_session_transcription(db, session)
+        db.commit()
+        publish_task_event(
+            "asr",
+            task,
+            "handed_off_to_offline",
+            {"offline_task_id": offline_task.id, "message": task.error_message},
+        )
+        return offline_task
+
     async def _process_task(self, task_id: int):
         """按分片处理 ASR 任务，已完成分片不会重复执行。"""
         async with self._semaphore:
             db = SessionLocal()
+            live_audio_buffer: LiveAudioBuffer | None = None
             try:
                 task = db.get(AsrTask, task_id)
                 if not task or task.status != "processing":
@@ -401,18 +586,11 @@ class AsrWorker:
                     # 任务等候期间可能已经下播。实时任务的身份不能偷偷改成离线任务，
                     # 否则同一行任务会同时代表两种业务。这里明确结束初稿任务，再创建
                     # 一条独立的离线终稿任务。
-                    task.status = TaskStatus.CANCELLED
-                    task.error_message = "领取任务时直播已结束，已转交独立离线终稿任务"
-                    task.completed_at = datetime.utcnow()
-                    task.postprocess_status = "skipped"
-                    touch_task(task, self._worker_id)
-                    offline_task, _created = queue_session_transcription(db, session)
-                    db.commit()
-                    publish_task_event(
-                        "asr",
+                    self._handoff_realtime_to_offline(
+                        db,
                         task,
-                        "handed_off_to_offline",
-                        {"offline_task_id": offline_task.id},
+                        session,
+                        "领取任务时直播已结束，已转交独立离线终稿任务",
                     )
                     return
 
@@ -425,8 +603,29 @@ class AsrWorker:
                 )
 
                 is_live = task.task_type == "realtime"
-                chunks = self._prepare_chunks(db, task, session, m3u8_url)
+                if is_live:
+                    live_audio_buffer = await self._start_live_audio_buffer(
+                        session,
+                        m3u8_url,
+                        headers,
+                    )
+                else:
+                    # 刚下播时优先复用本 Worker 留下的真实 PCM；缓存未覆盖的旧区间
+                    # 仍从回放拉取，不能拿别的时间段冒充。
+                    live_audio_buffer = self._audio_buffers.get(session.id)
+                chunks = self._prepare_chunks(
+                    db,
+                    task,
+                    session,
+                    m3u8_url,
+                    live_buffer_start_seconds=(
+                        live_audio_buffer.timeline_start_seconds
+                        if is_live and live_audio_buffer
+                        else None
+                    ),
+                )
 
+                completeness_repair_rounds = 0
                 while True:
                     for chunk in chunks:
                         self._ensure_task_running(db, task)
@@ -443,11 +642,27 @@ class AsrWorker:
                                     m3u8_url,
                                     headers,
                                     is_live=is_live,
+                                    audio_buffer=live_audio_buffer,
                                 )
                             finally:
                                 await self._release_resource_slot(task.id)
                             db.refresh(chunk)
                         if chunk.status not in {TaskStatus.COMPLETED, TaskStatus.SKIPPED}:
+                            db.refresh(session)
+                            if should_handoff_realtime_failure(
+                                task.task_type,
+                                session.live_status,
+                                chunk.error_message or "",
+                            ):
+                                if live_audio_buffer:
+                                    await live_audio_buffer.stop()
+                                self._handoff_realtime_to_offline(
+                                    db,
+                                    task,
+                                    session,
+                                    "直播在最后分片读取时结束，已保留初稿并自动转交离线终稿补齐",
+                                )
+                                return
                             raise RuntimeError(
                                 f"音频分片 {chunk.chunk_index + 1}/{len(chunks)} 达到最大重试次数: "
                                 f"{chunk.error_message or '未知错误'}"
@@ -465,11 +680,64 @@ class AsrWorker:
                             )
                             logger.info("任务 %s 已在分片边界礼让实时直播任务", task.id)
                             return
+                        if not is_live and self._has_newer_queued_offline_task(db, task):
+                            requeue_offline_task_for_live_priority(task)
+                            task.error_message = "已保存当前断点，先处理最新结束的直播终稿"
+                            db.commit()
+                            publish_task_event(
+                                "asr",
+                                task,
+                                "yielded_to_latest_offline",
+                                {"completed_chunk_index": chunk.chunk_index},
+                            )
+                            logger.info("任务 %s 已在分片边界礼让最新下播终稿", task.id)
+                            return
+
+                    # 离线任务完成本轮后必须按最新真实时长再校准一次。采集服务可能
+                    # 在转写期间修正下播时长；新增长度只追加缺失区间，不重跑旧片。
+                    db.refresh(session)
+                    if task.task_type == "offline":
+                        refreshed_chunks = self._prepare_chunks(
+                            db,
+                            task,
+                            session,
+                            m3u8_url,
+                        )
+                        incomplete_chunks = [
+                            item
+                            for item in refreshed_chunks
+                            if item.status
+                            not in {TaskStatus.COMPLETED, TaskStatus.SKIPPED}
+                        ]
+                        if incomplete_chunks:
+                            completeness_repair_rounds = (
+                                advance_completeness_repair_round(
+                                    completeness_repair_rounds,
+                                    settings.ASR_COMPLETENESS_REPAIR_ROUNDS,
+                                )
+                            )
+                            chunks = refreshed_chunks
+                            publish_task_event(
+                                "asr",
+                                task,
+                                "missing_ranges_appended",
+                                {
+                                    "missing_chunk_count": len(incomplete_chunks),
+                                    "duration_seconds": int(
+                                        session.live_duration_seconds or 0
+                                    ),
+                                },
+                            )
+                            continue
+                        if live_audio_buffer:
+                            await live_audio_buffer.stop()
+                        break
 
                     # 正在直播时按两分钟窗口继续追加，保证每段都有资源检查点。
-                    db.refresh(session)
                     is_live = session.live_status == "live"
                     if not is_live:
+                        if live_audio_buffer:
+                            await live_audio_buffer.stop()
                         break
                     index, start_seconds, end_seconds = next_live_chunk_range(
                         chunks,
@@ -501,9 +769,6 @@ class AsrWorker:
                     for chunk in chunks
                     if chunk.status == TaskStatus.COMPLETED
                 )
-                if segment_count == 0:
-                    raise RuntimeError("全部真实音频分片均未识别到有效话术，直播流可能已过期或没有人声")
-
                 self._save_full_text(db, task, chunks)
                 if task.task_type == "offline":
                     chunk_ids = [chunk.id for chunk in chunks]
@@ -564,23 +829,55 @@ class AsrWorker:
                 try:
                     task = db.get(AsrTask, task_id)
                     if task:
-                        task.status = "failed"
-                        task.error_message = str(exc)[:500]
-                        task.completed_at = datetime.utcnow()
+                        should_auto_repair = (
+                            task.task_type == "offline"
+                            and int(task.retry_count or 0) < int(task.max_retries or 3)
+                            and not isinstance(exc, _CompletenessRepairLimitExceeded)
+                        )
+                        task.status = (
+                            TaskStatus.QUEUED if should_auto_repair else TaskStatus.FAILED
+                        )
+                        task.error_message = (
+                            f"完整度补齐第 {task.retry_count} 轮未完成，已自动续接：{exc}"
+                            if should_auto_repair
+                            else str(exc)
+                        )[:500]
+                        task.completed_at = (
+                            None if should_auto_repair else datetime.utcnow()
+                        )
                         task.postprocess_status = "skipped"
                         touch_task(task, self._worker_id)
                         db.commit()
-                        publish_task_event("asr", task, "failed", {"error": task.error_message})
+                        publish_task_event(
+                            "asr",
+                            task,
+                            "repair_queued" if should_auto_repair else "failed",
+                            {"error": task.error_message},
+                        )
                 except Exception as persist_exc:
                     db.rollback()
                     logger.exception("任务 %s 失败状态保存异常: %s", task_id, persist_exc)
             finally:
+                if live_audio_buffer and live_audio_buffer.is_running:
+                    await live_audio_buffer.stop()
                 try:
-                    plan = await asyncio.to_thread(self._current_resource_plan)
+                    finished_task = db.get(AsrTask, task_id)
+                    if (
+                        finished_task
+                        and finished_task.task_type == "offline"
+                        and finished_task.status
+                        in {
+                            TaskStatus.COMPLETED,
+                            TaskStatus.FAILED,
+                            TaskStatus.CANCELLED,
+                        }
+                    ):
+                        async with self._audio_buffer_lock:
+                            self._audio_buffers.pop(finished_task.session_id, None)
                     queue_auto_transcriptions(
                         db,
-                        limit=max(0, plan.queue_capacity),
-                        queue_capacity=plan.queue_capacity,
+                        limit=settings.ASR_MAX_QUEUED,
+                        queue_capacity=settings.ASR_MAX_QUEUED,
                     )
                 except Exception as queue_exc:
                     db.rollback()
@@ -603,6 +900,34 @@ class AsrWorker:
                 AsrTask.status == TaskStatus.QUEUED,
                 AsrTask.cancel_requested_at.is_(None),
                 LiveSession.live_status == "live",
+            )
+            .first()
+            is not None
+        )
+
+    @staticmethod
+    def _has_newer_queued_offline_task(db, current_task: AsrTask) -> bool:
+        """旧终稿每完成一片就礼让更新的下播场次，避免最新复盘等几十分钟。"""
+        current_session = db.get(LiveSession, current_task.session_id)
+        if not current_session:
+            return False
+        current_start = current_session.live_start_time or datetime.min
+        return (
+            db.query(AsrTask.id)
+            .join(LiveSession, LiveSession.id == AsrTask.session_id)
+            .filter(
+                AsrTask.id != current_task.id,
+                AsrTask.task_type == "offline",
+                AsrTask.status == TaskStatus.QUEUED,
+                AsrTask.cancel_requested_at.is_(None),
+                LiveSession.live_status != "live",
+                or_(
+                    LiveSession.live_start_time > current_start,
+                    and_(
+                        LiveSession.live_start_time == current_start,
+                        LiveSession.id > current_session.id,
+                    ),
+                ),
             )
             .first()
             is not None
@@ -781,7 +1106,15 @@ class AsrWorker:
         if task.cancel_requested_at or task.status == TaskStatus.CANCELLED:
             raise TaskCancellationRequested("用户已停止 ASR 转写，已完成分片会保留")
 
-    def _prepare_chunks(self, db, task: AsrTask, session: LiveSession, m3u8_url: str) -> list[AsrAudioChunk]:
+    def _prepare_chunks(
+        self,
+        db,
+        task: AsrTask,
+        session: LiveSession,
+        m3u8_url: str,
+        *,
+        live_buffer_start_seconds: float | None = None,
+    ) -> list[AsrAudioChunk]:
         """按最新真实时长幂等校准分片，不删除已经识别成功的话术。"""
         existing = (
             db.query(AsrAudioChunk)
@@ -796,6 +1129,21 @@ class AsrWorker:
                 chunk_seconds=settings.ASR_CHUNK_SECONDS,
                 is_live=session.live_status == "live",
             )
+            if live_buffer_start_seconds is not None:
+                # 缓存从 Worker 接手直播的真实时刻开始。尚未成功的旧窗口若早于
+                # 这个时刻，必须移动到缓存起点；中间缺口留给下播终稿补齐。
+                for chunk in existing:
+                    if (
+                        chunk.status != TaskStatus.COMPLETED
+                        and float(chunk.start_seconds or 0) < live_buffer_start_seconds
+                    ):
+                        chunk.start_seconds = live_buffer_start_seconds
+                        chunk.end_seconds = (
+                            live_buffer_start_seconds + settings.ASR_CHUNK_SECONDS
+                        )
+                        chunk.status = TaskStatus.PENDING
+                        chunk.retry_count = 0
+                        chunk.error_message = None
             source_hash = hashlib.sha256(m3u8_url.encode("utf-8")).hexdigest()
             for index, start_seconds, end_seconds in missing_ranges:
                 chunk = AsrAudioChunk(
@@ -822,6 +1170,13 @@ class AsrWorker:
             settings.ASR_CHUNK_SECONDS,
             is_live=session.live_status == "live",
         )
+        if live_buffer_start_seconds is not None:
+            ranges = [
+                (
+                    live_buffer_start_seconds,
+                    live_buffer_start_seconds + settings.ASR_CHUNK_SECONDS,
+                )
+            ]
         source_hash = hashlib.sha256(m3u8_url.encode("utf-8")).hexdigest()
         chunks = []
         for index, (start_seconds, end_seconds) in enumerate(ranges):
@@ -843,7 +1198,17 @@ class AsrWorker:
         publish_task_event("asr", task, "chunks_created", {"chunk_count": len(chunks), "duration_seconds": duration})
         return chunks
 
-    async def _process_chunk(self, db, task, chunk, m3u8_url, headers, *, is_live: bool = False) -> None:
+    async def _process_chunk(
+        self,
+        db,
+        task,
+        chunk,
+        m3u8_url,
+        headers,
+        *,
+        is_live: bool = False,
+        audio_buffer: LiveAudioBuffer | None = None,
+    ) -> None:
         """执行单个真实音频分片；失败只回滚本分片的话术。"""
         client = FunasrClient()
         duration_seconds = (
@@ -851,14 +1216,30 @@ class AsrWorker:
             if chunk.end_seconds is not None
             else None
         )
-        pipe = M3u8Pipe(
-            m3u8_url,
-            headers,
-            # 实时流每次连接都从“当前直播点”读取，绝不能对持续流使用累计 -ss 偏移。
-            # chunk.start_seconds 只负责把识别结果换算为整场时间轴。
-            start_seconds=0 if is_live else chunk.start_seconds,
-            duration_seconds=duration_seconds,
+        can_use_buffer = bool(
+            audio_buffer
+            and (
+                (is_live and audio_buffer.is_running)
+                or audio_buffer.covers_range(
+                    float(chunk.start_seconds or 0),
+                    float(chunk.end_seconds or chunk.start_seconds or 0),
+                )
+            )
         )
+        if can_use_buffer:
+            pipe = audio_buffer.pipe_for_range(
+                float(chunk.start_seconds or 0),
+                float(duration_seconds or settings.ASR_CHUNK_SECONDS),
+            )
+        else:
+            pipe = M3u8Pipe(
+                m3u8_url,
+                headers,
+                # 没有连续缓存的老任务保留兼容路径：实时流从当前点读取，
+                # 已结束回放则按整场绝对时间定位。
+                start_seconds=0 if is_live else chunk.start_seconds,
+                duration_seconds=duration_seconds,
+            )
         heartbeat_task: asyncio.Task | None = None
         try:
             chunk.status = "processing"
@@ -886,7 +1267,7 @@ class AsrWorker:
             if not is_live and self._has_queued_live_task(db, task.id):
                 raise _YieldToLiveTask
 
-            async with self._funasr_connection_lock:
+            async with self._lane_coordinator.slot(task.task_type):
                 try:
                     # 先确保 FunASR 容器在运行（挂了就自动重启）
                     await self._ensure_funasr_alive()

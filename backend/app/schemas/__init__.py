@@ -192,6 +192,21 @@ class LiveAudienceProfileResponse(BaseModel):
     ratio: float = 0
     count: int = 0
 
+
+class TranscriptQualityResponse(BaseModel):
+    """话术覆盖完整度与真实语速。"""
+
+    status: str
+    coverage_percent: Optional[float] = None
+    covered_seconds: float = 0
+    duration_seconds: float = 0
+    missing_ranges: list[tuple[float, float]] = Field(default_factory=list)
+    speech_char_count: int = 0
+    speech_seconds: float = 0
+    speech_rate_cpm: Optional[int] = None
+    rate_source: str = "realtime_estimate"
+
+
 class LiveSessionDetailResponse(BaseModel):
     """直播场次详情页需要的完整采集结果。"""
 
@@ -201,6 +216,7 @@ class LiveSessionDetailResponse(BaseModel):
     profiles: list[LiveAudienceProfileResponse]
     stream_url: Optional[str] = None
     stream_source_count: int = 0
+    transcript_quality: TranscriptQualityResponse
 
 
 # ===== 评论 =====

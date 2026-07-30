@@ -17,6 +17,10 @@ from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
 from app.models.live_audience_profiles import LiveAudienceProfile
+from app.models.asr_audio_chunks import AsrAudioChunk
+from app.models.asr_tasks import AsrTask
+from app.models.transcript_segments import TranscriptSegment
+from app.services.asr.transcript_quality import assess_transcript_quality, elapsed_live_seconds
 from app.services.collector.stream_refresh import refresh_session_stream_url
 from app.services.collector.video_download import (
     _safe_ffmpeg_headers,
@@ -61,6 +65,76 @@ LIVE_SESSION_LIST_COLUMNS = (
     LiveSession.comments_count,
     LiveSession.leads_count,
 )
+
+
+def _session_duration_seconds(session: LiveSession) -> float:
+    """只使用场次真实时长；直播中按真实起播时间计算当前时长。"""
+    duration = float(getattr(session, "live_duration_seconds", 0) or 0)
+    if duration > 0:
+        return duration
+    live_start_time = getattr(session, "live_start_time", None)
+    live_end_time = getattr(session, "live_end_time", None)
+    live_status = getattr(session, "live_status", None)
+    if live_start_time and live_end_time:
+        return max(0.0, (live_end_time - live_start_time).total_seconds())
+    if live_status == "live" and live_start_time:
+        return elapsed_live_seconds(live_start_time)
+    return 0.0
+
+
+def _build_transcript_quality(db: Session, session: LiveSession) -> dict:
+    """优先按离线终稿计算，终稿未完成时展示实时初稿估算。"""
+    offline_task = (
+        db.query(AsrTask)
+        .filter(AsrTask.session_id == session.id, AsrTask.task_type == "offline")
+        .order_by(AsrTask.id.desc())
+        .first()
+    )
+    realtime_task = (
+        db.query(AsrTask)
+        .filter(AsrTask.session_id == session.id, AsrTask.task_type == "realtime")
+        .order_by(AsrTask.id.desc())
+        .first()
+    )
+    task = offline_task or realtime_task
+    use_offline_final = bool(offline_task and offline_task.status == "completed")
+    source = "offline" if use_offline_final else "realtime"
+    chunks = (
+        db.query(AsrAudioChunk)
+        .filter(AsrAudioChunk.task_id == task.id)
+        .order_by(AsrAudioChunk.chunk_index.asc())
+        .all()
+        if task
+        else []
+    )
+    visible_types = (
+        ("asr_offline",)
+        if use_offline_final
+        else ("asr_realtime",)
+    )
+    segments = (
+        db.query(TranscriptSegment)
+        .filter(
+            TranscriptSegment.session_id == session.id,
+            TranscriptSegment.segment_type.in_(visible_types),
+        )
+        .order_by(TranscriptSegment.segment_start.asc())
+        .all()
+    )
+    quality = assess_transcript_quality(
+        duration_seconds=_session_duration_seconds(session),
+        chunks=chunks,
+        segments=segments,
+        source=source,
+    ).to_dict()
+    if not task and quality["status"] != "waiting_duration":
+        quality["status"] = "waiting_transcript"
+    elif task and quality["status"] == "incomplete":
+        if task.status in {"queued", "processing"}:
+            quality["status"] = "repairing"
+        elif task.status == "failed":
+            quality["status"] = "repair_failed"
+    return quality
 
 
 def _attach_room_profile(session: LiveSession) -> dict:
@@ -201,6 +275,7 @@ def get_session_details(
         profiles=profiles,
         stream_url=latest_stream or session.stream_url,
         stream_source_count=len(stream_sources),
+        transcript_quality=_build_transcript_quality(db, session),
     )
 
 
