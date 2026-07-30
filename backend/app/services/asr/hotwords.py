@@ -36,6 +36,18 @@ _MANUAL_TERMS = [
 # FunASR hotwords 上限（官方建议不超过 200 个词，否则可能影响识别速度）
 MAX_HOTWORDS = 200
 
+# 区域分布文档中只有这些列表标签后面是品牌清单。
+# 其他标签（例如“面积要求”“共同特点”）属于说明文字，不能当作品牌。
+_BRAND_LIST_LABELS = {
+    "一线",
+    "二线",
+    "三线",
+    "疑似快招",
+    "品牌",
+    "品牌/备注",
+    "备注",
+}
+
 
 def _read_knowledge_files() -> str:
     """读取所有行业知识 Markdown 文件的原始文本。"""
@@ -47,6 +59,30 @@ def _read_knowledge_files() -> str:
             except Exception as exc:
                 logger.warning("读取行业知识文件 %s 失败: %s", md_file.name, exc)
     return "\n".join(texts)
+
+
+def _split_brand_segments(value: str) -> list[str]:
+    """按括号外的顿号拆分品牌，保留括号内的城市或业务说明。
+
+    例如“爽舌尖零食（江苏镇江、南通有部分门店）、零食转角”只能拆成
+    两个品牌，括号里的“南通有部分门店”不是第三个品牌。
+    """
+    segments: list[str] = []
+    current: list[str] = []
+    bracket_depth = 0
+    for char in value:
+        if char in "（(":
+            bracket_depth += 1
+        elif char in "）)" and bracket_depth > 0:
+            bracket_depth -= 1
+
+        if char == "、" and bracket_depth == 0:
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    segments.append("".join(current))
+    return segments
 
 
 def _extract_brand_names(text: str) -> set[str]:
@@ -72,15 +108,19 @@ def _extract_brand_names(text: str) -> set[str]:
         stripped = line.strip()
         if not (stripped.startswith("- ") or stripped.startswith("* ")):
             continue
-        # 找到冒号后的内容
+        # 只处理明确的品牌分类列表，避免把预算、面积和说明文字识别成品牌。
+        label_match = re.match(r"[-*]\s+\*\*([^*]+)\*\*\s*[：:]", stripped)
+        if not label_match or label_match.group(1).strip() not in _BRAND_LIST_LABELS:
+            continue
         if "：" not in stripped and ":" not in stripped:
             continue
         parts = re.split(r"[：:]", stripped, maxsplit=1)
         if len(parts) < 2:
             continue
         after_colon = parts[1]
-        # 按顿号分割（也处理逗号分隔的情况）
-        segments = re.split(r"[、，,]", after_colon)
+        # 品牌之间使用顿号；括号内的逗号属于总部说明，不能在这里切开，
+        # 否则“另设广州总部）”会被误识别成一个品牌。
+        segments = _split_brand_segments(after_colon)
         for seg in segments:
             seg = seg.strip()
             # 提取括号前的品牌名（也可能没有括号）
@@ -93,7 +133,7 @@ def _extract_brand_names(text: str) -> set[str]:
                 "一线", "二线", "三线", "品牌", "备注", "参考", "提示", "共同",
                 "整体", "正常", "卖场", "门头", "以下", "开放区域", "强势区域",
                 "未开放", "门店规模", "总部", "代言人", "项目", "内容", "地区",
-                "品牌/备注", "疑似快招", "开店预算", "面积要求", "回本周期",
+                "品牌/备注", "黑榜品牌", "疑似快招", "开店预算", "面积要求", "回本周期",
                 "投资预算", "区域保护", "零食折扣店",
             }
             if name not in skip_words and 2 <= len(name) <= 16:
@@ -114,7 +154,11 @@ def _extract_brand_names(text: str) -> set[str]:
                 brand_cell = cells[-1]  # 最后一列是品牌名
                 for seg in re.split(r"[、，,]", brand_cell):
                     name = seg.strip()
-                    if 2 <= len(name) <= 16:
+                    if (
+                        2 <= len(name) <= 16
+                        and name != "黑榜品牌"
+                        and not re.fullmatch(r"[-:：\s]+", name)
+                    ):
                         brands.add(name)
 
     return brands
@@ -135,11 +179,37 @@ def _extract_locations(text: str) -> set[str]:
         if loc and len(loc) <= 6:
             locations.add(loc)
 
-    # 城市名（从括号中的总部城市提取，如"来优品（安徽合肥）"）
+    # 城市名（从括号中的总部城市提取，如“来优品（安徽合肥）”）。
+    # 带业务说明的括号不是地名，必须先排除，避免污染识别模型。
+    location_noise = (
+        "另设",
+        "总部",
+        "部分门店",
+        "待核实",
+        "未知",
+        "隶属",
+        "合并",
+        "开放",
+        "重复条目",
+        "疑似",
+        "品牌",
+        "门店",
+        "列表",
+        "房租",
+        "速查",
+        "手册",
+        "避坑",
+        "黑榜",
+    )
     for match in re.finditer(r"（([^）)]{2,8})）", text):
         inner = match.group(1).strip()
         # 过滤数字、特殊字符，只保留可能的地名
-        if inner and not re.search(r"[0-9万㎡以年月日代～~]", inner) and len(inner) <= 8:
+        if (
+            inner
+            and not any(marker in inner for marker in location_noise)
+            and not re.search(r"[0-9万㎡以年月日代～~、，,/]", inner)
+            and len(inner) <= 8
+        ):
             # 省+市组合（如"安徽合肥"），整体加入
             locations.add(inner)
             # 也把城市单独加入（如"合肥"）
@@ -155,34 +225,15 @@ def _extract_industry_terms(text: str) -> set[str]:
 
     关注关键词：快招、割韭菜、回本周期、投资预算、区域保护 等
     """
-    # 这些术语在 _MANUAL_TERMS 中已经覆盖，
-    # 这里从文档中额外提取文档里特有的术语
-    additional: set[str] = set()
-
-    # 提取"疑似快招"相关的关键词模式
-    term_patterns = [
-        r"(快招\S*)",
-        r"(割\S*菜)",
-        r"(回本\S*)",
-        r"(投资预算\S*)",
-        r"(区域保护\S*)",
-        r"(加盟\S*)",
-        r"(选址\S*)",
-        r"(转让费\S*)",
-    ]
-    for pattern in term_patterns:
-        for match in re.finditer(pattern, text):
-            term = match.group(1)
-            if 2 <= len(term) <= 10:
-                additional.add(term)
-
-    return additional
+    # 行业术语必须来自人工确认的词表。原来的 ``\S*`` 贪婪匹配会把
+    # “回本周期：正常门店”等整段说明截进热词，反而降低识别准确率。
+    return {term for term in _MANUAL_TERMS if term in text}
 
 
 def extract_hotwords() -> list[str]:
     """从行业知识文档中提取所有热词。
 
-    返回按优先级排序的热词列表（品牌名 > 术语 > 地名）。
+    返回按优先级排序的热词列表（术语 > 品牌名 > 地名）。
     FunASR hotwords 参数建议不超过 200 个词。
 
     Returns:
@@ -215,8 +266,13 @@ def extract_hotwords() -> list[str]:
         if term not in all_terms:
             all_terms.append(term)
 
-    logger.info("从行业知识中提取了 %d 个热词（品牌 %d + 地名 %d + 术语 %d）",
-                len(all_terms), len(brands), len(locations), len(doc_terms) + len(_MANUAL_TERMS))
+    logger.info(
+        "行业知识热词合并去重后共 %d 个（候选品牌 %d、候选地名 %d、固定术语 %d）",
+        len(all_terms),
+        len(brands),
+        len(locations),
+        len(_MANUAL_TERMS),
+    )
 
     # FunASR hotwords 建议不超过 200 个
     if len(all_terms) > MAX_HOTWORDS:

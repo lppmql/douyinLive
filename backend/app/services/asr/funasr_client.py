@@ -13,6 +13,7 @@ from websockets.protocol import State
 
 from app.core.config import settings
 from app.core.logger import logger
+from app.services.asr.hotwords import get_hotwords_cached
 
 
 # 模拟话术片段（供 mock 模式使用）
@@ -173,6 +174,13 @@ class FunasrClient:
 
     def build_start_message(self, task_type: str) -> dict:
         """生成一条可测试的握手消息，避免协议选择散落在发送循环里。"""
+        try:
+            hotwords = get_hotwords_cached()
+        except Exception as exc:
+            # 行业知识文件损坏不能阻断整场转写；降级为空热词并保留告警，
+            # 后续纠错器仍会使用手工维护的标准词典。
+            logger.warning("加载 ASR 行业热词失败，本次按无热词模式继续: %s", exc)
+            hotwords = ""
         return {
             "mode": self.protocol_mode_for(task_type),
             "chunk_size": [5, 10, 5],
@@ -183,7 +191,7 @@ class FunasrClient:
             "wav_name": str(self._session_id),
             "wav_format": "pcm",
             "is_speaking": True,
-            "hotwords": "",
+            "hotwords": hotwords,
             "itn": True,
         }
 
