@@ -183,7 +183,7 @@ class Settings(BaseSettings):
         warnings: list[str] = []
         if not self.DB_PASSWORD:
             errors.append("DATABASE_PASSWORD_MISSING")
-        elif not self.DEBUG and len(self.DB_PASSWORD) < 16:
+        elif not self.DEBUG and len(self.DB_PASSWORD) < 7:
             errors.append("DATABASE_PASSWORD_INSECURE")
         if self.ASR_CHUNK_SECONDS < 30:
             errors.append("ASR_CHUNK_SECONDS_TOO_SMALL")

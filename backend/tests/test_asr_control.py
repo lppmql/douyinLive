@@ -22,6 +22,8 @@ def test_worker_pids_excludes_pgrep_and_shell_commands():
             ["ps", "-axo", "pid=,comm=,args="],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             check=False,
         )
 
