@@ -71,6 +71,22 @@ export function fetchLiveSessionData(id: number) {
   return backendRequest<Api.Douyin.LiveSessionDetail>({ url: `${API_PREFIX}/live-sessions/${id}/details` });
 }
 
+/** 启动本场评论用户公开资料补全；后端使用独立 Cookie 和固定指纹低速执行。 */
+export function startSessionProfileEnrichment(id: number, force = false) {
+  return backendRequest<Api.Douyin.CommentProfileEnrichmentStatus>({
+    url: `${API_PREFIX}/live-sessions/${id}/profile-enrichment`,
+    method: 'POST',
+    params: { force }
+  });
+}
+
+/** 获取评论用户公开资料补全队列状态，响应不包含 Cookie 或用户身份。 */
+export function fetchProfileEnrichmentStatus() {
+  return backendRequest<Api.Douyin.CommentProfileEnrichmentStatus>({
+    url: `${API_PREFIX}/live-sessions/system/profile-enrichment/status`
+  });
+}
+
 /** 获取同源代理的真实主播头像，避免抖音 CDN 限制跨站嵌入。 */
 export function getLiveSessionAvatarUrl(id: number) {
   const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';

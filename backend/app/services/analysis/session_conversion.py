@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.comments import Comment
+from app.models.comment_user_profiles import CommentUserProfile
 from app.models.leads import Lead
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
@@ -248,12 +249,37 @@ def build_session_conversion_analysis(
             leads_by_douyin[normalized].append(lead)
 
     users: list[dict[str, Any]] = []
+    sec_uids = {item.user_sec_uid for item in comments if item.user_sec_uid}
+    cached_profiles = {
+        item.sec_uid: item
+        for item in db.query(CommentUserProfile)
+        .filter(CommentUserProfile.sec_uid.in_(sec_uids))
+        .all()
+    } if sec_uids else {}
     for identity, rows in grouped.items():
         rows.sort(key=lambda item: (item.comment_time is None, item.comment_time, item.id))
         text = "\n".join((item.comment_content or "").strip() for item in rows)
         topics = _topics(text)
-        public_id = next((item.user_douyin_id for item in rows if item.user_douyin_id), None)
-        matched_leads = leads_by_douyin.get(_normalize_douyin_id(public_id), []) if public_id else []
+        sec_uid = next((item.user_sec_uid for item in rows if item.user_sec_uid), None)
+        cached_profile = cached_profiles.get(sec_uid) if sec_uid else None
+        public_id = (
+            cached_profile.public_douyin_id
+            if cached_profile and cached_profile.public_douyin_id
+            else next((item.user_douyin_id for item in rows if item.user_douyin_id), None)
+        )
+        public_candidates = list(dict.fromkeys(filter(None, [
+            public_id,
+            cached_profile.unique_id if cached_profile else None,
+            cached_profile.short_id if cached_profile else None,
+        ])))
+        matched_leads = []
+        matched_id = None
+        for candidate in public_candidates:
+            candidate_leads = leads_by_douyin.get(_normalize_douyin_id(candidate), [])
+            if candidate_leads:
+                matched_id = candidate
+                matched_leads.extend(candidate_leads)
+                break
         comment_seconds = [value for item in rows if (value := _relative_seconds(session, item)) is not None]
         first_seconds = min(comment_seconds) if comment_seconds else None
         last_seconds = max(comment_seconds) if comment_seconds else None
@@ -277,7 +303,13 @@ def build_session_conversion_analysis(
                 "user_nickname": next((item.user_nickname for item in rows if item.user_nickname), None),
                 "user_avatar_comment_id": next((int(item.id) for item in rows if item.user_avatar_url), None),
                 "user_douyin_id": public_id,
-                "profile_status": "complete" if public_id and any(item.user_avatar_url for item in rows) else "platform_not_provided",
+                "user_unique_id": cached_profile.unique_id if cached_profile else None,
+                "user_short_id": cached_profile.short_id if cached_profile else None,
+                "douyin_id_type": cached_profile.douyin_id_type if cached_profile else None,
+                "profile_status": (
+                    cached_profile.fetch_status
+                    if cached_profile else "pending"
+                ),
                 "comment_count": len(rows),
                 "comments": [
                     {"id": int(item.id), "content": item.comment_content or "", "comment_time": item.comment_time}
@@ -286,7 +318,11 @@ def build_session_conversion_analysis(
                 "intent_topics": topics,
                 "intent_level": "high" if "资料领取" in topics or matched_leads else "medium" if high_intent else "low",
                 "has_lead": bool(matched_leads),
-                "lead_match_method": "douyin_id_exact" if matched_leads else None,
+                "lead_match_method": (
+                    "unique_id_exact" if matched_leads and cached_profile and matched_id == cached_profile.unique_id
+                    else "short_id_exact" if matched_leads and cached_profile and matched_id == cached_profile.short_id
+                    else "douyin_id_exact" if matched_leads else None
+                ),
                 "lead_time": matched_leads[0].create_time if matched_leads else None,
                 "host_responded": bool(nearby_segments),
                 "hook_action_detected": bool(nearby_hooks),

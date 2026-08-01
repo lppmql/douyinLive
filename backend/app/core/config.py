@@ -103,6 +103,21 @@ class Settings(BaseSettings):
     COMMENT_COLLECT_INTERVAL: int = 60
     PROFILE_COLLECT_INTERVAL: int = 120
 
+    # 评论用户公开资料补全使用独立 Cookie 与固定浏览器指纹，不复用企业后台采集账号。
+    DOUYIN_PROFILE_COOKIE_FILE: str = "data/private/douyin_profile_cookie.txt"
+    DOUYIN_PROFILE_USER_AGENT: str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+    DOUYIN_PROFILE_SEC_CH_UA: str = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
+    DOUYIN_PROFILE_PLATFORM: str = "macOS"
+    DOUYIN_PROFILE_LOCALE: str = "zh-CN"
+    DOUYIN_PROFILE_TIMEZONE: str = "Asia/Shanghai"
+    DOUYIN_PROFILE_VIEWPORT_WIDTH: int = 1920
+    DOUYIN_PROFILE_VIEWPORT_HEIGHT: int = 1080
+    DOUYIN_PROFILE_REQUEST_INTERVAL_SECONDS: float = 1.5
+    DOUYIN_PROFILE_BATCH_SIZE: int = 30
+    DOUYIN_PROFILE_BATCH_PAUSE_SECONDS: float = 10
+    DOUYIN_PROFILE_CACHE_DAYS: int = 30
+    DOUYIN_PROFILE_REQUEST_TIMEOUT_SECONDS: int = 20
+
     # 数据采集控制中心调度。0 表示自动同步一次处理全部待补齐场次。
     COLLECTOR_SERVICE_TICK_SECONDS: int = 10
     DATA_REFRESH_INTERVAL_SECONDS: int = 600
@@ -207,6 +222,14 @@ class Settings(BaseSettings):
             errors.append("MONITOR_INTERVAL_TOO_SMALL")
         if self.COLLECTOR_SERVICE_TICK_SECONDS < 5:
             errors.append("COLLECTOR_SERVICE_TICK_TOO_SMALL")
+        if not 0.5 <= self.DOUYIN_PROFILE_REQUEST_INTERVAL_SECONDS <= 30:
+            errors.append("DOUYIN_PROFILE_INTERVAL_INVALID")
+        if not 1 <= self.DOUYIN_PROFILE_BATCH_SIZE <= 100:
+            errors.append("DOUYIN_PROFILE_BATCH_SIZE_INVALID")
+        if not 0 <= self.DOUYIN_PROFILE_BATCH_PAUSE_SECONDS <= 300:
+            errors.append("DOUYIN_PROFILE_BATCH_PAUSE_INVALID")
+        if not 1 <= self.DOUYIN_PROFILE_CACHE_DAYS <= 365:
+            errors.append("DOUYIN_PROFILE_CACHE_DAYS_INVALID")
         if self.CONTINUOUS_TASK_BATCH_SIZE < 0:
             errors.append("CONTINUOUS_TASK_BATCH_INVALID")
         if not 10 <= self.KEZI_SYNC_INTERVAL_SECONDS <= 3600:

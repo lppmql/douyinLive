@@ -264,6 +264,9 @@ class AudienceUserInsightResponse(BaseModel):
     user_nickname: Optional[str] = None
     user_avatar_comment_id: Optional[int] = None
     user_douyin_id: Optional[str] = None
+    user_unique_id: Optional[str] = None
+    user_short_id: Optional[str] = None
+    douyin_id_type: Optional[str] = None
     profile_status: str
     comment_count: int = 0
     comments: list[AudienceCommentResponse] = Field(default_factory=list)
@@ -290,6 +293,28 @@ class SessionDataCoverageResponse(BaseModel):
     session_lead_count: int = 0
     avatar_coverage_percent: float = 0
     douyin_id_coverage_percent: float = 0
+    profile_enrichment_status: str = "idle"
+    profile_enrichment_completed: int = 0
+    profile_enrichment_total: int = 0
+
+
+class CommentProfileEnrichmentStatusResponse(BaseModel):
+    """评论用户公开资料补全队列状态，不包含 Cookie 或用户身份明文。"""
+
+    status: str = "idle"
+    scope: Optional[str] = None
+    total: int = 0
+    completed: int = 0
+    success: int = 0
+    partial: int = 0
+    failed: int = 0
+    message: str = ""
+    configured: bool = False
+    cookie_file_secure: bool = False
+    fingerprint_configured: bool = False
+    batch_size: int = 0
+    request_interval_seconds: float = 0
+    cooldown_seconds: int = 0
 
 
 class LiveSessionDetailResponse(BaseModel):

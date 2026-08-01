@@ -319,6 +319,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/live-sessions/system/profile-enrichment/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Comment Profile Enrichment Status
+         * @description 获取公开资料补全进度；响应不包含 Cookie 或用户身份。
+         */
+        get: operations["get_comment_profile_enrichment_status_api_v1_live_sessions_system_profile_enrichment_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/live-sessions/{session_id}/profile-enrichment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Session Comment Profile Enrichment
+         * @description 按高意向优先顺序补齐本场评论用户公开资料。
+         */
+        post: operations["start_session_comment_profile_enrichment_api_v1_live_sessions__session_id__profile_enrichment_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/live-sessions/system/profile-enrichment/backfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start All Comment Profile Enrichment
+         * @description 按高意向和最近评论优先顺序低速回填全部历史用户。
+         */
+        post: operations["start_all_comment_profile_enrichment_api_v1_live_sessions_system_profile_enrichment_backfill_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/live-sessions/{session_id}/avatar": {
         parameters: {
             query?: never;
@@ -2920,6 +2980,12 @@ export interface components {
             user_avatar_comment_id?: number | null;
             /** User Douyin Id */
             user_douyin_id?: string | null;
+            /** User Unique Id */
+            user_unique_id?: string | null;
+            /** User Short Id */
+            user_short_id?: string | null;
+            /** Douyin Id Type */
+            douyin_id_type?: string | null;
             /** Profile Status */
             profile_status: string;
             /**
@@ -3327,6 +3393,79 @@ export interface components {
              * @description 关键词
              */
             keywords?: string | null;
+        };
+        /**
+         * CommentProfileEnrichmentStatusResponse
+         * @description 评论用户公开资料补全队列状态，不包含 Cookie 或用户身份明文。
+         */
+        CommentProfileEnrichmentStatusResponse: {
+            /**
+             * Status
+             * @default idle
+             */
+            status: string;
+            /** Scope */
+            scope?: string | null;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Completed
+             * @default 0
+             */
+            completed: number;
+            /**
+             * Success
+             * @default 0
+             */
+            success: number;
+            /**
+             * Partial
+             * @default 0
+             */
+            partial: number;
+            /**
+             * Failed
+             * @default 0
+             */
+            failed: number;
+            /**
+             * Message
+             * @default
+             */
+            message: string;
+            /**
+             * Configured
+             * @default false
+             */
+            configured: boolean;
+            /**
+             * Cookie File Secure
+             * @default false
+             */
+            cookie_file_secure: boolean;
+            /**
+             * Fingerprint Configured
+             * @default false
+             */
+            fingerprint_configured: boolean;
+            /**
+             * Batch Size
+             * @default 0
+             */
+            batch_size: number;
+            /**
+             * Request Interval Seconds
+             * @default 0
+             */
+            request_interval_seconds: number;
+            /**
+             * Cooldown Seconds
+             * @default 0
+             */
+            cooldown_seconds: number;
         };
         /** CommentResponse */
         CommentResponse: {
@@ -3891,19 +4030,40 @@ export interface components {
              * @default 0
              */
             related_lead_count: number;
-            /** @default 0 */
+            /**
+             * Comment After 5M
+             * @default 0
+             */
             comment_after_5m: number;
-            /** @default 0 */
+            /**
+             * Comment After 15M
+             * @default 0
+             */
             comment_after_15m: number;
-            /** @default 0 */
+            /**
+             * Comment After 30M
+             * @default 0
+             */
             comment_after_30m: number;
-            /** @default 0 */
+            /**
+             * Lead After 5M
+             * @default 0
+             */
             lead_after_5m: number;
-            /** @default 0 */
+            /**
+             * Lead After 15M
+             * @default 0
+             */
             lead_after_15m: number;
-            /** @default 0 */
+            /**
+             * Lead After 30M
+             * @default 0
+             */
             lead_after_30m: number;
-            /** @default 0 */
+            /**
+             * High Intent User Count
+             * @default 0
+             */
             high_intent_user_count: number;
             /** Attribution Label */
             attribution_label: string;
@@ -5995,6 +6155,21 @@ export interface components {
              * @default 0
              */
             douyin_id_coverage_percent: number;
+            /**
+             * Profile Enrichment Status
+             * @default idle
+             */
+            profile_enrichment_status: string;
+            /**
+             * Profile Enrichment Completed
+             * @default 0
+             */
+            profile_enrichment_completed: number;
+            /**
+             * Profile Enrichment Total
+             * @default 0
+             */
+            profile_enrichment_total: number;
         };
         /**
          * SoybeanResponse
@@ -7303,6 +7478,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LiveSessionDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_comment_profile_enrichment_status_api_v1_live_sessions_system_profile_enrichment_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentProfileEnrichmentStatusResponse"];
+                };
+            };
+        };
+    };
+    start_session_comment_profile_enrichment_api_v1_live_sessions__session_id__profile_enrichment_post: {
+        parameters: {
+            query?: {
+                /** @description 是否忽略缓存强制刷新 */
+                force?: boolean;
+            };
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentProfileEnrichmentStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_all_comment_profile_enrichment_api_v1_live_sessions_system_profile_enrichment_backfill_post: {
+        parameters: {
+            query?: {
+                /** @description 是否忽略缓存强制刷新 */
+                force?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommentProfileEnrichmentStatusResponse"];
                 };
             };
             /** @description Validation Error */

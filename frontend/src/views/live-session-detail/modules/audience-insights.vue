@@ -48,7 +48,10 @@ function formatTime(value: string | null) {
               />
               <div class="min-w-0 flex-1">
                 <div class="truncate font-600">{{ user.user_nickname || '匿名用户' }}</div>
-                <div class="truncate text-11px text-gray-400">抖音号 {{ user.user_douyin_id || '平台未提供' }}</div>
+                <div class="truncate text-11px text-gray-400">
+                  {{ user.douyin_id_type === 'short_id' ? '数字短号' : '抖音号' }}
+                  {{ user.user_douyin_id || '等待补全' }}
+                </div>
               </div>
               <NTag :type="user.has_lead ? 'success' : 'default'" :bordered="false" round>
                 {{ user.has_lead ? '已留资' : '未留资' }}
@@ -83,7 +86,10 @@ function formatTime(value: string | null) {
               <div class="mb-3px font-600">转化建议</div>
               {{ user.recommendation }}
             </div>
-            <div v-if="user.has_lead" class="text-11px text-gray-400">精确匹配 · 留资时间 {{ formatTime(user.lead_time) }}</div>
+            <div v-if="user.has_lead" class="text-11px text-gray-400">
+              {{ user.lead_match_method === 'short_id_exact' ? '数字短号精确匹配' : '自定义抖音号精确匹配' }}
+              · 留资时间 {{ formatTime(user.lead_time) }}
+            </div>
           </NSpace>
         </NCard>
       </NGi>

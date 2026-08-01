@@ -17,6 +17,7 @@ from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
 from app.services.analysis.session_conversion import build_session_conversion_analysis
+from app.services.collector.comment_profile_enrichment import comment_profile_enrichment_manager
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.asr_tasks import AsrTask
@@ -41,6 +42,7 @@ from app.schemas import (
     LiveSessionResponse,
     LiveSessionUpdate,
     MessageResponse,
+    CommentProfileEnrichmentStatusResponse,
 )
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
@@ -279,6 +281,13 @@ def get_session_details(
         .all()
     )
     conversion = build_session_conversion_analysis(db, session, analysis_comments, total_comment_count)
+    enrichment = comment_profile_enrichment_manager.snapshot()
+    enrichment_is_current_session = enrichment.get("scope") == f"session:{session_id}"
+    conversion["data_coverage"].update(
+        profile_enrichment_status=enrichment["status"] if enrichment_is_current_session else "idle",
+        profile_enrichment_completed=enrichment["completed"] if enrichment_is_current_session else 0,
+        profile_enrichment_total=enrichment["total"] if enrichment_is_current_session else 0,
+    )
 
     return LiveSessionDetailResponse(
         session=LiveSessionResponse(**_attach_room_profile(session)),
@@ -293,6 +302,52 @@ def get_session_details(
         audience_users=conversion["audience_users"],
         data_coverage=conversion["data_coverage"],
     )
+
+
+@router.get("/system/profile-enrichment/status", response_model=CommentProfileEnrichmentStatusResponse)
+def get_comment_profile_enrichment_status():
+    """获取公开资料补全进度；响应不包含 Cookie 或用户身份。"""
+    return comment_profile_enrichment_manager.snapshot()
+
+
+@router.post("/{session_id}/profile-enrichment", response_model=CommentProfileEnrichmentStatusResponse)
+async def start_session_comment_profile_enrichment(
+    session_id: int,
+    force: bool = Query(False, description="是否忽略缓存强制刷新"),
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    """按高意向优先顺序补齐本场评论用户公开资料。"""
+    if not db.get(LiveSession, session_id):
+        raise HTTPException(404, "直播场次不存在")
+    try:
+        return comment_profile_enrichment_manager.start(session_id=session_id, force=force)
+    except RuntimeError as exc:
+        if str(exc) == "PROFILE_COOKIE_NOT_CONFIGURED":
+            raise HTTPException(409, "评论用户资料专用 Cookie 尚未配置") from exc
+        if str(exc) == "PROFILE_TASK_BUSY":
+            raise HTTPException(409, "其他范围的用户资料补全任务正在运行，请完成后再试") from exc
+        if str(exc) == "PROFILE_TASK_COOLDOWN":
+            raise HTTPException(429, "平台风控冷却中，请稍后再试") from exc
+        raise
+
+
+@router.post("/system/profile-enrichment/backfill", response_model=CommentProfileEnrichmentStatusResponse)
+async def start_all_comment_profile_enrichment(
+    force: bool = Query(False, description="是否忽略缓存强制刷新"),
+    _user: User = Depends(get_current_user),
+):
+    """按高意向和最近评论优先顺序低速回填全部历史用户。"""
+    try:
+        return comment_profile_enrichment_manager.start(session_id=None, force=force)
+    except RuntimeError as exc:
+        if str(exc) == "PROFILE_COOKIE_NOT_CONFIGURED":
+            raise HTTPException(409, "评论用户资料专用 Cookie 尚未配置") from exc
+        if str(exc) == "PROFILE_TASK_BUSY":
+            raise HTTPException(409, "其他范围的用户资料补全任务正在运行，请完成后再试") from exc
+        if str(exc) == "PROFILE_TASK_COOLDOWN":
+            raise HTTPException(429, "平台风控冷却中，请稍后再试") from exc
+        raise
 
 
 @router.get("/{session_id}/avatar")

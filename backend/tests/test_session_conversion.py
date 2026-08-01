@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta
 
 from app.models.comments import Comment
+from app.models.comment_user_profiles import CommentUserProfile
 from app.models.leads import Lead
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
@@ -99,6 +100,46 @@ def test_nickname_or_sec_uid_never_fakes_lead_match(db):
 
     assert result["audience_users"][0]["has_lead"] is False
     assert result["summary"]["exact_matched_user_count"] == 0
+
+
+def test_cached_short_id_can_exactly_match_lead_while_unique_id_is_displayed(db):
+    """自定义号用于展示时，数字短号仍可作为独立精确匹配依据。"""
+    session = _session(db)
+    comment = Comment(
+        session_id=session.id,
+        user_nickname="双号码用户",
+        user_sec_uid="stable-both-id-user",
+        user_douyin_id="custom_public_id",
+        comment_content="想领取选址表",
+        comment_time=session.live_start_time + timedelta(minutes=5),
+    )
+    db.add_all([
+        comment,
+        CommentUserProfile(
+            sec_uid="stable-both-id-user",
+            unique_id="custom_public_id",
+            short_id="123456789",
+            public_douyin_id="custom_public_id",
+            douyin_id_type="unique_id",
+            fetch_status="success",
+        ),
+        Lead(
+            session_id=session.id,
+            douyin_id="123456789",
+            external_source="test",
+            external_id=22,
+            attribution_status="matched",
+            create_time=session.live_start_time + timedelta(minutes=6),
+        ),
+    ])
+    db.commit()
+
+    result = build_session_conversion_analysis(db, session, [comment])
+    user = result["audience_users"][0]
+
+    assert user["user_douyin_id"] == "custom_public_id"
+    assert user["has_lead"] is True
+    assert user["lead_match_method"] == "short_id_exact"
 
 
 def test_pending_lead_is_not_counted_as_confirmed_even_when_time_matches(db):

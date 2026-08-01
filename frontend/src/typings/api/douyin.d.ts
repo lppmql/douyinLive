@@ -354,13 +354,16 @@ declare namespace Api {
       user_nickname: string | null;
       user_avatar_comment_id: number | null;
       user_douyin_id: string | null;
-      profile_status: 'complete' | 'platform_not_provided' | string;
+      user_unique_id: string | null;
+      user_short_id: string | null;
+      douyin_id_type: 'unique_id' | 'short_id' | null;
+      profile_status: 'pending' | 'running' | 'success' | 'partial' | 'failed' | 'blocked' | string;
       comment_count: number;
       comments: Array<{ id: number; content: string; comment_time: string | null }>;
       intent_topics: string[];
       intent_level: 'high' | 'medium' | 'low';
       has_lead: boolean;
-      lead_match_method: 'douyin_id_exact' | null;
+      lead_match_method: 'douyin_id_exact' | 'unique_id_exact' | 'short_id_exact' | null;
       lead_time: string | null;
       host_responded: boolean;
       hook_action_detected: boolean;
@@ -380,6 +383,26 @@ declare namespace Api {
       session_lead_count: number;
       avatar_coverage_percent: number;
       douyin_id_coverage_percent: number;
+      profile_enrichment_status: string;
+      profile_enrichment_completed: number;
+      profile_enrichment_total: number;
+    }
+
+    interface CommentProfileEnrichmentStatus {
+      status: 'idle' | 'starting' | 'running' | 'completed' | 'failed' | 'blocked';
+      scope: string | null;
+      total: number;
+      completed: number;
+      success: number;
+      partial: number;
+      failed: number;
+      message: string;
+      configured: boolean;
+      cookie_file_secure: boolean;
+      fingerprint_configured: boolean;
+      batch_size: number;
+      request_interval_seconds: number;
+      cooldown_seconds: number;
     }
 
     interface TranscriptQuality {

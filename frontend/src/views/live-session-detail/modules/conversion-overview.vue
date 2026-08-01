@@ -1,10 +1,76 @@
 <script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { useMessage } from 'naive-ui';
+import { fetchProfileEnrichmentStatus, startSessionProfileEnrichment } from '@/service/api/douyin';
+import { unwrapServiceData } from '@/utils/service';
+
 defineOptions({ name: 'LiveConversionOverview' });
-defineProps<{
+const props = defineProps<{
+  sessionId: number;
   summary: Api.Douyin.ConversionSummary;
   hooks: Api.Douyin.HookEvent[];
   coverage: Api.Douyin.SessionDataCoverage;
 }>();
+const emit = defineEmits<{ refresh: [] }>();
+const message = useMessage();
+const enrichment = ref<Api.Douyin.CommentProfileEnrichmentStatus | null>(null);
+const starting = ref(false);
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pollFailures = 0;
+const currentScope = computed(() => `session:${props.sessionId}`);
+const enrichmentRunning = computed(() =>
+  Boolean(
+    enrichment.value?.scope === currentScope.value &&
+    ['starting', 'running'].includes(enrichment.value.status)
+  )
+);
+
+function schedulePoll() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollStatus, 2000);
+}
+
+async function pollStatus() {
+  try {
+    enrichment.value = unwrapServiceData(await fetchProfileEnrichmentStatus(), '未获取到资料补全状态');
+    pollFailures = 0;
+    if (enrichmentRunning.value) {
+      schedulePoll();
+    } else if (enrichment.value.scope === currentScope.value && enrichment.value.status === 'completed') {
+      emit('refresh');
+    }
+  } catch {
+    pollFailures += 1;
+    if (pollFailures <= 3) {
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(pollStatus, 2000 * pollFailures);
+    } else {
+      enrichment.value = null;
+    }
+  }
+}
+
+async function startEnrichment() {
+  if (starting.value) return;
+  starting.value = true;
+  try {
+    enrichment.value = unwrapServiceData(
+      await startSessionProfileEnrichment(props.sessionId),
+      '后端没有返回资料补全任务状态'
+    );
+    message.success(enrichment.value.message || '评论用户资料补全已启动');
+    schedulePoll();
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : '评论用户资料补全启动失败');
+  } finally {
+    starting.value = false;
+  }
+}
+
+onUnmounted(() => {
+  if (pollTimer) clearTimeout(pollTimer);
+});
+onMounted(pollStatus);
 </script>
 
 <template>
@@ -30,6 +96,29 @@ defineProps<{
       {{ hooks.length ? `已将 ${hooks.length} 个钩子或铺垫节点合并到上方“统一时间轴”，可按“转化钩子”筛选并点击回看。` : '真实话术中暂未识别到钩子或钩子铺垫。' }}
     </NAlert>
     <NDivider title-placement="left">用户身份采集覆盖</NDivider>
+    <div class="mb-14px flex flex-wrap items-center justify-between gap-10px">
+      <div class="text-12px text-gray-500">
+        使用独立资料 Cookie 与固定指纹低速补全，不占用企业后台采集账号。
+      </div>
+      <NButton
+        size="small"
+        type="primary"
+        secondary
+        :loading="starting || enrichmentRunning"
+        @click="startEnrichment"
+      >
+        补全本场用户资料
+      </NButton>
+    </div>
+    <NProgress
+      v-if="enrichment && enrichment.scope === currentScope && enrichment.total > 0"
+      class="mb-14px"
+      type="line"
+      :percentage="Math.round((enrichment.completed * 100) / enrichment.total)"
+      :status="enrichment.status === 'failed' || enrichment.status === 'blocked' ? 'error' : 'default'"
+      indicator-placement="inside"
+      processing
+    />
     <NGrid :x-gap="16" :y-gap="10" cols="1 s:2" responsive="screen">
       <NGi>
         <div class="mb-6px flex justify-between text-12px"><span>头像</span><span>{{ coverage.avatar_user_count }}/{{ coverage.comment_user_count }}</span></div>
@@ -40,6 +129,6 @@ defineProps<{
         <NProgress type="line" :percentage="coverage.douyin_id_coverage_percent" :height="8" />
       </NGi>
     </NGrid>
-    <div class="mt-10px text-12px text-gray-500">平台未返回的身份字段保持为空，不使用 sec_uid 冒充公开抖音号。</div>
+    <div class="mt-10px text-12px text-gray-500">优先展示自定义抖音号，无自定义号时展示平台数字短号；不使用 sec_uid 冒充抖音号。</div>
   </NCard>
 </template>

@@ -207,9 +207,11 @@ onMounted(load);
       <ReviewWorkbench v-if="detail" :session-id="Number(id)" :detail="detail" @refresh-detail="load" />
 
       <ConversionOverview
+        :session-id="Number(id)"
         :summary="detail.conversion_summary"
         :hooks="detail.hook_events"
         :coverage="detail.data_coverage"
+        @refresh="load"
       />
 
       <NGrid :x-gap="16" :y-gap="16" cols="1 s:2 m:4 l:4 xl:7" responsive="screen">
