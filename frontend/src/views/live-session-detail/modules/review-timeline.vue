@@ -11,12 +11,13 @@ const props = defineProps<{
   segments: Api.Douyin.ReviewTranscriptSegment[];
   findings: Api.Douyin.ReviewFinding[];
   alerts: Api.Douyin.ReviewLiveAlert[];
+  hooks: Api.Douyin.HookEvent[];
 }>();
 const emit = defineEmits<{
   updateFinding: [finding: Api.Douyin.ReviewFinding, status: Api.Douyin.ReviewFinding['status']];
 }>();
 
-type EventKind = 'alert' | 'finding' | 'comment' | 'transcript' | 'metric';
+type EventKind = 'alert' | 'hook' | 'finding' | 'comment' | 'transcript' | 'metric';
 interface TimelineEvent {
   key: string;
   kind: EventKind;
@@ -28,13 +29,16 @@ interface TimelineEvent {
   severity?: Api.Douyin.ReviewFinding['severity'];
   findingId?: number;
   finding?: Api.Douyin.ReviewFinding;
+  hook?: Api.Douyin.HookEvent;
 }
 
 const reviewStore = useReviewStore();
 const { currentSecond, selectedEvidenceId } = storeToRefs(reviewStore);
-const enabledKinds = ref<EventKind[]>(['alert', 'finding', 'comment', 'transcript']);
+// 默认突出可执行的告警、钩子、发现与评论；完整主播话术按需打开，避免数百个 ASR 节点淹没转化动作。
+const enabledKinds = ref<EventKind[]>(['alert', 'hook', 'finding', 'comment']);
 const kindOptions: Array<{ label: string; value: EventKind }> = [
   { label: '实时告警', value: 'alert' },
+  { label: '转化钩子', value: 'hook' },
   { label: '复盘发现', value: 'finding' },
   { label: '用户评论', value: 'comment' },
   { label: '主播话术', value: 'transcript' },
@@ -44,6 +48,10 @@ const kindOptions: Array<{ label: string; value: EventKind }> = [
 function relativeSeconds(value: string | null) {
   if (!props.sessionStart || !value) return 0;
   return Math.max(0, (new Date(value).getTime() - new Date(props.sessionStart).getTime()) / 1000);
+}
+
+function transcriptLabel(value?: string | null) {
+  return !value || value === 'asr_offline' || value === 'asr_realtime' ? '主播话术' : value;
 }
 
 const events = computed<TimelineEvent[]>(() => {
@@ -58,6 +66,22 @@ const events = computed<TimelineEvent[]>(() => {
       content: item.description,
       category: '实时告警',
       severity: item.severity
+    });
+  });
+  props.hooks.forEach(item => {
+    const strengthLabel = { strong: '强钩子', medium: '中钩子', weak: '弱钩子' }[item.strength] || '钩子';
+    const missingElements = item.missing_elements || [];
+    const stage = item.stage || '转化钩子';
+    items.push({
+      key: `hook-${item.id}`,
+      kind: 'hook',
+      second: item.start_seconds,
+      endSecond: item.end_seconds,
+      title: `${stage} · ${strengthLabel}`,
+      content: item.evidence_text,
+      category: item.hook_types.join(' / '),
+      severity: item.is_formal_hook && missingElements.length ? 'warning' : 'info',
+      hook: { ...item, missing_elements: missingElements }
     });
   });
   props.findings.forEach(item => {
@@ -92,9 +116,9 @@ const events = computed<TimelineEvent[]>(() => {
       kind: 'transcript',
       second: item.segment_start,
       endSecond: item.segment_end,
-      title: item.segment_type || '主播话术',
+      title: transcriptLabel(item.segment_type),
       content: item.text_content || '-',
-      category: item.segment_type || undefined
+      category: transcriptLabel(item.segment_type) === '主播话术' ? undefined : transcriptLabel(item.segment_type)
     });
   });
   props.metrics.forEach((item, index) => {
@@ -123,6 +147,7 @@ function formatSecond(value: number) {
 function kindIcon(kind: EventKind) {
   return {
     finding: 'mdi:lightbulb-alert-outline',
+    hook: 'mdi:hook',
     alert: 'mdi:alert-decagram-outline',
     comment: 'mdi:comment-account-outline',
     transcript: 'mdi:text-box-outline',
@@ -182,6 +207,15 @@ function isActive(item: TimelineEvent) {
               </NTag>
             </div>
             <div class="mt-4px line-clamp-2 text-12px leading-19px text-gray-500">{{ item.content }}</div>
+            <div v-if="item.hook" class="mt-5px flex flex-wrap gap-6px text-11px text-gray-500">
+              <NTag v-if="item.hook.missing_elements?.length" size="tiny" type="warning" :bordered="false">
+                待补：{{ item.hook.missing_elements.join('、') }}
+              </NTag>
+              <span>5分钟：评论 {{ item.hook.comment_after_5m || 0 }} · 客资 {{ item.hook.lead_after_5m || 0 }}</span>
+              <span>15分钟：评论 {{ item.hook.comment_after_15m || 0 }} · 客资 {{ item.hook.lead_after_15m || 0 }}</span>
+              <span>30分钟：评论 {{ item.hook.comment_after_30m || 0 }} · 客资 {{ item.hook.lead_after_30m || 0 }}</span>
+              <span>高意向用户 {{ item.hook.high_intent_user_count || 0 }}</span>
+            </div>
           </div>
           <NDropdown
             v-if="item.finding"

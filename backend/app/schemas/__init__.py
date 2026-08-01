@@ -220,6 +220,8 @@ class ConversionSummaryResponse(BaseModel):
 
     hook_count: int = 0
     effective_hook_count: int = 0
+    strong_hook_count: int = 0
+    incomplete_hook_count: int = 0
     session_lead_count: int = 0
     hook_window_lead_count: int = 0
     exact_matched_user_count: int = 0
@@ -233,8 +235,19 @@ class HookEventResponse(BaseModel):
     start_seconds: float = 0
     end_seconds: float = 0
     hook_types: list[str] = Field(default_factory=list)
+    is_formal_hook: bool = False
+    stage: str
+    strength: str
+    missing_elements: list[str] = Field(default_factory=list)
     evidence_text: str
     related_lead_count: int = 0
+    comment_after_5m: int = 0
+    comment_after_15m: int = 0
+    comment_after_30m: int = 0
+    lead_after_5m: int = 0
+    lead_after_15m: int = 0
+    lead_after_30m: int = 0
+    high_intent_user_count: int = 0
     attribution_label: str
 
 

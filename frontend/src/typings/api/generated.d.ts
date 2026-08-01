@@ -3576,6 +3576,16 @@ export interface components {
              */
             effective_hook_count: number;
             /**
+             * Strong Hook Count
+             * @default 0
+             */
+            strong_hook_count: number;
+            /**
+             * Incomplete Hook Count
+             * @default 0
+             */
+            incomplete_hook_count: number;
+            /**
              * Session Lead Count
              * @default 0
              */
@@ -3863,6 +3873,17 @@ export interface components {
             end_seconds: number;
             /** Hook Types */
             hook_types?: string[];
+            /**
+             * Is Formal Hook
+             * @default false
+             */
+            is_formal_hook: boolean;
+            /** Stage */
+            stage: string;
+            /** Strength */
+            strength: string;
+            /** Missing Elements */
+            missing_elements?: string[];
             /** Evidence Text */
             evidence_text: string;
             /**
@@ -3870,6 +3891,20 @@ export interface components {
              * @default 0
              */
             related_lead_count: number;
+            /** @default 0 */
+            comment_after_5m: number;
+            /** @default 0 */
+            comment_after_15m: number;
+            /** @default 0 */
+            comment_after_30m: number;
+            /** @default 0 */
+            lead_after_5m: number;
+            /** @default 0 */
+            lead_after_15m: number;
+            /** @default 0 */
+            lead_after_30m: number;
+            /** @default 0 */
+            high_intent_user_count: number;
             /** Attribution Label */
             attribution_label: string;
         };

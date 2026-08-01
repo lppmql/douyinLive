@@ -146,7 +146,168 @@ def test_adjacent_asr_segments_are_one_hook_action(db):
     result = build_session_conversion_analysis(db, session, [])
 
     assert result["summary"]["hook_count"] == 1
-    assert result["hook_events"][0]["hook_types"] == ["资料钩子", "私信引导", "行动指令"]
+    assert result["hook_events"][0]["hook_types"] == ["资料钩子", "私信引导", "领取动作"]
+    assert result["hook_events"][0]["stage"] == "正式钩子"
+
+
+def test_business_phrases_are_formal_hooks_and_content_only_is_lead_in(db):
+    session = _session(db)
+    phrases = ["去后台看一下", "我给你发个消息", "点击红色按钮", "我给你发资料"]
+    segments = [
+        TranscriptSegment(
+            session_id=session.id,
+            segment_start=index * 100,
+            segment_end=index * 100 + 10,
+            text_content=text,
+            asr_status="completed",
+        )
+        for index, text in enumerate(["这里有一份行业报告", *phrases], start=1)
+    ]
+    db.add_all(segments)
+    db.commit()
+
+    result = build_session_conversion_analysis(db, session, [])
+
+    assert result["summary"]["hook_count"] == len(phrases)
+    assert result["hook_events"][0]["stage"] == "钩子铺垫"
+    assert all(item["is_formal_hook"] for item in result["hook_events"][1:])
+
+
+def test_adjacent_content_and_action_recalculate_combined_strength(db):
+    session = _session(db)
+    db.add_all(
+        [
+            TranscriptSegment(
+                session_id=session.id,
+                segment_start=100,
+                segment_end=110,
+                text_content="这里有一份品牌名单。",
+                asr_status="completed",
+            ),
+            TranscriptSegment(
+                session_id=session.id,
+                segment_start=120,
+                segment_end=130,
+                text_content="去后台私信我。",
+                asr_status="completed",
+            ),
+        ]
+    )
+    db.commit()
+
+    result = build_session_conversion_analysis(db, session, [])
+
+    assert result["hook_events"][0]["strength"] == "medium"
+    assert result["hook_events"][0]["missing_elements"] == ["资料价值"]
+
+
+def test_value_only_segment_supplements_previous_hook_without_becoming_standalone(db):
+    session = _session(db)
+    db.add_all(
+        [
+            TranscriptSegment(
+                session_id=session.id,
+                segment_start=100,
+                segment_end=110,
+                text_content="点击红色按钮领取选址评估表。",
+                asr_status="completed",
+            ),
+            TranscriptSegment(
+                session_id=session.id,
+                segment_start=120,
+                segment_end=130,
+                text_content="可以帮你避坑、少走弯路。",
+                asr_status="completed",
+            ),
+        ]
+    )
+    db.commit()
+
+    result = build_session_conversion_analysis(db, session, [])
+
+    assert result["summary"]["hook_count"] == 1
+    assert result["hook_events"][0]["strength"] == "strong"
+    assert result["hook_events"][0]["missing_elements"] == []
+
+
+def test_hook_effect_windows_use_real_comments_and_matched_leads(db):
+    session = _session(db)
+    db.add(
+        TranscriptSegment(
+            session_id=session.id,
+            segment_start=60,
+            segment_end=70,
+            text_content="点击红色按钮领取选址评估表，可以帮你避坑。",
+            asr_status="completed",
+        )
+    )
+    comments = [
+        Comment(
+            session_id=session.id,
+            user_nickname="用户甲",
+            user_sec_uid="user-a",
+            comment_content="想要选址资料",
+            comment_time=session.live_start_time + timedelta(seconds=120),
+        ),
+        Comment(
+            session_id=session.id,
+            user_nickname="用户乙",
+            user_sec_uid="user-b",
+            comment_content="预算十万可以吗",
+            comment_time=session.live_start_time + timedelta(minutes=10),
+        ),
+    ]
+    db.add_all(comments)
+    db.add(
+        Lead(
+            session_id=session.id,
+            douyin_id="lead-user",
+            external_source="test",
+            external_id=4,
+            attribution_status="matched",
+            create_time=session.live_start_time + timedelta(minutes=4),
+        )
+    )
+    db.commit()
+
+    result = build_session_conversion_analysis(db, session, comments)
+    hook = result["hook_events"][0]
+
+    assert hook["strength"] == "strong"
+    assert hook["comment_after_5m"] == 1
+    assert hook["comment_after_15m"] == 2
+    assert hook["lead_after_5m"] == 1
+
+
+def test_events_during_hook_are_not_counted_as_after_hook(db):
+    session = _session(db)
+    db.add(
+        TranscriptSegment(
+            session_id=session.id,
+            segment_start=60,
+            segment_end=180,
+            text_content="去后台私信领取资料，我给你发品牌名单。",
+            asr_status="completed",
+        )
+    )
+    during = Comment(
+        session_id=session.id,
+        user_nickname="进行中评论",
+        comment_content="想要资料",
+        comment_time=session.live_start_time + timedelta(seconds=120),
+    )
+    after = Comment(
+        session_id=session.id,
+        user_nickname="结束后评论",
+        comment_content="怎么领取",
+        comment_time=session.live_start_time + timedelta(seconds=200),
+    )
+    db.add_all([during, after])
+    db.commit()
+
+    result = build_session_conversion_analysis(db, session, [during, after])
+
+    assert result["hook_events"][0]["comment_after_5m"] == 1
 
 
 def test_analysis_coverage_reports_truncated_sample_truthfully(db):

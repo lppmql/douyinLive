@@ -27,12 +27,18 @@ INTENT_TOPICS: dict[str, tuple[str, ...]] = {
     "资料领取": ("资料", "清单", "表格", "报告", "怎么领", "发我", "想要", "私信"),
 }
 
-HOOK_TYPES: dict[str, tuple[str, ...]] = {
-    "资料钩子": ("资料", "清单", "表格", "报告", "名单", "计算表", "评估表"),
-    "私信引导": ("私信", "发消息", "站内", "咨询我", "联系我"),
-    "行动指令": ("点击", "领取", "评论区", "扣1", "打在公屏", "发给你"),
-    "免费分析": ("免费分析", "一对一", "帮你分析", "免费评估"),
+HOOK_CONTENT_WORDS = ("资料", "清单", "表格", "报告", "名单", "计算表", "评估表", "避坑名单")
+HOOK_ACTIONS: dict[str, tuple[str, ...]] = {
+    "私信引导": (
+        "后台", "私信", "站内消息", "站内发消息", "发消息", "给你发消息", "给你发个消息",
+        "我给你发", "我给发个消息", "咨询我", "联系我", "联系客服",
+    ),
+    "领取动作": ("领取", "领取资料", "发资料", "资料发给你", "发给你", "给你发"),
+    "按钮引导": ("红色按钮", "点击按钮", "点按钮", "左下角按钮", "右下角按钮"),
+    "评论动作": ("评论区", "扣1", "打在公屏", "公屏打"),
 }
+HOOK_VALUE_WORDS = ("免费", "避坑", "解决", "分析", "评估", "帮你", "测算", "少走弯路")
+FREE_ANALYSIS_WORDS = ("免费分析", "一对一", "帮你分析", "免费评估")
 
 
 def _normalize_douyin_id(value: str | None) -> str:
@@ -45,9 +51,49 @@ def _topics(text: str) -> list[str]:
     return [name for name, words in INTENT_TOPICS.items() if any(word.casefold() in lowered for word in words)]
 
 
-def _hook_types(text: str) -> list[str]:
+def _classify_hook(text: str) -> dict[str, Any] | None:
+    """按“资料内容、领取动作、资料价值”识别钩子及完整程度。"""
     lowered = text.casefold()
-    return [name for name, words in HOOK_TYPES.items() if any(word.casefold() in lowered for word in words)]
+    has_content = any(word.casefold() in lowered for word in HOOK_CONTENT_WORDS)
+    action_types = [
+        name for name, words in HOOK_ACTIONS.items() if any(word.casefold() in lowered for word in words)
+    ]
+    has_value = any(word.casefold() in lowered for word in HOOK_VALUE_WORDS)
+    has_free_analysis = any(word.casefold() in lowered for word in FREE_ANALYSIS_WORDS)
+    # 只讲“资料/报告”但没有领取动作时属于钩子铺垫，不计入正式下钩子次数。
+    direct_conversion_actions = [name for name in action_types if name != "评论动作"]
+    # 单纯“打在公屏/评论区提问”属于互动，不算留资钩子；只有同时给出资料内容时才进入钩子。
+    if not has_content and not direct_conversion_actions and not has_free_analysis:
+        return None
+    is_formal = bool(direct_conversion_actions or has_free_analysis or (has_content and "评论动作" in action_types))
+    hook_types = []
+    if has_content:
+        hook_types.append("资料钩子")
+    hook_types.extend(action_types)
+    if has_free_analysis:
+        hook_types.append("免费分析")
+    element_count = sum((has_content, bool(action_types), has_value))
+    strength = "strong" if element_count == 3 else "medium" if element_count == 2 else "weak"
+    missing_elements = []
+    if not has_content:
+        missing_elements.append("具体资料")
+    if not action_types:
+        missing_elements.append("领取动作")
+    if not has_value:
+        missing_elements.append("资料价值")
+    return {
+        "hook_types": list(dict.fromkeys(hook_types)),
+        "is_formal_hook": is_formal,
+        "stage": "正式钩子" if is_formal else "钩子铺垫",
+        "strength": strength,
+        "missing_elements": missing_elements,
+    }
+
+
+def _contains_hook_value(text: str) -> bool:
+    """判断片段是否只是在补充钩子的资料价值。"""
+    lowered = text.casefold()
+    return any(word.casefold() in lowered for word in HOOK_VALUE_WORDS)
 
 
 def _relative_seconds(session: LiveSession, comment: Comment) -> float | None:
@@ -93,16 +139,42 @@ def build_session_conversion_analysis(
     hooks: list[dict[str, Any]] = []
     for segment in segments:
         text = (segment.text_content or "").strip()
-        types = _hook_types(text)
-        if not text or not types:
+        classification = _classify_hook(text)
+        if not text:
+            continue
+        # ASR 可能把“领取资料”和“帮你避坑”切成相邻两段。价值片段不能单独成钩子，
+        # 但在 30 秒内紧跟已有候选时，应补入前一钩子的完整度与原话证据。
+        if not classification:
+            if (
+                hooks
+                and _contains_hook_value(text)
+                and float(segment.segment_start or 0) - hooks[-1]["end_seconds"] <= 30
+            ):
+                previous = hooks[-1]
+                previous["end_seconds"] = max(previous["end_seconds"], float(segment.segment_end or 0))
+                previous["evidence_text"] = f'{previous["evidence_text"]} {text}'[:1000]
+                previous["missing_elements"] = [
+                    item for item in previous["missing_elements"] if item != "资料价值"
+                ]
+                combined_element_count = 3 - len(previous["missing_elements"])
+                previous["strength"] = (
+                    "strong" if combined_element_count == 3 else "medium" if combined_element_count == 2 else "weak"
+                )
             continue
         event = {
                 "id": int(segment.id),
                 "start_seconds": float(segment.segment_start or 0),
                 "end_seconds": float(segment.segment_end or segment.segment_start or 0),
-                "hook_types": types,
+                **classification,
                 "evidence_text": text[:1000],
                 "related_lead_count": 0,
+                "comment_after_5m": 0,
+                "comment_after_15m": 0,
+                "comment_after_30m": 0,
+                "lead_after_5m": 0,
+                "lead_after_15m": 0,
+                "lead_after_30m": 0,
+                "high_intent_user_count": 0,
                 "attribution_label": "时间窗关联，不代表确定因果",
             }
         # ASR 常把一句连续话术切成多个短片段。30 秒内连续命中的片段合并为一次钩子动作，
@@ -112,22 +184,62 @@ def build_session_conversion_analysis(
             previous["end_seconds"] = max(previous["end_seconds"], event["end_seconds"])
             previous["hook_types"] = list(dict.fromkeys([*previous["hook_types"], *event["hook_types"]]))
             previous["evidence_text"] = f'{previous["evidence_text"]} {event["evidence_text"]}'[:1000]
+            previous["is_formal_hook"] = previous["is_formal_hook"] or event["is_formal_hook"]
+            previous["stage"] = "正式钩子" if previous["is_formal_hook"] else "钩子铺垫"
+            previous["missing_elements"] = [
+                item for item in previous["missing_elements"] if item in event["missing_elements"]
+            ]
+            # 合并后的完整度可能高于任一单片段，必须按组合后的三要素重新计算强度。
+            combined_element_count = 3 - len(previous["missing_elements"])
+            previous["strength"] = (
+                "strong" if combined_element_count == 3 else "medium" if combined_element_count == 2 else "weak"
+            )
         else:
             hooks.append(event)
 
-    # 一条客资只关联到其产生前最近一次、且不超过 30 分钟的钩子。
+    formal_hooks = [hook for hook in hooks if hook["is_formal_hook"]]
+    # 一条客资只关联到其产生前最近一次正式钩子；同时保留 5/15/30 分钟观察窗。
     for lead in session_leads:
         if not lead.create_time or not session.live_start_time:
             continue
         lead_seconds = (lead.create_time - session.live_start_time).total_seconds()
-        candidates = [hook for hook in hooks if 0 <= lead_seconds - hook["start_seconds"] <= 1800]
+        for hook in formal_hooks:
+            delta = lead_seconds - hook["end_seconds"]
+            if 0 <= delta <= 300:
+                hook["lead_after_5m"] += 1
+            if 0 <= delta <= 900:
+                hook["lead_after_15m"] += 1
+            if 0 <= delta <= 1800:
+                hook["lead_after_30m"] += 1
+        candidates = [hook for hook in formal_hooks if 0 <= lead_seconds - hook["end_seconds"] <= 1800]
         if candidates:
-            max(candidates, key=lambda item: item["start_seconds"])["related_lead_count"] += 1
+            max(candidates, key=lambda item: item["end_seconds"])["related_lead_count"] += 1
 
     grouped: dict[str, list[Comment]] = defaultdict(list)
     for comment in comments:
         identity = comment.user_sec_uid or _normalize_douyin_id(comment.user_douyin_id) or (comment.user_nickname or "匿名用户")
         grouped[identity].append(comment)
+
+    # 预计算评论时间和意向，避免每个钩子重复解析同一条评论文本。
+    comment_samples = [
+        (comment, seconds, bool(_topics(comment.comment_content or "")))
+        for comment in comments
+        if (seconds := _relative_seconds(session, comment)) is not None
+    ]
+    # 评论效果只统计真实评论时间；观察窗从钩子整句结束后开始。
+    for hook in formal_hooks:
+        intent_users: set[str] = set()
+        for comment, seconds, has_intent in comment_samples:
+            delta = seconds - hook["end_seconds"]
+            if 0 <= delta <= 300:
+                hook["comment_after_5m"] += 1
+            if 0 <= delta <= 900:
+                hook["comment_after_15m"] += 1
+            if 0 <= delta <= 1800:
+                hook["comment_after_30m"] += 1
+            if 0 <= delta <= 300 and has_intent:
+                intent_users.add(comment.user_sec_uid or comment.user_nickname or str(comment.id))
+        hook["high_intent_user_count"] = len(intent_users)
 
     leads_by_douyin: dict[str, list[Lead]] = defaultdict(list)
     for lead in session_leads:
@@ -147,7 +259,7 @@ def build_session_conversion_analysis(
         last_seconds = max(comment_seconds) if comment_seconds else None
         nearby_hooks = [
             hook
-            for hook in hooks
+            for hook in formal_hooks
             if first_seconds is not None and first_seconds - 60 <= hook["start_seconds"] <= (last_seconds or first_seconds) + 300
         ]
         nearby_segments = [
@@ -186,14 +298,16 @@ def build_session_conversion_analysis(
 
     users.sort(key=lambda item: (not item["has_lead"], item["intent_level"] != "high", -item["comment_count"]))
     exact_lead_users = sum(1 for item in users if item["has_lead"])
-    related_leads = sum(int(item["related_lead_count"]) for item in hooks)
+    related_leads = sum(int(item["related_lead_count"]) for item in formal_hooks)
     avatar_count = sum(1 for item in users if item["user_avatar_comment_id"])
     douyin_count = sum(1 for item in users if item["user_douyin_id"])
     captured_comment_count = total_comment_count if total_comment_count is not None else len(comments)
     return {
         "summary": {
-            "hook_count": len(hooks),
-            "effective_hook_count": sum(1 for item in hooks if item["related_lead_count"] > 0),
+            "hook_count": len(formal_hooks),
+            "effective_hook_count": sum(1 for item in formal_hooks if item["related_lead_count"] > 0),
+            "strong_hook_count": sum(1 for item in formal_hooks if item["strength"] == "strong"),
+            "incomplete_hook_count": sum(1 for item in formal_hooks if item["missing_elements"]),
             "session_lead_count": len(session_leads),
             "hook_window_lead_count": related_leads,
             "exact_matched_user_count": exact_lead_users,

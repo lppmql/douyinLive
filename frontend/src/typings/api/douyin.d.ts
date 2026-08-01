@@ -320,6 +320,8 @@ declare namespace Api {
     interface ConversionSummary {
       hook_count: number;
       effective_hook_count: number;
+      strong_hook_count: number;
+      incomplete_hook_count: number;
       session_lead_count: number;
       hook_window_lead_count: number;
       exact_matched_user_count: number;
@@ -331,8 +333,19 @@ declare namespace Api {
       start_seconds: number;
       end_seconds: number;
       hook_types: string[];
+      is_formal_hook: boolean;
+      stage: '正式钩子' | '钩子铺垫' | string;
+      strength: 'strong' | 'medium' | 'weak';
+      missing_elements: string[];
       evidence_text: string;
       related_lead_count: number;
+      comment_after_5m: number;
+      comment_after_15m: number;
+      comment_after_30m: number;
+      lead_after_5m: number;
+      lead_after_15m: number;
+      lead_after_30m: number;
+      high_intent_user_count: number;
       attribution_label: string;
     }
 

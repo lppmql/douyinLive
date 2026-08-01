@@ -173,6 +173,7 @@ onBeforeUnmount(() => {
                 :segments="workbench.transcript_segments || []"
                 :findings="workbench.findings || []"
                 :alerts="workbench.live_alerts || []"
+                :hooks="detail.hook_events || []"
                 @update-finding="updateFinding"
               />
             </NTabPane>
