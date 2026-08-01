@@ -38,6 +38,12 @@ def test_production_rejects_short_database_password():
     assert "DATABASE_PASSWORD_INSECURE" in errors
 
 
+def test_production_allows_documented_seven_character_database_password():
+    errors, _ = make_settings(DEBUG=False, DB_PASSWORD="root123", JWT_SECRET_KEY="x" * 32).runtime_configuration_issues()
+
+    assert "DATABASE_PASSWORD_INSECURE" not in errors
+
+
 def test_local_debug_allows_documented_first_run_database_password():
     errors, _ = make_settings(DEBUG=True, DB_PASSWORD="root123").runtime_configuration_issues()
 

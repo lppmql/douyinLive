@@ -39,10 +39,10 @@ def test_local_debug_allows_documented_first_run_admin_password(db, monkeypatch)
     assert db.query(User).filter(User.username == "admin").one().roles == ["R_SUPER"]
 
 
-def test_production_rejects_local_first_run_admin_password(db, monkeypatch):
+def test_production_allows_documented_first_run_admin_password(db, monkeypatch):
     monkeypatch.setattr(settings, "BOOTSTRAP_ADMIN_USERNAME", "admin")
     monkeypatch.setattr(settings, "BOOTSTRAP_ADMIN_PASSWORD", "admin123")
     monkeypatch.setattr(settings, "DEBUG", False)
 
-    with pytest.raises(RuntimeError, match="至少 15 位"):
-        bootstrap_admin_if_empty(db)
+    assert bootstrap_admin_if_empty(db) is True
+    assert db.query(User).filter(User.username == "admin").one().roles == ["R_SUPER"]

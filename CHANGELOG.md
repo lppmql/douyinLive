@@ -12,8 +12,9 @@
 - 新增 ADR 0034：《跨机器一键部署与 CI 配置闭环》。
 
 ### Changed
+- 按部署要求将生产数据库密码最低长度调整为 7 位、首次管理员密码最低长度调整为 6 位；`root123` 与 `admin123` 可用于首次部署，公网环境仍建议更换为随机强密码。
 - 一键启动将 DataEase 与 FunASR 作为可降级服务；DataEase 配置缺失或启动失败时不再阻断前后端主系统。
-- `.env.example` 明确定位为 `DEBUG=true` 的本机首次启动模板，保留用户指定的 `root123` / `admin123` 首次初始化值；`DEBUG=false` 时继续强制数据库密码至少 16 位、管理员密码至少 15 位。
+- `.env.example` 保留用户指定的 `root123` / `admin123` 首次初始化值，并明确公网环境仍应主动更换强密码。
 - CI 明确安装 `ruff`，Docker 配置检查使用 `.env.example` 生成临时环境文件，保证全新检出也能验证 Compose。
 - Qdrant 集合初始化不再提前导入 `torch/transformers`，避免未使用向量模型时误报 Qdrant 不可用。
 

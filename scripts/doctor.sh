@@ -39,8 +39,8 @@ if [ -f "$ROOT_DIR/.env" ]; then
     if [ -z "$DB_PASSWORD_VALUE" ] || [ "$DB_PASSWORD_VALUE" = "root123" ] || [ ${#DB_PASSWORD_VALUE} -lt 16 ]; then
       warn "当前使用本机调试数据库密码；对外部署前请改为至少 16 位随机字符串并关闭 DEBUG"
     fi
-  elif [ -z "$DB_PASSWORD_VALUE" ] || [ ${#DB_PASSWORD_VALUE} -lt 16 ]; then
-    fail "DEBUG=false 时 DB_PASSWORD 必须是至少 16 位随机字符串"
+  elif [ -z "$DB_PASSWORD_VALUE" ] || [ ${#DB_PASSWORD_VALUE} -lt 7 ]; then
+    fail "DEBUG=false 时 DB_PASSWORD 必须至少 7 位"
   fi
   if [ "$DB_USER_VALUE" = "root" ]; then
     warn "业务后端仍使用 MySQL root；正式部署应迁移到独立业务账号"
