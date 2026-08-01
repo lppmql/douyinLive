@@ -67,6 +67,10 @@ def _parse_comment_user_profile(item: dict) -> dict[str, str | None]:
         "avatar_url",
         "avatarThumb",
         "avatar_thumb",
+        "avatarMedium",
+        "avatar_medium",
+        "avatarLarge",
+        "avatar_large",
         "avatar",
     )
     douyin_id = _first_comment_user_value(
@@ -78,6 +82,8 @@ def _parse_comment_user_profile(item: dict) -> dict[str, str | None]:
         "unique_id",
         "shortId",
         "short_id",
+        "displayId",
+        "display_id",
     )
     return {
         "user_nickname": str(nickname).strip()[:100] if nickname not in (None, "") else None,
@@ -140,8 +146,17 @@ async def _scrape_comments(context: BrowserContext, room_id: str) -> list:
                     continue
                 comments.append({
                     **profile,
-                    "user_sec_uid": c.get("user_sec_uid") or c.get("secUId") or c.get("sec_uid"),
-                    "webcast_uid": c.get("webcast_uid") or c.get("webcastUid"),
+                    "user_sec_uid": _first_comment_user_value(
+                        [c, *(value for value in (c.get("user"), c.get("author"), c.get("userInfo"), c.get("user_info")) if isinstance(value, dict))],
+                        "user_sec_uid", "secUId", "secUid", "sec_uid",
+                    ),
+                    "webcast_uid": (
+                        _first_comment_user_value([c], "webcast_uid", "webcastUid")
+                        or _first_comment_user_value(
+                            [value for value in (c.get("user"), c.get("author"), c.get("userInfo"), c.get("user_info")) if isinstance(value, dict)],
+                            "webcast_uid", "webcastUid", "id",
+                        )
+                    ),
                     "comment_content": content,
                     "comment_time": _parse_comment_time(c.get("comment_time") or c.get("createTime")),
                 })

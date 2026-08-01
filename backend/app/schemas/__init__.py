@@ -152,8 +152,16 @@ class LiveSessionResponse(LiveSessionBase):
     exposure_enter_rate: float = 0
     fans_view_ratio: float = 0
     scene_lead_conversion_rate: float = 0
+    share_rate: float = 0
+    like_rate: float = 0
     comment_rate: float = 0
     interaction_rate: float = 0
+    natural_traffic_ratio: float = 0
+    marketing_traffic_ratio: float = 0
+    other_traffic_ratio: float = 0
+    live_exposure_users: int = 0
+    live_enter_users: int = 0
+    card_click_users: int = 0
     comments_count: int = 0
     leads_count: int = 0
     created_at: datetime
@@ -207,6 +215,70 @@ class TranscriptQualityResponse(BaseModel):
     rate_source: str = "realtime_estimate"
 
 
+class ConversionSummaryResponse(BaseModel):
+    """整场钩子与客资转化摘要。"""
+
+    hook_count: int = 0
+    effective_hook_count: int = 0
+    session_lead_count: int = 0
+    hook_window_lead_count: int = 0
+    exact_matched_user_count: int = 0
+    comment_user_count: int = 0
+
+
+class HookEventResponse(BaseModel):
+    """由真实主播转写识别出的钩子事件。"""
+
+    id: int
+    start_seconds: float = 0
+    end_seconds: float = 0
+    hook_types: list[str] = Field(default_factory=list)
+    evidence_text: str
+    related_lead_count: int = 0
+    attribution_label: str
+
+
+class AudienceCommentResponse(BaseModel):
+    id: int
+    content: str
+    comment_time: Optional[datetime] = None
+
+
+class AudienceUserInsightResponse(BaseModel):
+    """按稳定用户标识聚合的评论、留资与主播承接分析。"""
+
+    identity_key: str
+    user_nickname: Optional[str] = None
+    user_avatar_comment_id: Optional[int] = None
+    user_douyin_id: Optional[str] = None
+    profile_status: str
+    comment_count: int = 0
+    comments: list[AudienceCommentResponse] = Field(default_factory=list)
+    intent_topics: list[str] = Field(default_factory=list)
+    intent_level: str = "low"
+    has_lead: bool = False
+    lead_match_method: Optional[str] = None
+    lead_time: Optional[datetime] = None
+    host_responded: bool = False
+    hook_action_detected: bool = False
+    host_evidence: Optional[str] = None
+    related_hook_ids: list[int] = Field(default_factory=list)
+    recommendation: str
+
+
+class SessionDataCoverageResponse(BaseModel):
+    comment_count: int = 0
+    analysis_comment_count: int = 0
+    analysis_truncated: bool = False
+    comment_user_count: int = 0
+    avatar_user_count: int = 0
+    douyin_id_user_count: int = 0
+    transcript_segment_count: int = 0
+    session_lead_count: int = 0
+    avatar_coverage_percent: float = 0
+    douyin_id_coverage_percent: float = 0
+
+
 class LiveSessionDetailResponse(BaseModel):
     """直播场次详情页需要的完整采集结果。"""
 
@@ -217,6 +289,10 @@ class LiveSessionDetailResponse(BaseModel):
     stream_url: Optional[str] = None
     stream_source_count: int = 0
     transcript_quality: TranscriptQualityResponse
+    conversion_summary: ConversionSummaryResponse
+    hook_events: list[HookEventResponse] = Field(default_factory=list)
+    audience_users: list[AudienceUserInsightResponse] = Field(default_factory=list)
+    data_coverage: SessionDataCoverageResponse
 
 
 # ===== 评论 =====

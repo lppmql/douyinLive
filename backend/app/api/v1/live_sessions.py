@@ -16,6 +16,7 @@ from app.models.live_sessions import LiveSession
 from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
+from app.services.analysis.session_conversion import build_session_conversion_analysis
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.asr_audio_chunks import AsrAudioChunk
 from app.models.asr_tasks import AsrTask
@@ -254,6 +255,16 @@ def get_session_details(
         .limit(comment_limit)
         .all()
     )
+    # 用户级分析覆盖最近 2000 条已采集评论；每个用户最多返回 50 条证据。
+    # 明确设置上限，避免超长直播导致详情接口和浏览器内存无界增长。
+    analysis_comments = (
+        db.query(Comment)
+        .filter(Comment.session_id == session_id)
+        .order_by(Comment.comment_time.desc(), Comment.id.desc())
+        .limit(2000)
+        .all()
+    )
+    total_comment_count = db.query(Comment).filter(Comment.session_id == session_id).count()
     stream_sources = (
         db.query(StreamSource)
         .filter(StreamSource.session_id == session_id)
@@ -267,6 +278,7 @@ def get_session_details(
         .order_by(LiveAudienceProfile.dimension_type, LiveAudienceProfile.ratio.desc())
         .all()
     )
+    conversion = build_session_conversion_analysis(db, session, analysis_comments, total_comment_count)
 
     return LiveSessionDetailResponse(
         session=LiveSessionResponse(**_attach_room_profile(session)),
@@ -276,6 +288,10 @@ def get_session_details(
         stream_url=latest_stream or session.stream_url,
         stream_source_count=len(stream_sources),
         transcript_quality=_build_transcript_quality(db, session),
+        conversion_summary=conversion["summary"],
+        hook_events=conversion["hook_events"],
+        audience_users=conversion["audience_users"],
+        data_coverage=conversion["data_coverage"],
     )
 
 

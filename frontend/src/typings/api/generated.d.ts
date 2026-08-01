@@ -2898,6 +2898,70 @@ export interface components {
              */
             message: string;
         };
+        /** AudienceCommentResponse */
+        AudienceCommentResponse: {
+            /** Id */
+            id: number;
+            /** Content */
+            content: string;
+            /** Comment Time */
+            comment_time?: string | null;
+        };
+        /**
+         * AudienceUserInsightResponse
+         * @description 按稳定用户标识聚合的评论、留资与主播承接分析。
+         */
+        AudienceUserInsightResponse: {
+            /** Identity Key */
+            identity_key: string;
+            /** User Nickname */
+            user_nickname?: string | null;
+            /** User Avatar Comment Id */
+            user_avatar_comment_id?: number | null;
+            /** User Douyin Id */
+            user_douyin_id?: string | null;
+            /** Profile Status */
+            profile_status: string;
+            /**
+             * Comment Count
+             * @default 0
+             */
+            comment_count: number;
+            /** Comments */
+            comments?: components["schemas"]["AudienceCommentResponse"][];
+            /** Intent Topics */
+            intent_topics?: string[];
+            /**
+             * Intent Level
+             * @default low
+             */
+            intent_level: string;
+            /**
+             * Has Lead
+             * @default false
+             */
+            has_lead: boolean;
+            /** Lead Match Method */
+            lead_match_method?: string | null;
+            /** Lead Time */
+            lead_time?: string | null;
+            /**
+             * Host Responded
+             * @default false
+             */
+            host_responded: boolean;
+            /**
+             * Hook Action Detected
+             * @default false
+             */
+            hook_action_detected: boolean;
+            /** Host Evidence */
+            host_evidence?: string | null;
+            /** Related Hook Ids */
+            related_hook_ids?: number[];
+            /** Recommendation */
+            recommendation: string;
+        };
         /** ChatRequest */
         ChatRequest: {
             /** Message */
@@ -3497,6 +3561,42 @@ export interface components {
             created_at?: string | null;
         };
         /**
+         * ConversionSummaryResponse
+         * @description 整场钩子与客资转化摘要。
+         */
+        ConversionSummaryResponse: {
+            /**
+             * Hook Count
+             * @default 0
+             */
+            hook_count: number;
+            /**
+             * Effective Hook Count
+             * @default 0
+             */
+            effective_hook_count: number;
+            /**
+             * Session Lead Count
+             * @default 0
+             */
+            session_lead_count: number;
+            /**
+             * Hook Window Lead Count
+             * @default 0
+             */
+            hook_window_lead_count: number;
+            /**
+             * Exact Matched User Count
+             * @default 0
+             */
+            exact_matched_user_count: number;
+            /**
+             * Comment User Count
+             * @default 0
+             */
+            comment_user_count: number;
+        };
+        /**
          * DashboardSummaryResponse
          * @description GET /dashboard/summary
          */
@@ -3743,6 +3843,35 @@ export interface components {
             is_contacted: number | null;
             /** Created At */
             created_at?: string | null;
+        };
+        /**
+         * HookEventResponse
+         * @description 由真实主播转写识别出的钩子事件。
+         */
+        HookEventResponse: {
+            /** Id */
+            id: number;
+            /**
+             * Start Seconds
+             * @default 0
+             */
+            start_seconds: number;
+            /**
+             * End Seconds
+             * @default 0
+             */
+            end_seconds: number;
+            /** Hook Types */
+            hook_types?: string[];
+            /** Evidence Text */
+            evidence_text: string;
+            /**
+             * Related Lead Count
+             * @default 0
+             */
+            related_lead_count: number;
+            /** Attribution Label */
+            attribution_label: string;
         };
         /** KnowledgeBaseCreate */
         KnowledgeBaseCreate: {
@@ -4509,6 +4638,12 @@ export interface components {
              */
             stream_source_count: number;
             transcript_quality: components["schemas"]["TranscriptQualityResponse"];
+            conversion_summary: components["schemas"]["ConversionSummaryResponse"];
+            /** Hook Events */
+            hook_events?: components["schemas"]["HookEventResponse"][];
+            /** Audience Users */
+            audience_users?: components["schemas"]["AudienceUserInsightResponse"][];
+            data_coverage: components["schemas"]["SessionDataCoverageResponse"];
         };
         /**
          * LiveSessionListItemResponse
@@ -4837,6 +4972,16 @@ export interface components {
              */
             scene_lead_conversion_rate: number;
             /**
+             * Share Rate
+             * @default 0
+             */
+            share_rate: number;
+            /**
+             * Like Rate
+             * @default 0
+             */
+            like_rate: number;
+            /**
              * Comment Rate
              * @default 0
              */
@@ -4846,6 +4991,36 @@ export interface components {
              * @default 0
              */
             interaction_rate: number;
+            /**
+             * Natural Traffic Ratio
+             * @default 0
+             */
+            natural_traffic_ratio: number;
+            /**
+             * Marketing Traffic Ratio
+             * @default 0
+             */
+            marketing_traffic_ratio: number;
+            /**
+             * Other Traffic Ratio
+             * @default 0
+             */
+            other_traffic_ratio: number;
+            /**
+             * Live Exposure Users
+             * @default 0
+             */
+            live_exposure_users: number;
+            /**
+             * Live Enter Users
+             * @default 0
+             */
+            live_enter_users: number;
+            /**
+             * Card Click Users
+             * @default 0
+             */
+            card_click_users: number;
             /**
              * Comments Count
              * @default 0
@@ -5732,6 +5907,59 @@ export interface components {
              * @description 中国大陆 11 位手机号
              */
             phone: string;
+        };
+        /** SessionDataCoverageResponse */
+        SessionDataCoverageResponse: {
+            /**
+             * Comment Count
+             * @default 0
+             */
+            comment_count: number;
+            /**
+             * Analysis Comment Count
+             * @default 0
+             */
+            analysis_comment_count: number;
+            /**
+             * Analysis Truncated
+             * @default false
+             */
+            analysis_truncated: boolean;
+            /**
+             * Comment User Count
+             * @default 0
+             */
+            comment_user_count: number;
+            /**
+             * Avatar User Count
+             * @default 0
+             */
+            avatar_user_count: number;
+            /**
+             * Douyin Id User Count
+             * @default 0
+             */
+            douyin_id_user_count: number;
+            /**
+             * Transcript Segment Count
+             * @default 0
+             */
+            transcript_segment_count: number;
+            /**
+             * Session Lead Count
+             * @default 0
+             */
+            session_lead_count: number;
+            /**
+             * Avatar Coverage Percent
+             * @default 0
+             */
+            avatar_coverage_percent: number;
+            /**
+             * Douyin Id Coverage Percent
+             * @default 0
+             */
+            douyin_id_coverage_percent: number;
         };
         /**
          * SoybeanResponse

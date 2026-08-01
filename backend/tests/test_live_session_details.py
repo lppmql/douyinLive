@@ -12,6 +12,7 @@ from app.api.v1.live_sessions import (
 from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
+from app.models.leads import Lead
 from app.models.live_sessions import LiveSession
 from app.models.stream_sources import StreamSource
 from app.schemas import LiveAudienceProfileResponse
@@ -59,7 +60,13 @@ class LiveSessionDetailsTest(unittest.TestCase):
         self.assertEqual(profile.ratio, 44)
 
     def test_detail_endpoint_keeps_assets_after_video_route_addition(self):
-        session = SimpleNamespace(id=9, stream_url="https://example.test/fallback.m3u8")
+        session = SimpleNamespace(
+            id=9,
+            stream_url="https://example.test/fallback.m3u8",
+            live_start_time=None,
+            live_end_time=None,
+            live_duration_seconds=0,
+        )
         stream = SimpleNamespace(m3u8_url="https://example.test/live.m3u8", status="active")
         db = DetailDb(session, stream)
         session_data = {
@@ -96,6 +103,9 @@ class DetailQuery:
     def first(self):
         return self.rows[0] if self.rows else None
 
+    def count(self):
+        return len(self.rows)
+
 
 class DetailDb:
     def __init__(self, session, stream):
@@ -118,6 +128,7 @@ class DetailDb:
             AsrTask: [],
             AsrAudioChunk: [],
             TranscriptSegment: [],
+            Lead: [],
         }[model]
         return DetailQuery(rows)
 

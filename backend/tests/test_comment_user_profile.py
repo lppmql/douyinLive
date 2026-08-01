@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from app.models.comments import Comment
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
-from app.services.collector.comments import _parse_comment_user_profile, _save_comments
+from app.services.collector.comments import _first_comment_user_value, _parse_comment_user_profile, _save_comments
 
 
 def test_parse_comment_user_profile_supports_nested_real_fields():
@@ -33,6 +33,16 @@ def test_parse_comment_user_profile_never_uses_sec_uid_as_douyin_id():
     assert profile["user_nickname"] == "只有昵称"
     assert profile["user_douyin_id"] is None
     assert profile["user_avatar_url"] is None
+
+
+def test_comment_id_is_not_used_as_top_level_webcast_user_id():
+    comment_payload = {"id": "comment-id", "user": {"id": "real-user-id"}}
+
+    top_level = _first_comment_user_value([comment_payload], "webcast_uid", "webcastUid")
+    nested_user = _first_comment_user_value([comment_payload["user"]], "webcast_uid", "webcastUid", "id")
+
+    assert top_level is None
+    assert nested_user == "real-user-id"
 
 
 def test_incremental_comment_collection_fills_missing_profile_without_duplicate(db):

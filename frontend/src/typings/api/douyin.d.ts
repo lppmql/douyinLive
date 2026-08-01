@@ -230,8 +230,16 @@ declare namespace Api {
       exposure_enter_rate: number;
       fans_view_ratio: number;
       scene_lead_conversion_rate: number;
+      share_rate: number;
+      like_rate: number;
       comment_rate: number;
       interaction_rate: number;
+      natural_traffic_ratio: number;
+      marketing_traffic_ratio: number;
+      other_traffic_ratio: number;
+      live_exposure_users: number;
+      live_enter_users: number;
+      card_click_users: number;
       comments_count: number;
       leads_count: number;
       created_at: string;
@@ -303,6 +311,62 @@ declare namespace Api {
       stream_url: string | null;
       stream_source_count: number;
       transcript_quality: TranscriptQuality;
+      conversion_summary: ConversionSummary;
+      hook_events: HookEvent[];
+      audience_users: AudienceUserInsight[];
+      data_coverage: SessionDataCoverage;
+    }
+
+    interface ConversionSummary {
+      hook_count: number;
+      effective_hook_count: number;
+      session_lead_count: number;
+      hook_window_lead_count: number;
+      exact_matched_user_count: number;
+      comment_user_count: number;
+    }
+
+    interface HookEvent {
+      id: number;
+      start_seconds: number;
+      end_seconds: number;
+      hook_types: string[];
+      evidence_text: string;
+      related_lead_count: number;
+      attribution_label: string;
+    }
+
+    interface AudienceUserInsight {
+      identity_key: string;
+      user_nickname: string | null;
+      user_avatar_comment_id: number | null;
+      user_douyin_id: string | null;
+      profile_status: 'complete' | 'platform_not_provided' | string;
+      comment_count: number;
+      comments: Array<{ id: number; content: string; comment_time: string | null }>;
+      intent_topics: string[];
+      intent_level: 'high' | 'medium' | 'low';
+      has_lead: boolean;
+      lead_match_method: 'douyin_id_exact' | null;
+      lead_time: string | null;
+      host_responded: boolean;
+      hook_action_detected: boolean;
+      host_evidence: string | null;
+      related_hook_ids: number[];
+      recommendation: string;
+    }
+
+    interface SessionDataCoverage {
+      comment_count: number;
+      analysis_comment_count: number;
+      analysis_truncated: boolean;
+      comment_user_count: number;
+      avatar_user_count: number;
+      douyin_id_user_count: number;
+      transcript_segment_count: number;
+      session_lead_count: number;
+      avatar_coverage_percent: number;
+      douyin_id_coverage_percent: number;
     }
 
     interface TranscriptQuality {

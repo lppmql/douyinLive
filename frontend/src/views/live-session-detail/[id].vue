@@ -9,6 +9,9 @@ import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import SessionWorkflowNav from '@/components/business/session-workflow-nav.vue';
 import CommentGroups from './modules/comment-groups.vue';
 import ReviewWorkbench from './modules/review-workbench.vue';
+import ConversionOverview from './modules/conversion-overview.vue';
+import AudienceInsights from './modules/audience-insights.vue';
+import SessionMetricsGrid from './modules/session-metrics-grid.vue';
 
 defineOptions({ name: 'LiveSessionDetail' });
 const props = defineProps<{ id: string }>();
@@ -203,6 +206,12 @@ onMounted(load);
     <template v-else-if="detail">
       <ReviewWorkbench v-if="detail" :session-id="Number(id)" :detail="detail" @refresh-detail="load" />
 
+      <ConversionOverview
+        :summary="detail.conversion_summary"
+        :hooks="detail.hook_events"
+        :coverage="detail.data_coverage"
+      />
+
       <NGrid :x-gap="16" :y-gap="16" cols="1 s:2 m:4 l:4 xl:7" responsive="screen">
         <NGi v-for="item in kpis" :key="item.label">
           <NCard :bordered="false" class="card-wrapper">
@@ -298,9 +307,14 @@ onMounted(load);
         </NGi>
       </NGrid>
 
+      <SessionMetricsGrid :session="detail.session" />
+
       <NCard :bordered="false" class="card-wrapper" title="评论与观众画像">
         <NTabs type="line" animated default-value="comments">
-          <NTabPane name="comments" :tab="`直播评论 (${detail?.comments.length || 0})`" display-directive="if">
+          <NTabPane name="comments" :tab="`用户转化分析 (${detail.audience_users.length})`" display-directive="if">
+            <AudienceInsights :session-id="Number(id)" :users="detail.audience_users" />
+          </NTabPane>
+          <NTabPane name="raw-comments" :tab="`原始评论 (${detail?.comments.length || 0})`" display-directive="if">
             <CommentGroups :comments="detail?.comments || []" />
           </NTabPane>
           <NTabPane name="profiles" :tab="`观众画像 (${detail?.profiles.length || 0})`" display-directive="if">
