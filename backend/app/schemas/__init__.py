@@ -257,6 +257,15 @@ class AudienceCommentResponse(BaseModel):
     comment_time: Optional[datetime] = None
 
 
+class AudienceLeadContactResponse(BaseModel):
+    """同主播一分钟配对成功后可展示和复制的真实联系方式。"""
+
+    type: str
+    value: str
+    converted_at: Optional[datetime] = None
+    gap_seconds: int = 0
+
+
 class AudienceUserInsightResponse(BaseModel):
     """按稳定用户标识聚合的评论、留资与主播承接分析。"""
 
@@ -275,6 +284,7 @@ class AudienceUserInsightResponse(BaseModel):
     has_lead: bool = False
     lead_match_method: Optional[str] = None
     lead_time: Optional[datetime] = None
+    lead_contacts: list[AudienceLeadContactResponse] = Field(default_factory=list)
     host_responded: bool = False
     hook_action_detected: bool = False
     host_evidence: Optional[str] = None

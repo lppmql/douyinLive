@@ -365,6 +365,12 @@ declare namespace Api {
       has_lead: boolean;
       lead_match_method: 'douyin_id_exact' | 'unique_id_exact' | 'short_id_exact' | null;
       lead_time: string | null;
+      lead_contacts: Array<{
+        type: 'phone' | 'wechat';
+        value: string;
+        converted_at: string | null;
+        gap_seconds: number;
+      }>;
       host_responded: boolean;
       hook_action_detected: boolean;
       host_evidence: string | null;

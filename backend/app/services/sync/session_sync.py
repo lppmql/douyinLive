@@ -9,7 +9,7 @@ from sqlalchemy import text, func
 from app.core.logger import logger
 from app.models.live_sessions import LiveSession
 from app.models.live_rooms import LiveRoom
-from app.models.leads import Lead
+from app.models.lead_conversion_pairs import LeadConversionPair
 from app.models.live_metrics import LiveMetric
 from app.models.de_tables import (
     DeAnchorRealtimeMetrics,
@@ -29,13 +29,12 @@ def sync_session_summary(db, session_id: int):
 
     room = db.query(LiveRoom).get(session.room_id) if session.room_id else None
 
-    # 聚合有效留资
-    valid_leads = db.query(func.count(Lead.id)).filter(
-        Lead.session_id == session_id,
-        Lead.is_valid == 1,
+    # 统一使用“同主播 60 秒内抖音号 + 联系方式”确认配对口径。
+    valid_leads = db.query(func.count(LeadConversionPair.id)).filter(
+        LeadConversionPair.session_id == session_id,
     ).scalar() or 0
 
-    total_leads = session.leads_count or 0
+    total_leads = valid_leads
     lead_valid_rate = (valid_leads / total_leads) if total_leads > 0 else 0
     ad_cost = float(session.ad_cost or 0)
     lead_cost = (ad_cost / valid_leads) if valid_leads > 0 else 0

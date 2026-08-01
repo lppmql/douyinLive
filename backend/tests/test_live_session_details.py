@@ -118,6 +118,7 @@ class DetailDb:
     def query(self, model):
         from app.models.asr_audio_chunks import AsrAudioChunk
         from app.models.asr_tasks import AsrTask
+        from app.models.lead_conversion_pairs import LeadConversionPair
         from app.models.transcript_segments import TranscriptSegment
 
         rows = {
@@ -128,6 +129,7 @@ class DetailDb:
             AsrTask: [],
             AsrAudioChunk: [],
             TranscriptSegment: [],
+            LeadConversionPair: [],
             Lead: [],
         }[model]
         return DetailQuery(rows)

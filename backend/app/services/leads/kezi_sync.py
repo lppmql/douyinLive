@@ -20,6 +20,8 @@ from app.core.logger import logger
 from app.models.lead_sync_states import LeadSyncState
 from app.models.leads import Lead
 from app.models.live_sessions import LiveSession
+from app.models.lead_conversion_pairs import LeadConversionPair
+from app.services.leads.lead_pairing import rebuild_lead_conversion_pairs
 
 
 SOURCE_SYSTEM = "kezi"
@@ -359,7 +361,7 @@ def _save_item(db: Session, item: KeziLeadItem) -> tuple[bool, int | None]:
 
 
 def _refresh_session_lead_counts(db: Session, session_ids: set[int]) -> None:
-    """只更新本轮受影响场次，避免每次同步扫描全部历史数据。"""
+    """按已完成一分钟配对的确认客资更新场次数量。"""
     # 新客资刚加入 Session 但尚未提交，先 flush 才能让下面的 COUNT 看见它。
     db.flush()
     for session_id in session_ids:
@@ -367,10 +369,9 @@ def _refresh_session_lead_counts(db: Session, session_ids: set[int]) -> None:
         if session is None:
             continue
         session.leads_count = (
-            db.query(Lead.id)
+            db.query(LeadConversionPair.id)
             .filter(
-                Lead.session_id == session_id,
-                Lead.is_valid == 1,
+                LeadConversionPair.session_id == session_id,
             )
             .count()
         )
@@ -426,6 +427,7 @@ def rematch_pending_leads(db: Session) -> dict:
             lead.remark = "未找到同主播且时间覆盖的真实直播场次，等待人工归属" if any_candidates else "换号播的"
             still_pending += 1
 
+    rebuild_lead_conversion_pairs(db)
     _refresh_session_lead_counts(db, affected_sessions)
     db.commit()
 
@@ -458,6 +460,7 @@ async def sync_kezi_leads(
         matched = 0
         pending = 0
         pages = 0
+        pair_result = {"pair_count": 0}
         try:
             while pages < max(1, max_pages):
                 page = await client.fetch_page(
@@ -496,6 +499,10 @@ async def sync_kezi_leads(
                 if not page.has_more or not page.data:
                     break
 
+            # 一次同步批次只全量重建一次，避免每页重复扫描全部历史数据。
+            pair_result = rebuild_lead_conversion_pairs(db)
+            db.commit()
+
             logger.info(
                 "客资增量同步完成：新增 %s 条，重复 %s 条，已归属 %s 条，待归属 %s 条",
                 added,
@@ -512,9 +519,18 @@ async def sync_kezi_leads(
                 "pending_count": int(state.pending_count or 0),
                 "last_external_id": int(state.last_external_id or 0),
                 "page_count": pages,
+                "paired_count": pair_result["pair_count"] if pages else 0,
             }
         except Exception as exc:
             db.rollback()
+            # 前面页已经按页提交时，即使后续请求失败也要把已入库原始记录配对完。
+            if pages:
+                try:
+                    rebuild_lead_conversion_pairs(db)
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    logger.exception("客资同步失败后重建确认配对失败")
             safe_error = (
                 str(exc)
                 if isinstance(exc, KeziSyncError)

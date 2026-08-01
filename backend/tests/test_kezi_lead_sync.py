@@ -336,7 +336,14 @@ def test_manual_attribution_refreshes_old_and_new_session_counts(db):
     new_session = LiveSession(room_id=room.id, anchor_name="主播乙", live_status="ended")
     db.add_all([old_session, new_session])
     db.flush()
-    lead = Lead(session_id=old_session.id, lead_phone="13800138000", is_valid=1)
+    lead = Lead(
+        session_id=old_session.id,
+        lead_phone="13800138000",
+        douyin_id="confirmed-user",
+        anchor_name="主播甲",
+        create_time=datetime(2026, 8, 1, 10, 0),
+        is_valid=1,
+    )
     db.add(lead)
     old_session.leads_count = 1
     new_session.leads_count = 0
@@ -378,6 +385,9 @@ def test_manual_create_and_delete_refresh_session_count(db):
         LeadCreate(
             session_id=session.id,
             lead_phone="13800138000",
+            douyin_id="confirmed-user",
+            anchor_name="主播甲",
+            create_time=datetime(2026, 8, 1, 10, 0),
             is_valid=1,
         ),
         db=db,

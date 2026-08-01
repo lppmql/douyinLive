@@ -76,7 +76,7 @@ onMounted(pollStatus);
 <template>
   <NCard :bordered="false" class="card-wrapper" title="钩子与客资转化">
     <NAlert type="info" :show-icon="true" class="mb-16px">
-      客资只按公开抖音号精确标注到用户；“钩子关联客资”表示客资在钩子后 30 分钟内产生，不代表确定因果。
+      只有同主播60秒内同时出现抖音号和手机号/微信号才确认留资；抖音号只用于归属评论用户和直播场次。
     </NAlert>
     <NAlert v-if="coverage.analysis_truncated" type="warning" :show-icon="true" class="mb-16px">
       本场共采集 {{ coverage.comment_count }} 条评论；为保证页面性能，用户分析使用最近
@@ -89,7 +89,7 @@ onMounted(pollStatus);
       <NGi><NStatistic label="待补完整" :value="summary.incomplete_hook_count || 0" /></NGi>
       <NGi><NStatistic label="本场客资" :value="summary.session_lead_count" /></NGi>
       <NGi><NStatistic label="时间窗关联客资" :value="summary.hook_window_lead_count" /></NGi>
-      <NGi><NStatistic label="精确匹配用户" :value="summary.exact_matched_user_count" /></NGi>
+      <NGi><NStatistic label="确认留资用户" :value="summary.exact_matched_user_count" /></NGi>
       <NGi><NStatistic :label="coverage.analysis_truncated ? '样本评论用户' : '评论用户'" :value="summary.comment_user_count" /></NGi>
     </NGrid>
     <NAlert type="success" :show-icon="true" class="mt-16px">

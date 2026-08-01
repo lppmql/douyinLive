@@ -2968,6 +2968,23 @@ export interface components {
             comment_time?: string | null;
         };
         /**
+         * AudienceLeadContactResponse
+         * @description 同主播一分钟配对成功后可展示和复制的真实联系方式。
+         */
+        AudienceLeadContactResponse: {
+            /** Type */
+            type: string;
+            /** Value */
+            value: string;
+            /** Converted At */
+            converted_at?: string | null;
+            /**
+             * Gap Seconds
+             * @default 0
+             */
+            gap_seconds: number;
+        };
+        /**
          * AudienceUserInsightResponse
          * @description 按稳定用户标识聚合的评论、留资与主播承接分析。
          */
@@ -3011,6 +3028,8 @@ export interface components {
             lead_match_method?: string | null;
             /** Lead Time */
             lead_time?: string | null;
+            /** Lead Contacts */
+            lead_contacts?: components["schemas"]["AudienceLeadContactResponse"][];
             /**
              * Host Responded
              * @default false
@@ -4476,6 +4495,11 @@ export interface components {
              * @default 0
              */
             page_count: number;
+            /**
+             * Paired Count
+             * @default 0
+             */
+            paired_count: number;
             /** Rematch */
             rematch?: {
                 [key: string]: unknown;

@@ -9,6 +9,7 @@ from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
 from app.services.analysis.session_conversion import build_session_conversion_analysis
+from app.services.leads.lead_pairing import rebuild_lead_conversion_pairs
 
 
 def _session(db):
@@ -27,6 +28,32 @@ def _session(db):
     db.add(session)
     db.flush()
     return session
+
+
+def _add_confirmed_lead_pair(db, session, douyin_id: str, minute: int, external_id: int):
+    """测试也遵守真实口径：同主播60秒内抖音号和联系方式成对出现。"""
+    db.add_all([
+        Lead(
+            session_id=session.id,
+            douyin_id=douyin_id,
+            anchor_name="测试主播",
+            external_source="test",
+            external_id=external_id,
+            attribution_status="matched",
+            create_time=session.live_start_time + timedelta(minutes=minute),
+        ),
+        Lead(
+            session_id=session.id,
+            lead_phone="13800138000",
+            anchor_name="测试主播",
+            external_source="test",
+            external_id=external_id + 1,
+            attribution_status="matched",
+            create_time=session.live_start_time + timedelta(minutes=minute, seconds=20),
+        ),
+    ])
+    db.flush()
+    rebuild_lead_conversion_pairs(db)
 
 
 def test_exact_douyin_id_marks_user_as_lead_and_attributes_nearest_hook(db):
@@ -49,17 +76,7 @@ def test_exact_douyin_id_marks_user_as_lead_and_attributes_nearest_hook(db):
             asr_status="completed",
         )
     )
-    db.add(
-        Lead(
-            session_id=session.id,
-            douyin_id="@shop_123 ",
-            anchor_name="测试主播",
-            external_source="test",
-            external_id=1,
-            attribution_status="matched",
-            create_time=session.live_start_time + timedelta(minutes=15),
-        )
-    )
+    _add_confirmed_lead_pair(db, session, "@shop_123 ", 15, 1)
     db.commit()
 
     result = build_session_conversion_analysis(db, session, [comment])
@@ -123,15 +140,9 @@ def test_cached_short_id_can_exactly_match_lead_while_unique_id_is_displayed(db)
             douyin_id_type="unique_id",
             fetch_status="success",
         ),
-        Lead(
-            session_id=session.id,
-            douyin_id="123456789",
-            external_source="test",
-            external_id=22,
-            attribution_status="matched",
-            create_time=session.live_start_time + timedelta(minutes=6),
-        ),
     ])
+    db.flush()
+    _add_confirmed_lead_pair(db, session, "123456789", 6, 22)
     db.commit()
 
     result = build_session_conversion_analysis(db, session, [comment])
@@ -299,16 +310,7 @@ def test_hook_effect_windows_use_real_comments_and_matched_leads(db):
         ),
     ]
     db.add_all(comments)
-    db.add(
-        Lead(
-            session_id=session.id,
-            douyin_id="lead-user",
-            external_source="test",
-            external_id=4,
-            attribution_status="matched",
-            create_time=session.live_start_time + timedelta(minutes=4),
-        )
-    )
+    _add_confirmed_lead_pair(db, session, "lead-user", 4, 40)
     db.commit()
 
     result = build_session_conversion_analysis(db, session, comments)

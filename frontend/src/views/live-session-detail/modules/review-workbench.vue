@@ -167,6 +167,7 @@ onBeforeUnmount(() => {
                 当前有 {{ workbench.live_alerts?.length || 0 }} 条实时告警，已按发生时间合并到时间轴中。
               </NAlert>
               <ReviewTimeline
+                :session-id="sessionId"
                 :session-start="detail.session.live_start_time"
                 :metrics="detail.metrics || []"
                 :comments="detail.comments || []"
@@ -174,6 +175,7 @@ onBeforeUnmount(() => {
                 :findings="workbench.findings || []"
                 :alerts="workbench.live_alerts || []"
                 :hooks="detail.hook_events || []"
+                :audience-users="detail.audience_users || []"
                 @update-finding="updateFinding"
               />
             </NTabPane>

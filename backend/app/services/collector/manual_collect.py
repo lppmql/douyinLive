@@ -172,7 +172,7 @@ async def _collect_room_data(
         if home_info.get("realtime_online_count") is not None:
             sm["realtime_online_count"] = home_info["realtime_online_count"]
         if home_info.get("leads_count") is not None:
-            sm["leads_count"] = home_info["leads_count"]
+            sm["scene_leads_count"] = home_info["leads_count"]
         _apply_summary_metrics_to_session(session, sm)
 
         # 6. 采集评论
@@ -267,7 +267,7 @@ def _apply_summary_metrics_to_session(session: LiveSession, sm: dict) -> None:
         "realtime_online_count", "private_message_count", "private_message_longterm_count",
         "scene_leads_count", "mini_windmill_click_count", "card_click_count",
         "new_followers", "share_count", "share_users", "like_count", "like_users",
-        "leads_count", "comments_count", "comment_users", "interaction_count",
+        "comments_count", "comment_users", "interaction_count",
         "interaction_users", "watch_count", "watch_over_1m_count", "fans_club_join_count",
         "gift_count", "dislike_count", "dislike_users", "wechat_add_count",
         "form_submit_count", "form_submit_users",

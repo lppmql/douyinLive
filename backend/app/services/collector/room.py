@@ -285,7 +285,6 @@ async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:
         "share_users": ["lp_screen_live_share_uv", "share_users"],
         "like_count": ["lp_screen_live_like_count", "like_count"],
         "like_users": ["lp_screen_live_like_uv", "like_users"],
-        "leads_count": ["lp_screen_clue_uv", "leads_count", "clue_count", "clue_uv"],
         "comments_count": ["lp_screen_live_comment_count", "comments_count"],
         "comment_users": ["lp_screen_live_comment_uv", "comment_users"],
         "interaction_count": ["lp_screen_live_interaction_count", "interaction_count"],
@@ -390,7 +389,7 @@ async def _scrape_home_live_card(context: BrowserContext) -> dict:
         "is_live": False,
         "realtime_online_count": None,
         "total_viewers": None,
-        "leads_count": None,
+        "scene_leads_count": None,
     }
 
     if "您当前正在直播，更多详情" in lines:
@@ -406,7 +405,7 @@ async def _scrape_home_live_card(context: BrowserContext) -> dict:
     label_map = {
         "当前观看人数": "realtime_online_count",
         "累计观看人数": "total_viewers",
-        "留资线索数": "leads_count",
+        "留资线索数": "scene_leads_count",
     }
     for label, field in label_map.items():
         value = _extract_next_number(lines, label)

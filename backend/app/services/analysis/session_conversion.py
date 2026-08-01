@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.comments import Comment
 from app.models.comment_user_profiles import CommentUserProfile
-from app.models.leads import Lead
+from app.models.lead_conversion_pairs import LeadConversionPair
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
 
@@ -131,9 +131,9 @@ def build_session_conversion_analysis(
     # “已留资”是确认态，只允许使用已经由客资同步流程归属到本场的数据。
     # 未归属客资即使主播名和时间接近，也不能在用户卡片上显示为已留资。
     session_leads = (
-        db.query(Lead)
-        .filter(Lead.is_valid == 1, Lead.session_id == session.id, Lead.attribution_status == "matched")
-        .order_by(Lead.create_time.asc(), Lead.id.asc())
+        db.query(LeadConversionPair)
+        .filter(LeadConversionPair.session_id == session.id, LeadConversionPair.attribution_status == "attributed")
+        .order_by(LeadConversionPair.converted_at.asc(), LeadConversionPair.id.asc())
         .all()
     )
 
@@ -201,9 +201,9 @@ def build_session_conversion_analysis(
     formal_hooks = [hook for hook in hooks if hook["is_formal_hook"]]
     # 一条客资只关联到其产生前最近一次正式钩子；同时保留 5/15/30 分钟观察窗。
     for lead in session_leads:
-        if not lead.create_time or not session.live_start_time:
+        if not lead.converted_at or not session.live_start_time:
             continue
-        lead_seconds = (lead.create_time - session.live_start_time).total_seconds()
+        lead_seconds = (lead.converted_at - session.live_start_time).total_seconds()
         for hook in formal_hooks:
             delta = lead_seconds - hook["end_seconds"]
             if 0 <= delta <= 300:
@@ -242,7 +242,7 @@ def build_session_conversion_analysis(
                 intent_users.add(comment.user_sec_uid or comment.user_nickname or str(comment.id))
         hook["high_intent_user_count"] = len(intent_users)
 
-    leads_by_douyin: dict[str, list[Lead]] = defaultdict(list)
+    leads_by_douyin: dict[str, list[LeadConversionPair]] = defaultdict(list)
     for lead in session_leads:
         normalized = _normalize_douyin_id(lead.douyin_id)
         if normalized:
@@ -323,7 +323,16 @@ def build_session_conversion_analysis(
                     else "short_id_exact" if matched_leads and cached_profile and matched_id == cached_profile.short_id
                     else "douyin_id_exact" if matched_leads else None
                 ),
-                "lead_time": matched_leads[0].create_time if matched_leads else None,
+                "lead_time": matched_leads[0].converted_at if matched_leads else None,
+                "lead_contacts": [
+                    {
+                        "type": item.contact_type,
+                        "value": item.contact_value,
+                        "converted_at": item.converted_at,
+                        "gap_seconds": item.gap_seconds,
+                    }
+                    for item in matched_leads
+                ],
                 "host_responded": bool(nearby_segments),
                 "hook_action_detected": bool(nearby_hooks),
                 "host_evidence": (nearby_segments[0].text_content or "")[:500] if nearby_segments else None,

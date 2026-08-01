@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.logger import logger
 from app.models.lead_sync_states import LeadSyncState
 from app.models.leads import Lead
+from app.models.lead_conversion_pairs import LeadConversionPair
 from app.models.live_sessions import LiveSession
 from app.schemas import LeadCreate, LeadResponse, MessageResponse
 from app.schemas.leads import (
@@ -18,6 +19,7 @@ from app.schemas.leads import (
     LeadSyncStatusResponse,
 )
 from app.services.leads.kezi_sync import SOURCE_SYSTEM, rematch_pending_leads, sync_kezi_leads
+from app.services.leads.lead_pairing import rebuild_lead_conversion_pairs
 
 router = APIRouter(prefix="/leads", tags=["留资"])
 
@@ -29,8 +31,8 @@ def _refresh_session_lead_count(db: Session, session_id: int | None) -> None:
     session = db.get(LiveSession, session_id)
     if session:
         session.leads_count = (
-            db.query(Lead.id)
-            .filter(Lead.session_id == session_id, Lead.is_valid == 1)
+            db.query(LeadConversionPair.id)
+            .filter(LeadConversionPair.session_id == session_id)
             .count()
         )
 
@@ -119,6 +121,7 @@ def create_lead(data: LeadCreate, db: Session = Depends(get_db)):
         # 先把客资写进当前事务，再按真实有效客资重算场次统计。
         # 两步一起提交，避免列表里有客资但看板数量还是旧值。
         db.flush()
+        rebuild_lead_conversion_pairs(db)
         _refresh_session_lead_count(db, lead.session_id)
         db.commit()
     except SQLAlchemyError as exc:
@@ -150,6 +153,7 @@ def attribute_lead(
     if lead.remark == "未找到同主播且时间覆盖的真实直播场次，等待人工归属":
         lead.remark = None
     db.flush()
+    rebuild_lead_conversion_pairs(db)
     _refresh_session_lead_count(db, old_session_id)
     _refresh_session_lead_count(db, session.id)
     db.commit()
@@ -165,6 +169,7 @@ def delete_lead(lead_id: int, db: Session = Depends(get_db)):
     old_session_id = lead.session_id
     db.delete(lead)
     db.flush()
+    rebuild_lead_conversion_pairs(db)
     _refresh_session_lead_count(db, old_session_id)
     db.commit()
     return {"message": "删除成功"}

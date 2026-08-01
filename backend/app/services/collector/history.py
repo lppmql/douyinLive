@@ -137,7 +137,7 @@ async def _sync_history_sessions(db: Session, account: ScraperAccount, room: Liv
             avg_live_duration = _safe_int(item.get("avg_live_duration"))
             if avg_live_duration is not None:
                 session.avg_watch_seconds = float(avg_live_duration)
-            session.leads_count = _safe_int(item.get("live_leads_info_cnt")) or session.leads_count or 0
+            session.scene_leads_count = _safe_int(item.get("live_leads_info_cnt")) or session.scene_leads_count or 0
             session.private_message_count = _safe_int(item.get("consultation_count")) or session.private_message_count or 0
 
         page_no += 1

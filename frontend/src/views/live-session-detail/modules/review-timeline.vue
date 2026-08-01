@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { useMessage } from 'naive-ui';
 import { storeToRefs } from 'pinia';
+import AnchorAvatar from '@/components/business/anchor-avatar.vue';
+import { getCommentUserAvatarUrl } from '@/service/api/douyin';
 import { useReviewStore } from '@/store/modules/review';
 
 defineOptions({ name: 'ReviewTimeline' });
 const props = defineProps<{
+  sessionId: number;
   sessionStart: string | null;
   metrics: Api.Douyin.LiveMetric[];
   comments: Api.Douyin.LiveComment[];
@@ -12,6 +16,7 @@ const props = defineProps<{
   findings: Api.Douyin.ReviewFinding[];
   alerts: Api.Douyin.ReviewLiveAlert[];
   hooks: Api.Douyin.HookEvent[];
+  audienceUsers: Api.Douyin.AudienceUserInsight[];
 }>();
 const emit = defineEmits<{
   updateFinding: [finding: Api.Douyin.ReviewFinding, status: Api.Douyin.ReviewFinding['status']];
@@ -30,9 +35,12 @@ interface TimelineEvent {
   findingId?: number;
   finding?: Api.Douyin.ReviewFinding;
   hook?: Api.Douyin.HookEvent;
+  audienceUser?: Api.Douyin.AudienceUserInsight;
+  commentId?: number;
 }
 
 const reviewStore = useReviewStore();
+const message = useMessage();
 const { currentSecond, selectedEvidenceId } = storeToRefs(reviewStore);
 // 默认突出可执行的告警、钩子、发现与评论；完整主播话术按需打开，避免数百个 ASR 节点淹没转化动作。
 const enabledKinds = ref<EventKind[]>(['alert', 'hook', 'finding', 'comment']);
@@ -56,6 +64,7 @@ function transcriptLabel(value?: string | null) {
 
 const events = computed<TimelineEvent[]>(() => {
   const items: TimelineEvent[] = [];
+  const audienceByIdentity = new Map(props.audienceUsers.map(item => [item.identity_key, item]));
   props.alerts.forEach(item => {
     items.push({
       key: `alert-${item.key}`,
@@ -99,6 +108,8 @@ const events = computed<TimelineEvent[]>(() => {
     });
   });
   props.comments.forEach(item => {
+    const identity = item.user_sec_uid || item.user_douyin_id || item.user_nickname || '匿名用户';
+    const audienceUser = audienceByIdentity.get(identity);
     items.push({
       key: `comment-${item.id}`,
       kind: 'comment',
@@ -107,7 +118,9 @@ const events = computed<TimelineEvent[]>(() => {
       title: `${item.user_nickname || '匿名用户'}${item.is_high_intent ? ' · 筹备意向' : ''}`,
       content: item.comment_content || '-',
       category: item.keywords || undefined,
-      severity: item.is_high_intent ? 'warning' : 'info'
+      severity: item.is_high_intent ? 'warning' : 'info',
+      audienceUser,
+      commentId: item.id
     });
   });
   props.segments.forEach(item => {
@@ -168,6 +181,11 @@ function isActive(item: TimelineEvent) {
     (currentSecond.value >= item.second && currentSecond.value <= Math.max(item.endSecond, item.second + 5))
   );
 }
+async function copyValue(label: string, value: string | null | undefined) {
+  if (!value) return;
+  await navigator.clipboard.writeText(value);
+  message.success(`${label}已复制`);
+}
 </script>
 
 <template>
@@ -198,7 +216,14 @@ function isActive(item: TimelineEvent) {
           <SvgIcon :icon="kindIcon(item.kind)" class="mt-2px shrink-0 text-20px text-primary" />
           <div class="min-w-0 flex-1">
             <div class="flex flex-wrap items-center gap-8px">
+              <AnchorAvatar
+                v-if="item.kind === 'comment' && item.audienceUser"
+                :size="28"
+                :name="item.audienceUser.user_nickname || '匿名用户'"
+                :src="item.audienceUser.user_avatar_comment_id ? getCommentUserAvatarUrl(sessionId, item.audienceUser.user_avatar_comment_id) : ''"
+              />
               <span class="text-13px font-700">{{ item.title }}</span>
+              <NTag v-if="item.audienceUser?.has_lead" size="tiny" type="success" :bordered="false">已留资</NTag>
               <NTag v-if="item.category" size="tiny" round :bordered="false">{{ item.category }}</NTag>
               <NTag v-if="item.severity === 'critical'" size="tiny" type="error">重点复核</NTag>
               <NTag v-else-if="item.severity === 'warning'" size="tiny" type="warning">机会/风险</NTag>
@@ -207,6 +232,27 @@ function isActive(item: TimelineEvent) {
               </NTag>
             </div>
             <div class="mt-4px line-clamp-2 text-12px leading-19px text-gray-500">{{ item.content }}</div>
+            <div v-if="item.audienceUser" class="mt-5px flex flex-wrap items-center gap-8px text-11px">
+              <NButton
+                v-if="item.audienceUser.user_douyin_id"
+                text
+                size="tiny"
+                type="primary"
+                @click.stop="copyValue('抖音号', item.audienceUser.user_douyin_id)"
+              >
+                抖音号 {{ item.audienceUser.user_douyin_id }} · 复制
+              </NButton>
+              <NButton
+                v-for="contact in item.audienceUser.lead_contacts"
+                :key="`${contact.type}-${contact.value}`"
+                text
+                size="tiny"
+                type="success"
+                @click.stop="copyValue(contact.type === 'phone' ? '手机号' : '微信号', contact.value)"
+              >
+                {{ contact.type === 'phone' ? '手机号' : '微信号' }} {{ contact.value }} · 复制
+              </NButton>
+            </div>
             <div v-if="item.hook" class="mt-5px flex flex-wrap gap-6px text-11px text-gray-500">
               <NTag v-if="item.hook.missing_elements?.length" size="tiny" type="warning" :bordered="false">
                 待补：{{ item.hook.missing_elements.join('、') }}

@@ -7,7 +7,7 @@ from app.core.logger import logger
 from app.models.live_sessions import LiveSession
 from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
-from app.models.leads import Lead
+from app.models.lead_conversion_pairs import LeadConversionPair
 from app.models.stream_sources import StreamSource
 from app.services.asr.control import get_asr_runtime_status
 from app.services.asr.queue import queue_auto_transcriptions
@@ -38,8 +38,8 @@ async def process_live_end(db: Session, session_id: int):
             Comment.session_id == session_id
         ).scalar() or 0
 
-        lead_count = db.query(func.count(Lead.id)).filter(
-            Lead.session_id == session_id
+        lead_count = db.query(func.count(LeadConversionPair.id)).filter(
+            LeadConversionPair.session_id == session_id
         ).scalar() or 0
 
         # 更新场次
