@@ -6,6 +6,7 @@
 import asyncio
 from datetime import datetime
 from typing import Optional
+from urllib.parse import parse_qs, urlparse
 
 from playwright.async_api import BrowserContext
 
@@ -22,7 +23,7 @@ from app.services.collector.utils import (
 )
 
 # 大屏页 + 主页地址
-from app.services.collector.constants import LIVE_SCREEN_URL
+from app.services.collector.constants import COMMENT_URL, LIVE_SCREEN_URL
 HOME_URL = "https://leads.cluerich.com/pc/growth/home"
 
 
@@ -37,6 +38,26 @@ async def _drain_response_tasks(tasks: list[asyncio.Task], timeout_seconds: floa
     for task in pending:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def discover_root_room_id(context: BrowserContext) -> Optional[str]:
+    """让企业后台选择最近有效直播间，并从真实重定向 URL 提取根 room_id。"""
+    page = await context.new_page()
+    try:
+        await page.goto(COMMENT_URL, wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(3000)
+        query = parse_qs(urlparse(page.url).query)
+        room_id = str((query.get("roomId") or query.get("room_id") or [""])[0]).strip()
+        return room_id or None
+    except Exception as exc:
+        logger.warning("自动发现根直播间失败: %s", exc)
+        return None
+    finally:
+        try:
+            await page.close()
+        except Exception as exc:
+            if not _is_context_closed_message(exc):
+                logger.debug("自动发现根直播间页面关闭失败: %s", exc)
 
 
 async def _scrape_live_screen(context: BrowserContext, room_id: str) -> dict:

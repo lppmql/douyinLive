@@ -10,7 +10,9 @@ class KnowledgeBase(Base, TimestampMixin):
     __tablename__ = "knowledge_base"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=True, comment="关联直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=True, comment="关联直播场次ID"
+    )
     category = Column(String(50), nullable=True, comment="分类：优质话术/分析结论/优化案例")
     title = Column(String(200), nullable=True, comment="标题")
     content = Column(LONGTEXT, nullable=True, comment="内容")

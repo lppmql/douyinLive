@@ -16,7 +16,9 @@ class KnowledgeTimeSlice(Base, TimestampMixin):
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="知识时间片ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="关联直播场次ID"
+    )
     slice_index = Column(Integer, nullable=False, comment="场次内时间片序号，从0开始")
     slice_start_seconds = Column(Integer, nullable=False, comment="相对开播开始秒数")
     slice_end_seconds = Column(Integer, nullable=False, comment="相对开播结束秒数")

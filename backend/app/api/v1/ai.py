@@ -2,7 +2,7 @@
 import json
 import logging
 from typing import Literal
-from fastapi import APIRouter, Depends, HTTPException, Query, Request as FastapiRequest
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field

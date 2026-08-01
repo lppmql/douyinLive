@@ -4,6 +4,31 @@
 
 ---
 
+## [2026-08-01]
+
+### Added
+- 新增可随 Git 分发的 DataEase 2.10.25 `application.yml`，并在一键启动时自动准备独立 `dataease` 数据库。
+- 为根目录 `.env.example` 的每个变量补充中文用途、格式、单位和安全说明。
+- 新增 ADR 0034：《跨机器一键部署与 CI 配置闭环》。
+
+### Changed
+- 一键启动将 DataEase 与 FunASR 作为可降级服务；DataEase 配置缺失或启动失败时不再阻断前后端主系统。
+- `.env.example` 明确定位为 `DEBUG=true` 的本机首次启动模板，保留用户指定的 `root123` / `admin123` 首次初始化值；`DEBUG=false` 时继续强制数据库密码至少 16 位、管理员密码至少 15 位。
+- CI 明确安装 `ruff`，Docker 配置检查使用 `.env.example` 生成临时环境文件，保证全新检出也能验证 Compose。
+- Qdrant 集合初始化不再提前导入 `torch/transformers`，避免未使用向量模型时误报 Qdrant 不可用。
+
+### Fixed
+- 修复全新数据库已经扫码登录却因 `live_rooms` 为空而提前报错的问题：首次采集现在复用保存的 Cookie 与浏览器指纹，让企业后台自动选择最近有效直播间并保存真实 `room_id`，无需手工录入。
+- 修复一键启动清理端口时误杀 Docker Desktop 进程的问题。
+- 修复 DataEase 配置缺失时被 Docker 创建成同名目录、数据库未初始化以及只读账号配置失败的问题。
+- 修复 macOS `ps` 输出包含非 UTF-8 字节时，ASR 控制中心接口和后端关闭流程抛出 `UnicodeDecodeError`。
+- 修复新电脑首次管理员初始化密码与项目实际部署配置不一致的问题。
+
+### Verified
+- DataEase 登录 RSA 链路、HTTP 页面、MySQL 只读账号与 FunASR WebSocket 均曾使用真实本地服务验证通过；本次提交另以真实本地前后端完成管理员登录和首页验收。
+- 使用已扫码账号真实验证根直播间自动发现成功，并同步发现 9 位主播、1045 场企业直播记录和 1001 场历史记录；详情补齐抽样 2 场成功后停止手工验收，剩余场次交由正常后台队列处理。
+- 全新临时数据库从空库升级到 Alembic 最新版本后 `alembic check` 通过；320 项后端测试、前端类型检查、生产构建、代码规范与 Docker Compose 解析通过。
+
 ## [2026-07-30]
 
 ### Fixed

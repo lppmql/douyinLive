@@ -41,6 +41,7 @@ from app.services.collector.room import (
     _scrape_home_live_card,
     _scrape_live_screen,
     _scrape_stream_url,
+    discover_root_room_id,
 )
 from app.services.collector.session import _get_or_create_session, _repair_session_comment_integrity
 from app.services.collector.utils import _is_context_closed_message
@@ -343,6 +344,26 @@ def _prune_unmapped_sessions(db: Session, room: LiveRoom) -> int:
 # ==================== 主编排入口 ====================
 
 
+def _save_discovered_root_room(db: Session, account: ScraperAccount, room_id: str) -> LiveRoom:
+    """幂等保存平台自动选择的根直播间，不依赖用户手工录入。"""
+    room = db.query(LiveRoom).filter(LiveRoom.room_id_str == room_id).first()
+    display_name = account.douyin_nickname or account.account_name or "已登录采集账号"
+    if room is None:
+        room = LiveRoom(
+            account_name=account.account_name or display_name,
+            anchor_name=display_name,
+            douyin_id=account.douyin_id,
+            room_id_str=room_id,
+            status=True,
+        )
+        db.add(room)
+    else:
+        room.status = True
+    db.commit()
+    db.refresh(room)
+    return room
+
+
 async def collect_all(
     db: Session,
     task_id: Optional[int] = None,
@@ -382,19 +403,48 @@ async def collect_all(
     if not browser_manager._logged_in_account_id:
         browser_manager._logged_in_account_id = account.id
 
-    # 2. 获取所有配置了 room_id 的房间
+    # 2. 先恢复真实登录上下文；全新数据库会用它让平台自动选择最近有效直播间。
+    report("login_check", 6, 0, 0, "正在验证 Cookie 与浏览器指纹")
+    context, is_valid, msg = await browser_manager.get_logged_in_context()
+    if not is_valid or context is None:
+        return {
+            "total_rooms": 0,
+            "collected_rooms": 0,
+            "message": msg or "登录已过期，请先在采集页面重新扫码登录",
+            "results": [],
+        }
+
+    # 3. 获取已有房间；空库时从企业后台真实重定向自动发现根 room_id。
     rooms = (
         db.query(LiveRoom)
         .filter(LiveRoom.status.is_(True), LiveRoom.room_id_str.isnot(None))
         .all()
     )
+    if not rooms:
+        report("room_discovery", 7, 0, 0, "正在从企业后台自动发现直播间")
+        discovered_room_id = await discover_root_room_id(context)
+        if discovered_room_id:
+            rooms = [_save_discovered_root_room(db, account, discovered_room_id)]
+            db.add(
+                ScraperLog(
+                    task_id=task_id,
+                    level="info",
+                    message="已从企业后台自动发现并保存根直播间",
+                    raw_json={
+                        "stage": "room_discovery",
+                        "event": "root_room_discovered",
+                        "room_id": discovered_room_id,
+                    },
+                )
+            )
+            db.commit()
     report("prepare", 8, 0, len(rooms), f"已加载 {len(rooms)} 个采集房间")
 
     if not rooms:
         return {
             "total_rooms": 0,
             "collected_rooms": 0,
-            "message": "没有配置房间，请先在直播间管理添加 room_id",
+            "message": "已登录，但企业后台没有返回可采集的直播间；请确认该账号至少有一场直播记录",
             "results": [],
         }
 
@@ -408,17 +458,6 @@ async def collect_all(
             f"已合并 {repaired_sessions} 条重复场次、清理 {removed_comments} 条串场评论",
             {"merged_session_count": repaired_sessions, "removed_comment_count": removed_comments},
         )
-
-    # 3. 获取持久化登录上下文
-    report("login_check", 10, 0, len(rooms), "正在验证 Cookie 与浏览器指纹")
-    context, is_valid, msg = await browser_manager.get_logged_in_context()
-    if not is_valid:
-        return {
-            "total_rooms": len(rooms),
-            "collected_rooms": 0,
-            "message": msg or "登录已过期，请先在采集页面重新扫码登录",
-            "results": [],
-        }
 
     try:
         results = []

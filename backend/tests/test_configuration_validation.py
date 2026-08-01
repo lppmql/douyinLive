@@ -38,6 +38,12 @@ def test_production_rejects_short_database_password():
     assert "DATABASE_PASSWORD_INSECURE" in errors
 
 
+def test_local_debug_allows_documented_first_run_database_password():
+    errors, _ = make_settings(DEBUG=True, DB_PASSWORD="root123").runtime_configuration_issues()
+
+    assert "DATABASE_PASSWORD_INSECURE" not in errors
+
+
 def test_unsafe_local_services_are_reported_without_exposing_secrets():
     errors, warnings = make_settings(
         DB_USER="root",
@@ -69,13 +75,14 @@ def test_alembic_uses_runtime_database_configuration_without_stored_password():
     assert "mysql+pymysql://localhost/douyin_live" in ini_source
 
 
-def test_one_click_start_waits_for_all_runtime_health_checks():
+def test_one_click_start_requires_core_health_and_keeps_optional_services_optional():
     start_source = (BACKEND_ROOT.parent / "start.sh").read_text(encoding="utf-8")
 
-    assert "docker compose --profile dataease up -d mysql redis qdrant dataease" in start_source
+    assert "docker compose up -d mysql redis qdrant" in start_source
+    assert 'if [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then' in start_source
     assert "docker compose --profile observability up -d prometheus grafana" in start_source
     assert "if ! wait_for_backend; then" in start_source
-    assert "if ! wait_for_dataease; then" in start_source
+    assert '[ "$MYSQL_READY" = "true" ] && wait_for_dataease' in start_source
     assert "scripts/check_dataease_crypto.py" in start_source
     assert "local ATTEMPTS=600" in start_source
     assert "douyinLive.dataeaseKeySha256" in start_source
@@ -83,10 +90,14 @@ def test_one_click_start_waits_for_all_runtime_health_checks():
     assert 'wait_for_http "Grafana"' in start_source
     assert 'wait_for_http "Qdrant"' in start_source
     assert "docker compose --profile funasr up -d funasr" in start_source
+    assert 'if [ "$(env_value ASR_AUTO_START)" != "true" ]; then' in start_source
+    assert 'FUNASR_WAIT_SECONDS="$(env_value ASR_ENGINE_READY_TIMEOUT_SECONDS)"' in start_source
+    assert "FunASR 容器异常退出，主系统将继续启动" in start_source
+    assert "FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，主系统将继续启动" in start_source
     assert start_source.index('echo "[2/6] 启动 Prometheus 与 Grafana..."') < start_source.index(
         'echo "[3/6] 启动后端 FastAPI..."'
     )
     assert start_source.index("if ! wait_for_backend; then") < start_source.index('echo "  ✅ 后端: http://localhost:8000"')
-    assert start_source.index("if ! wait_for_dataease; then") < start_source.index(
+    assert start_source.index('[ "$MYSQL_READY" = "true" ] && wait_for_dataease') < start_source.index(
         'echo "  ✅ DataEase: http://localhost:8100"'
     )

@@ -35,8 +35,12 @@ if [ -f "$ROOT_DIR/.env" ]; then
   JWT_VALUE="$(env_value JWT_SECRET_KEY)"
   REDIS_VALUE="$(env_value REDIS_URL)"
   DEBUG_VALUE="$(env_value DEBUG)"
-  if [ -z "$DB_PASSWORD_VALUE" ] || [ "$DB_PASSWORD_VALUE" = "root123" ] || [ ${#DB_PASSWORD_VALUE} -lt 16 ]; then
-    warn "DB_PASSWORD 为空或仍为弱密码，请改为至少 16 位随机字符串"
+  if [ "$DEBUG_VALUE" = "true" ]; then
+    if [ -z "$DB_PASSWORD_VALUE" ] || [ "$DB_PASSWORD_VALUE" = "root123" ] || [ ${#DB_PASSWORD_VALUE} -lt 16 ]; then
+      warn "当前使用本机调试数据库密码；对外部署前请改为至少 16 位随机字符串并关闭 DEBUG"
+    fi
+  elif [ -z "$DB_PASSWORD_VALUE" ] || [ ${#DB_PASSWORD_VALUE} -lt 16 ]; then
+    fail "DEBUG=false 时 DB_PASSWORD 必须是至少 16 位随机字符串"
   fi
   if [ "$DB_USER_VALUE" = "root" ]; then
     warn "业务后端仍使用 MySQL root；正式部署应迁移到独立业务账号"

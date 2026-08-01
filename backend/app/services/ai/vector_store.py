@@ -20,9 +20,12 @@ from qdrant_client.models import (
 
 from app.core.config import settings
 from app.core.qdrant import get_client
-from app.services.ai.embedding_service import VECTOR_DIM
 
 logger = logging.getLogger(__name__)
+
+# bge-small-zh-v1.5 的固定输出维度。集合初始化不应导入 embedding_service，
+# 否则仅检查 Qdrant 也会强制要求安装和加载 torch/transformers。
+VECTOR_DIM = 512
 
 # ── 集合（Collection）管理 ──
 

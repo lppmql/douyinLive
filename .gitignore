@@ -13,10 +13,6 @@ backend/__pycache__/
 *.swp
 *.swo
 
-# 本地 AI 编程助手指令，不上传远程仓库
-CLAUDE.md
-AGENTS.md
-
 # OS
 .DS_Store
 Thumbs.db
@@ -44,7 +40,11 @@ ms-playwright/
 backend/storage_state/*.json
 
 # DataEase 外部配置
-dataease/
+# DataEase 运行目录默认忽略，但保留启动必需的配置文件，避免换电脑后挂载成同名目录。
+dataease/*
+!dataease/conf/
+dataease/conf/*
+!dataease/conf/application.yml
 .coverage
 
 # Claude Code generated files

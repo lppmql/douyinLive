@@ -15,7 +15,9 @@ class AsrAudioChunk(Base, TimestampMixin):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="分片ID")
     task_id = Column(BigInteger, ForeignKey("asr_tasks.id"), nullable=False, comment="ASR任务ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="直播场次ID"
+    )
     chunk_index = Column(Integer, nullable=False, comment="从0开始的分片序号")
     start_seconds = Column(Float, nullable=False, default=0, comment="分片开始秒数")
     end_seconds = Column(Float, nullable=True, comment="分片结束秒数，空表示读取到流结束")

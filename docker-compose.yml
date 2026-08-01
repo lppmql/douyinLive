@@ -80,6 +80,20 @@ services:
       SPRING_WEB_RESOURCES_STATIC_LOCATIONS: file:/opt/dataease-overlay/,classpath:/META-INF/resources/,classpath:/resources/,classpath:/static/,classpath:/public/
       # DataEase 官方 iframe 嵌入要求：与根 .env 的 CORS_ORIGINS 保持一致
       DATAEASE_ORIGIN_LIST: ${CORS_ORIGINS:-http://localhost:9527,http://127.0.0.1:9527}
+      DE_CONTEXT_PATH: ""
+      DE_SPRING_PROFILE: mysql
+      DE_MYSQL_HOST: mysql
+      DE_MYSQL_PORT: "3306"
+      DE_MYSQL_DB: dataease
+      DE_MYSQL_USER: ${DB_USER:-root}
+      DE_MYSQL_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
+      DE_MYSQL_PARAMS: autoReconnect=false&useUnicode=true&characterEncoding=UTF-8&characterSetResults=UTF-8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true
+      DE_EXPORT_VIEWS_LIMIT: "100000"
+      DE_EXPORT_DATASET_LIMIT: "100000"
+      DE_ORIGIN_LIST: ${CORS_ORIGINS:-http://localhost:9527,http://127.0.0.1:9527}
+      DE_LOGIN_TIMEOUT: "480"
+      DE_SERVERS: dataease
+      DE_PLAYWRIGHT_SERVER: http://playwright:3000
     volumes:
       - ./dataease/conf/application.yml:/opt/apps/config/application.yml
       - ./deploy/dataease-overlay/static:/opt/dataease-overlay:ro

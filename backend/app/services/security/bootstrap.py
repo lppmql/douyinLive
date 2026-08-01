@@ -18,10 +18,11 @@ def bootstrap_admin_if_empty(db: Session) -> bool:
 
     username = settings.BOOTSTRAP_ADMIN_USERNAME.strip()
     password = settings.BOOTSTRAP_ADMIN_PASSWORD
-    if not username or len(password) < 15:
+    minimum_password_length = 6 if settings.DEBUG else 15
+    if not username or len(password) < minimum_password_length:
         raise RuntimeError(
             "全新安装必须在根目录 .env 配置 BOOTSTRAP_ADMIN_USERNAME，"
-            "并设置至少 15 位的 BOOTSTRAP_ADMIN_PASSWORD"
+            f"并设置至少 {minimum_password_length} 位的 BOOTSTRAP_ADMIN_PASSWORD"
         )
 
     db.add(

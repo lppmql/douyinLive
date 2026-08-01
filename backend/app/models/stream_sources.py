@@ -12,7 +12,9 @@ class StreamSource(Base, TimestampMixin):
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="流源ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="关联直播场次"
+    )
     source_type = Column(String(20), default="m3u8", comment="流源类型: m3u8/flv/hls")
     m3u8_url = Column(String(2000), nullable=False, comment="m3u8 播放地址")
     headers_json = Column(JSON, nullable=True, comment="请求头(Referer/User-Agent等)")

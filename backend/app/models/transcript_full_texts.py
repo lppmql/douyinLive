@@ -11,5 +11,7 @@ class TranscriptFullText(Base, TimestampMixin):
     __tablename__ = "transcript_full_texts"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="关联直播场次ID"
+    )
     full_text = Column(LONGTEXT, nullable=True, comment="完整拼接话术")

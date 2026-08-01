@@ -15,7 +15,9 @@ class AsrTask(Base, TimestampMixin):
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="任务ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="关联直播场次"
+    )
     stream_id = Column(Integer, ForeignKey("stream_sources.id"), nullable=True, comment="关联流源")
     status = Column(String(20), default="queued", comment="状态: queued/processing/completed/failed")
     task_type = Column(String(20), default="realtime", comment="任务类型: realtime/offline")

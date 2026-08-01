@@ -9,7 +9,9 @@ class LiveMetric(Base, TimestampMixin):
     __tablename__ = "live_metrics"
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="关联直播场次ID"
+    )
     metric_time = Column(DateTime, nullable=False, comment="指标采集时间")
 
     # 流量趋势

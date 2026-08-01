@@ -16,7 +16,9 @@ class AiCallTrace(Base, TimestampMixin):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="AI调用ID")
     trace_id = Column(String(128), nullable=False, comment="应用链路追踪ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=True, comment="关联真实直播场次")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=True, comment="关联真实直播场次"
+    )
     operation = Column(String(50), nullable=False, comment="业务操作类型")
     provider = Column(String(32), nullable=False, default="deepseek", comment="模型供应商")
     model_name = Column(String(100), nullable=False, comment="模型名称")

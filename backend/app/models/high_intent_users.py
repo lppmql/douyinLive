@@ -9,7 +9,9 @@ class HighIntentUser(Base, TimestampMixin):
     __tablename__ = "high_intent_users"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="关联直播场次ID"
+    )
     comment_id = Column(BigInteger, ForeignKey("comments.id"), nullable=True, comment="关联评论ID")
     user_name = Column(String(100), nullable=True, comment="用户昵称")
     phone = Column(String(20), nullable=True, comment="手机号（脱敏）")

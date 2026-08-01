@@ -16,7 +16,9 @@ class ScraperTask(Base, TimestampMixin):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="任务ID")
     account_id = Column(Integer, ForeignKey("scraper_accounts.id"), nullable=True, comment="关联采集账号ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=True, comment="关联直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=True, comment="关联直播场次ID"
+    )
     task_type = Column(String(50), nullable=False, comment="任务类型: login/metrics/comments/leads/profile")
     status = Column(String(20), default="pending", comment="状态: pending/running/completed/failed")
     started_at = Column(DateTime, nullable=True, comment="开始时间")

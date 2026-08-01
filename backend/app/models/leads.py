@@ -17,7 +17,9 @@ class Lead(Base, TimestampMixin):
     id = Column(Integer, primary_key=True, autoincrement=True, comment="ID")
     # 外部客资可能在下播后才提交。找不到真实场次时先留空，进入“待归属”，
     # 绝不能为了满足非空约束随便猜一个场次。
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=True, comment="真实匹配的直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=True, comment="真实匹配的直播场次ID"
+    )
     lead_name = Column(String(100), nullable=True, comment="留资姓名")
     lead_phone = Column(String(100), nullable=True, comment="手机号（放宽以便容纳含空格/多号码的原始客资）")
     douyin_id = Column(String(100), nullable=True, comment="客户抖音号")

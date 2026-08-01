@@ -27,7 +27,9 @@ class ReviewFinding(Base, TimestampMixin):
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="复盘发现ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="关联直播场次ID"
+    )
     report_id = Column(Integer, ForeignKey("analysis_reports.id"), nullable=True, comment="关联AI报告ID")
     evidence_key = Column(String(160), nullable=False, comment="真实证据幂等键")
     finding_type = Column(String(30), nullable=False, default="observation", comment="observation/opportunity/risk")
@@ -56,7 +58,9 @@ class ReviewActionItem(Base, TimestampMixin):
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="整改任务ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="来源直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="来源直播场次ID"
+    )
     finding_id = Column(BigInteger, ForeignKey("review_findings.id"), nullable=True, comment="来源复盘发现ID")
     title = Column(String(200), nullable=False, comment="整改标题")
     description = Column(Text, nullable=True, comment="整改要求")
@@ -64,7 +68,9 @@ class ReviewActionItem(Base, TimestampMixin):
     priority = Column(String(20), nullable=False, default="medium", comment="low/medium/high")
     status = Column(String(20), nullable=False, default="pending", comment="pending/in_progress/completed/verified")
     due_at = Column(DateTime, nullable=True, comment="计划完成时间")
-    verification_session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=True, comment="验证场次ID")
+    verification_session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=True, comment="验证场次ID"
+    )
     verification_note = Column(Text, nullable=True, comment="验证结论")
 
 
@@ -78,7 +84,9 @@ class ScriptAsset(Base, TimestampMixin):
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True, comment="话术资产ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="来源直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="来源直播场次ID"
+    )
     transcript_segment_id = Column(
         BigInteger,
         ForeignKey("transcript_segments.id"),

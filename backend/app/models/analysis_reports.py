@@ -9,7 +9,9 @@ class AnalysisReport(Base, TimestampMixin):
     __tablename__ = "analysis_reports"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="ID")
-    session_id = Column(Integer, ForeignKey("live_sessions.id"), nullable=False, comment="关联直播场次ID")
+    session_id = Column(
+        Integer, ForeignKey("live_sessions.id", ondelete="CASCADE"), nullable=False, comment="关联直播场次ID"
+    )
     report_type = Column(String(30), nullable=False, comment="类型：speech_score/trend/anomaly/optimization")
     report_title = Column(String(200), nullable=True, comment="报告标题")
     report_content = Column(JSON, nullable=True, comment="报告内容（JSON格式）")

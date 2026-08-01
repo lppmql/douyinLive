@@ -9,6 +9,11 @@ BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 START_LOCK_DIR="$ROOT_DIR/.runtime/start.lock"
 
+env_value() {
+  local KEY="$1"
+  sed -n "s/^${KEY}=//p" "$ROOT_DIR/.env" 2>/dev/null | tail -n 1
+}
+
 # 同一项目只能运行一个一键启动编排器。重复启动会先杀掉旧后端，可能在
 # 采集过程中关闭 BrowserContext；使用原子目录锁可以在碰业务进程前直接拦住。
 acquire_start_lock() {
@@ -76,14 +81,14 @@ auto_install() {
   local BIN="$2"
   local BREW_PKG="$3"
   if command -v "$BIN" >/dev/null 2>&1; then
-    echo "  ✅ $NAME（$(command -v "$BIN")）"
+    echo "  ✅ ${NAME}（$(command -v "$BIN")）"
     return 0
   fi
-  echo "  ⏳ $NAME 未安装，正在用 Homebrew 自动安装..."
+  echo "  ⏳ ${NAME} 未安装，正在用 Homebrew 自动安装..."
   if brew install "$BREW_PKG" 2>&1 | tail -1; then
-    echo "  ✅ $NAME 安装完成"
+    echo "  ✅ ${NAME} 安装完成"
   else
-    echo "  ❌ $NAME 自动安装失败，请手动执行：brew install $BREW_PKG"
+    echo "  ❌ ${NAME} 自动安装失败，请手动执行：brew install $BREW_PKG"
     exit 1
   fi
 }
@@ -115,9 +120,22 @@ echo "  🎉 环境自检通过"
 clean_port() {
   local PORT=$1
   local PIDS
+  local PID
+  local PROCESS_NAME
   local WAITED=0
   PIDS=$(lsof -ti ":$PORT" 2>/dev/null || true)
   if [ -n "$PIDS" ]; then
+    # macOS 上 Docker Desktop 负责容器端口转发，绝不能按端口直接杀掉。
+    for PID in $PIDS; do
+      PROCESS_NAME=$(ps -p "$PID" -o command= 2>/dev/null || true)
+      case "$PROCESS_NAME" in
+        *Docker*|*docker*|*com.docker*)
+          echo "  ❌ 端口 $PORT 由 Docker 服务占用，已拒绝结束 Docker Desktop"
+          echo "     请先检查占用该端口的容器：docker ps --filter publish=$PORT"
+          return 1
+          ;;
+      esac
+    done
     echo "  ⚠️  端口 $PORT 被占用 (PID: $(echo "$PIDS" | tr '\n' ' '))，正在释放..."
     kill $PIDS 2>/dev/null || true
     while [ "$WAITED" -lt 60 ]; do
@@ -203,30 +221,57 @@ wait_for_http() {
 
 # 1. 启动基础 Docker 服务与 DataEase（ASR 由后端按安全资源限制自动启动）
 echo ""
-echo "[1/6] 启动 MySQL、Redis、Qdrant 与 DataEase..."
+echo "[1/6] 启动 MySQL、Redis 与 Qdrant..."
 cd "$ROOT_DIR"
-docker compose --profile dataease up -d mysql redis qdrant dataease
+docker compose up -d mysql redis qdrant
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
 if ! wait_for_http "Qdrant" "http://127.0.0.1:6333/healthz" "douyin_live_qdrant" 60; then
   exit 1
 fi
 echo "  ✅ Qdrant: http://localhost:6333"
-echo "  ⏳ DataEase 正在启动，8GB 电脑首次初始化可能需要 3-10 分钟"
 echo "  ℹ️  FunASR 将在第 5 步启动；ASR Worker 由后端按页面开关管理"
-if ! wait_for_dataease; then
-  exit 1
+DATAEASE_STARTED=false
+if [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then
+  echo "  ⏳ 正在准备 DataEase 独立数据库..."
+  DATAEASE_DB_USER="$(env_value DB_USER)"
+  DATAEASE_DB_PASSWORD="$(env_value DB_PASSWORD)"
+  DATAEASE_DB_USER="${DATAEASE_DB_USER:-root}"
+  MYSQL_READY=false
+  if [ -z "$DATAEASE_DB_PASSWORD" ]; then
+    echo "  ⚠️  .env 中 DB_PASSWORD 为空，DataEase 暂不启动"
+  else
+    for ((i = 1; i <= 60; i++)); do
+      if docker exec -e MYSQL_PWD="$DATAEASE_DB_PASSWORD" douyin_live_mysql \
+        mysqladmin ping -h 127.0.0.1 -u"$DATAEASE_DB_USER" --silent >/dev/null 2>&1; then
+        MYSQL_READY=true
+        break
+      fi
+      sleep 1
+    done
+  fi
+  if [ "$MYSQL_READY" = "true" ]; then
+    docker exec -e MYSQL_PWD="$DATAEASE_DB_PASSWORD" douyin_live_mysql \
+      mysql -h 127.0.0.1 -u"$DATAEASE_DB_USER" \
+      -e "CREATE DATABASE IF NOT EXISTS dataease CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+  else
+    echo "  ⚠️  MySQL 未就绪，DataEase 暂不启动"
+  fi
+  echo "  ⏳ DataEase 正在启动，首次初始化可能需要 3-10 分钟"
+  if [ "$MYSQL_READY" = "true" ]; then
+    docker compose --profile dataease up -d dataease
+  fi
+  if [ "$MYSQL_READY" = "true" ] && wait_for_dataease \
+    && "$BACKEND_DIR/.venv/bin/python" "$BACKEND_DIR/scripts/check_dataease_crypto.py" --timeout 60 \
+    && curl -fsS --max-time 60 http://127.0.0.1:8100/ | grep -q "douyinLive.dataeaseKeySha256"; then
+    DATAEASE_STARTED=true
+    echo "  ✅ DataEase: http://localhost:8100"
+  else
+    echo "  ⚠️  DataEase 启动失败，主系统继续启动；可稍后单独排查"
+  fi
+else
+  echo "  ⚠️  未找到有效的 dataease/conf/application.yml，已跳过可选的 DataEase"
 fi
-if ! "$BACKEND_DIR/.venv/bin/python" "$BACKEND_DIR/scripts/check_dataease_crypto.py" --timeout 60; then
-  echo "  ❌ DataEase 公钥链路异常，请先检查 core_rsa 数据和 DataEase 日志"
-  exit 1
-fi
-if ! curl -fsS --max-time 60 http://127.0.0.1:8100/ | grep -q "douyinLive.dataeaseKeySha256"; then
-  echo "  ❌ DataEase 登录密钥自动刷新层未生效，请重新创建 dataease 容器"
-  exit 1
-fi
-echo "  ✅ DataEase 登录密钥自动刷新层已启用"
-echo "  ✅ DataEase: http://localhost:8100"
 
 # 2. ASR 尚未启动时先准备监控组件，避免首次拉镜像与模型争抢内存。
 echo ""
@@ -250,8 +295,10 @@ cd "$BACKEND_DIR"
 source .venv/bin/activate
 alembic upgrade head
 echo "  ✅ 数据库迁移已更新到最新版本"
-python -m scripts.configure_dataease_reader
-echo "  ✅ DataEase 专用只读账号已配置"
+if [ "$DATAEASE_STARTED" = "true" ]; then
+  python -m scripts.configure_dataease_reader
+  echo "  ✅ DataEase 专用只读账号已配置"
+fi
 if [ "${BACKEND_RELOAD:-false}" = "true" ]; then
   start_in_own_session "$BACKEND_DIR/.venv/bin/uvicorn" app.main:app --reload --port 8000
   echo "  ℹ️  已开启后端开发热更新"
@@ -279,18 +326,27 @@ echo "     设置 MONITOR_ENABLED=true 启用自动采集"
 echo ""
 echo "[5/6] 启动 FunASR 语音转写服务..."
 cd "$ROOT_DIR"
+if [ "$(env_value ASR_AUTO_START)" != "true" ]; then
+  echo "  ℹ️  ASR_AUTO_START=false，已跳过可选的 FunASR"
+  FUNASR_READY=false
+  ASR_PID=""
+else
 docker compose --profile funasr up -d funasr
 echo "  ⏳ FunASR 容器启动中，首次下载或崩溃恢复可能需要 5-15 分钟..."
 
 # 等待 FunASR 端口就绪（WebSocket 服务，用 Python 检测 TCP 连通性）
 FUNASR_READY=false
-FUNASR_WAIT_SECONDS="${ASR_ENGINE_READY_TIMEOUT_SECONDS:-900}"
+FUNASR_WAIT_SECONDS="$(env_value ASR_ENGINE_READY_TIMEOUT_SECONDS)"
+if ! [[ "$FUNASR_WAIT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "  ⚠️  ASR_ENGINE_READY_TIMEOUT_SECONDS 无效，使用默认值 900 秒"
+  FUNASR_WAIT_SECONDS=900
+fi
 for ((i = 1; i <= FUNASR_WAIT_SECONDS; i++)); do
   # 先确认容器在运行
   if [ "$(docker inspect -f '{{.State.Running}}' douyin_live_funasr 2>/dev/null)" != "true" ]; then
-    echo "  ❌ FunASR 容器异常退出，最近日志如下："
+    echo "  ⚠️  FunASR 容器异常退出，主系统将继续启动；最近日志如下："
     docker logs --tail 30 douyin_live_funasr 2>&1 || true
-    exit 1
+    break
   fi
   # 用 Python 检测 WebSocket 端口是否已监听
   if "$BACKEND_DIR/.venv/bin/python" -c "
@@ -311,13 +367,15 @@ except Exception:
 done
 
 if [ "$FUNASR_READY" != "true" ]; then
-  echo "  ❌ FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，最近日志如下："
+  echo "  ⚠️  FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，主系统将继续启动；最近日志如下："
   docker logs --tail 30 douyin_live_funasr 2>&1 || true
-  exit 1
+  echo "  ℹ️  语音转写暂不可用；可稍后重启 FunASR 或设置 ASR_AUTO_START=false"
+else
+  echo "  ✅ FunASR: ws://localhost:10096"
+  echo "  ℹ️  ASR Worker 由后端按页面开关管理，并根据电脑资源实时调节并发"
 fi
-echo "  ✅ FunASR: ws://localhost:10096"
-echo "  ℹ️  ASR Worker 由后端按页面开关管理，并根据电脑资源实时调节并发"
 ASR_PID=""
+fi
 
 # 6. 启动前端（先清理 9527 端口）
 echo ""

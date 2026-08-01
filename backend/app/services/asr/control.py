@@ -45,6 +45,8 @@ def _worker_pids() -> list[int]:
         ["ps", "-axo", "pid=,comm=,args="],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     worker_pids = []

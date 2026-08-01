@@ -5,7 +5,7 @@
 - ConversationMessage：对话中的每条消息（用户问题 / AI 回答）
 """
 
-from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, func
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.mysql import JSON
 from sqlalchemy.orm import relationship
 
@@ -34,6 +34,7 @@ class ConversationMessage(Base, TimestampMixin):
     """对话消息 — 对话中每一条用户/助手消息"""
 
     __tablename__ = "conversation_messages"
+    __table_args__ = (Index("ix_conversation_messages_conv_id", "conversation_id", "id"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="消息ID")
     conversation_id = Column(
