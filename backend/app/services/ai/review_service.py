@@ -466,6 +466,7 @@ def _serialize_asset(item: ScriptAsset) -> dict[str, Any]:
 
 
 def build_workbench(db: Session, session_id: int, refresh_findings: bool = False) -> dict[str, Any]:
+    from app.services.ai.unified_review import get_unified_review
     session = db.get(LiveSession, session_id)
     if not session:
         raise ValueError("直播场次不存在")
@@ -527,6 +528,7 @@ def build_workbench(db: Session, session_id: int, refresh_findings: bool = False
         "script_assets": [_serialize_asset(item) for item in assets],
         "live_alerts": build_live_alerts(db, session),
         "latest_reports": list(latest_reports.values()),
+        "unified_ai_review": get_unified_review(db, session_id),
     }
 
 

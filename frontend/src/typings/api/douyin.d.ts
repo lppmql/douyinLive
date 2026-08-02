@@ -315,6 +315,7 @@ declare namespace Api {
       hook_events: HookEvent[];
       audience_users: AudienceUserInsight[];
       data_coverage: SessionDataCoverage;
+      unified_ai_review: UnifiedAiReview | null;
     }
 
     interface ConversionSummary {
@@ -376,6 +377,65 @@ declare namespace Api {
       host_evidence: string | null;
       related_hook_ids: number[];
       recommendation: string;
+      ai_analysis: UnifiedAiUserAnalysis | null;
+    }
+
+    interface UnifiedAiEvidence {
+      evidence_id: string;
+      conclusion: string;
+      reason: string;
+      text?: string;
+      time?: string | null;
+      second?: number | null;
+    }
+
+    interface UnifiedAiUserAnalysis {
+      id: number;
+      identity_key: string;
+      user_nickname: string | null;
+      business_stage: 'preparing' | 'selecting_location' | 'comparing_brand' | 'opened_store' | 'suspected_paid' | 'unknown';
+      follow_up_status: 'not_lead' | 'confirmed_lead' | 'suspected_contacted' | 'unknown';
+      demand_scope: 'snack_store' | 'non_snack_store' | 'industry_peer' | 'unknown';
+      interaction_type: 'normal_inquiry' | 'high_intent' | 'rational_question' | 'malicious' | 'casual' | 'information_insufficient';
+      precision_status: 'precision_new_lead' | 'nurture' | 'existing_store' | 'in_follow_up' | 'existing_customer' | 'non_target' | 'industry_peer' | 'malicious' | 'information_insufficient';
+      is_precision_lead: boolean;
+      exclusion_reason: string | null;
+      host_response_status: 'excellent' | 'effective' | 'average' | 'irrelevant' | 'no_response' | 'unknown';
+      host_response_score: number | null;
+      missed_opportunity: boolean;
+      recommendation: string;
+      suggested_reply: string | null;
+      confidence: number;
+      evidence: UnifiedAiEvidence[];
+      manual_confirmed: boolean;
+    }
+
+    interface UnifiedAiReview {
+      status: 'pending' | 'running' | 'completed' | 'failed' | 'stale';
+      analysis_version: string;
+      model_name: string | null;
+      input_hash: string;
+      summary: {
+        precision_new_lead_count?: number;
+        confirmed_lead_count?: number;
+        precision_unconverted_count?: number;
+        opened_store_count?: number;
+        suspected_paid_count?: number;
+        suspected_contacted_count?: number;
+        non_target_count?: number;
+        rational_question_count?: number;
+        malicious_count?: number;
+        missed_opportunity_count?: number;
+        response_counts?: Record<string, number>;
+        summary?: string;
+        strengths?: string[];
+        problems?: string[];
+        next_actions?: string[];
+      };
+      analyzed_user_count: number;
+      completed_at: string | null;
+      error_message: string | null;
+      users: UnifiedAiUserAnalysis[];
     }
 
     interface SessionDataCoverage {
@@ -907,6 +967,7 @@ declare namespace Api {
       script_assets: ScriptAsset[];
       live_alerts: ReviewLiveAlert[];
       latest_reports: ReviewLatestReport[];
+      unified_ai_review: UnifiedAiReview | null;
     }
 
     interface ComparisonDimension {

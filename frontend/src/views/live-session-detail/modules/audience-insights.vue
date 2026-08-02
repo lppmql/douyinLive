@@ -7,13 +7,14 @@ import { getCommentUserAvatarUrl } from '@/service/api/douyin';
 defineOptions({ name: 'AudienceConversionInsights' });
 const props = defineProps<{ sessionId: number; users: Api.Douyin.AudienceUserInsight[] }>();
 const message = useMessage();
-const filter = ref<'all' | 'lead' | 'high' | 'unconverted'>('all');
+const filter = ref<'all' | 'lead' | 'precision' | 'missed' | 'unconverted'>('all');
 const page = ref(1);
 const pageSize = 12;
 const filtered = computed(() =>
   props.users.filter(user => {
     if (filter.value === 'lead') return user.has_lead;
-    if (filter.value === 'high') return user.intent_level === 'high';
+    if (filter.value === 'precision') return user.ai_analysis?.is_precision_lead;
+    if (filter.value === 'missed') return user.ai_analysis?.missed_opportunity;
     if (filter.value === 'unconverted') return !user.has_lead;
     return true;
   })
@@ -37,7 +38,8 @@ async function copyValue(label: string, value: string | null) {
       <NRadioGroup v-model:value="filter" size="small">
         <NRadioButton value="all">全部 {{ users.length }}</NRadioButton>
         <NRadioButton value="lead">已留资</NRadioButton>
-        <NRadioButton value="high">高意向</NRadioButton>
+        <NRadioButton value="precision">精准新客</NRadioButton>
+        <NRadioButton value="missed">错失机会</NRadioButton>
         <NRadioButton value="unconverted">未留资</NRadioButton>
       </NRadioGroup>
       <span class="text-12px text-gray-500">同主播60秒内“抖音号 + 手机号/微信号”配对成功才算已留资</span>
@@ -84,6 +86,12 @@ async function copyValue(label: string, value: string | null) {
               </div>
             </div>
             <div class="flex flex-wrap gap-6px">
+              <NTag v-if="user.ai_analysis" :type="user.ai_analysis.is_precision_lead ? 'success' : 'default'" size="small" :bordered="false">
+                {{ user.ai_analysis.is_precision_lead ? '精准新客' : user.ai_analysis.precision_status === 'existing_store' ? '已开店' : user.ai_analysis.precision_status === 'non_target' ? '非目标需求' : '非精准新客' }}
+              </NTag>
+              <NTag v-if="user.ai_analysis?.interaction_type === 'rational_question'" type="warning" size="small" :bordered="false">理性质疑</NTag>
+              <NTag v-if="user.ai_analysis?.interaction_type === 'malicious'" type="error" size="small" :bordered="false">恶意用户</NTag>
+              <NTag v-if="user.ai_analysis?.missed_opportunity" type="error" size="small" :bordered="false">错失转化</NTag>
               <NTag :type="user.intent_level === 'high' ? 'error' : user.intent_level === 'medium' ? 'warning' : 'default'" size="small" :bordered="false">
                 {{ user.intent_level === 'high' ? '高意向' : user.intent_level === 'medium' ? '中意向' : '待识别' }}
               </NTag>
@@ -106,9 +114,21 @@ async function copyValue(label: string, value: string | null) {
             <NAlert v-if="user.host_evidence" type="success" :show-icon="false">
               主播同主题原话：{{ user.host_evidence }}
             </NAlert>
+            <template v-if="user.ai_analysis">
+              <NAlert :type="user.ai_analysis.missed_opportunity ? 'warning' : 'info'" :show-icon="false">
+                AI回应判断：{{ user.ai_analysis.host_response_status }}
+                <span v-if="user.ai_analysis.host_response_score !== null"> · {{ user.ai_analysis.host_response_score }}分</span>
+                · 置信度 {{ Math.round(user.ai_analysis.confidence * 100) }}%
+                <div v-if="user.ai_analysis.exclusion_reason" class="mt-4px">排除原因：{{ user.ai_analysis.exclusion_reason }}</div>
+              </NAlert>
+              <div v-if="user.ai_analysis.suggested_reply" class="rounded-8px bg-warning-50 p-10px text-13px leading-21px dark:bg-dark">
+                <div class="mb-3px font-600">建议主播这样回答</div>
+                {{ user.ai_analysis.suggested_reply }}
+              </div>
+            </template>
             <div class="rounded-8px bg-primary-50 p-10px text-13px leading-21px dark:bg-dark">
-              <div class="mb-3px font-600">转化建议</div>
-              {{ user.recommendation }}
+              <div class="mb-3px font-600">{{ user.ai_analysis ? 'AI转化建议' : '规则转化建议' }}</div>
+              {{ user.ai_analysis?.recommendation || user.recommendation }}
             </div>
             <div v-if="user.has_lead" class="text-11px text-gray-400">
               同主播1分钟配对 · {{ user.lead_match_method === 'short_id_exact' ? '数字短号归属' : '自定义抖音号归属' }}

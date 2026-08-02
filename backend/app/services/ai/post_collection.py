@@ -9,6 +9,7 @@ from app.models.transcript_segments import TranscriptSegment
 from app.services.ai.kb_service import sync_session_to_kb
 from app.services.ai.review_service import generate_findings
 from app.services.ai.scoring import score_session_transcript
+from app.services.ai.unified_review import generate_unified_review
 from app.services.sync import sync_session
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ def process_session_post_collection(db: Session, session_id: int) -> dict[str, A
         lambda: score_session_transcript(session_id, db),
     )
     findings = _run_stage(db, errors, "review", lambda: generate_findings(db, session_id))
+    unified_review = _run_stage(db, errors, "unified_review", lambda: generate_unified_review(db, session_id))
     knowledge = _run_stage(db, errors, "knowledge", lambda: sync_session_to_kb(db, session_id))
     dataease = _run_stage(db, errors, "dataease", lambda: (sync_session(db, session_id), True)[1])
 
@@ -62,6 +64,7 @@ def process_session_post_collection(db: Session, session_id: int) -> dict[str, A
         "speech_score_status": "completed" if score else "skipped",
         "speech_score": (score or {}).get("total_score") if isinstance(score, dict) else None,
         "review_finding_count": len(findings or []),
+        "audience_analysis_count": int((unified_review or {}).get("analyzed_user_count", 0)),
         "knowledge": knowledge or {},
         "dataease_synced": dataease is not None,
         "errors": errors,

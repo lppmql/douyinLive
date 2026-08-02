@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ReviewActionCreate(BaseModel):
@@ -28,6 +28,20 @@ class ReviewActionUpdate(BaseModel):
 
 class FindingStatusUpdate(BaseModel):
     status: Literal["open", "confirmed", "dismissed", "resolved"]
+
+
+class AudienceAnalysisOverrideRequest(BaseModel):
+    """人工纠正用户画像；为空的字段保留AI结果。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    clear: bool = False
+    business_stage: Literal["preparing", "selecting_location", "comparing_brand", "opened_store", "suspected_paid", "unknown"] | None = None
+    demand_scope: Literal["snack_store", "non_snack_store", "industry_peer", "unknown"] | None = None
+    interaction_type: Literal["normal_inquiry", "high_intent", "rational_question", "malicious", "casual", "information_insufficient"] | None = None
+    precision_status: Literal["precision_new_lead", "nurture", "existing_store", "in_follow_up", "existing_customer", "non_target", "industry_peer", "malicious", "information_insufficient"] | None = None
+    is_precision_lead: bool | None = None
+    exclusion_reason: str | None = Field(default=None, max_length=1000)
 
 
 class ScriptAssetCreate(BaseModel):
@@ -68,6 +82,7 @@ class ReviewWorkbenchResponse(BaseModel):
     script_assets: list[dict[str, Any]] = Field(default_factory=list)
     live_alerts: list[dict[str, Any]] = Field(default_factory=list)
     latest_reports: list[dict[str, Any]] = Field(default_factory=list)
+    unified_ai_review: dict[str, Any] | None = None
 
 
 class ReviewGenerateResponse(BaseModel):
@@ -75,6 +90,7 @@ class ReviewGenerateResponse(BaseModel):
     status: str
     finding_count: int = 0
     workbench: dict[str, Any] = Field(default_factory=dict)
+    unified_ai_review: dict[str, Any] | None = None
 
 
 class ReviewComparisonResponse(BaseModel):

@@ -21,6 +21,7 @@ import AnalysisScoreOverview from './components/AnalysisScoreOverview.vue';
 import AnalysisEvidence from './components/AnalysisEvidence.vue';
 import AnalysisReportHistory from './components/AnalysisReportHistory.vue';
 import SessionWorkflowNav from '@/components/business/session-workflow-nav.vue';
+import UnifiedAudienceReview from '@/components/business/unified-audience-review.vue';
 
 defineOptions({ name: 'Analysis' });
 
@@ -61,6 +62,10 @@ const {
 } = useReviewWorkbench();
 
 onMounted(initializePage);
+
+function updateUnifiedReview(review: Api.Douyin.UnifiedAiReview) {
+  if (workbench.value) workbench.value.unified_ai_review = review;
+}
 </script>
 
 <template>
@@ -158,6 +163,14 @@ onMounted(initializePage);
                 @run-full-review="runFullReview"
               />
             </NSpin>
+          </NTabPane>
+
+          <NTabPane name="audience" tab="用户与转化">
+            <UnifiedAudienceReview
+              :review="workbench?.unified_ai_review || null"
+              :session-id="selectedSessionId || undefined"
+              @updated="updateUnifiedReview"
+            />
           </NTabPane>
 
           <NTabPane name="history" :tab="`历史报告 (${sessionReports.length})`">

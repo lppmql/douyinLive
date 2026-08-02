@@ -51,6 +51,11 @@ def test_post_collection_pipeline_runs_review_before_knowledge(monkeypatch):
     monkeypatch.setattr(post_collection, "generate_findings", lambda *_args: calls.append("review") or [1, 2])
     monkeypatch.setattr(
         post_collection,
+        "generate_unified_review",
+        lambda *_args: calls.append("unified_review") or {"analyzed_user_count": 3},
+    )
+    monkeypatch.setattr(
+        post_collection,
         "sync_session_to_kb",
         lambda *_args: calls.append("knowledge") or {"transcript_saved": 1, "review_saved": 1},
     )
@@ -62,7 +67,8 @@ def test_post_collection_pipeline_runs_review_before_knowledge(monkeypatch):
     assert result["transcript_count"] == 12
     assert result["speech_score"] == 86
     assert result["review_finding_count"] == 2
-    assert calls == ["review", "knowledge", "dataease"]
+    assert result["audience_analysis_count"] == 3
+    assert calls == ["review", "unified_review", "knowledge", "dataease"]
 
 
 def test_post_collection_pipeline_keeps_knowledge_stage_after_review_failure(monkeypatch):
@@ -74,6 +80,7 @@ def test_post_collection_pipeline_keeps_knowledge_stage_after_review_failure(mon
         raise RuntimeError("真实复盘生成失败")
 
     monkeypatch.setattr(post_collection, "generate_findings", fail_review)
+    monkeypatch.setattr(post_collection, "generate_unified_review", lambda *_args: {"analyzed_user_count": 0})
     monkeypatch.setattr(
         post_collection,
         "sync_session_to_kb",

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.live_sessions import LiveSession
 from app.models.review import ComplianceRule, ReviewActionItem, ReviewFinding, ScriptAsset
+from app.models.unified_ai_review import AudienceInteractionAnalysis
 from app.models.transcript_segments import TranscriptSegment
 from app.schemas.review import (
     FindingStatusUpdate,
@@ -21,8 +22,11 @@ from app.schemas.review import (
     ReviewActionOut,
     ReviewScriptAssetOut,
     ComplianceRuleOut,
+    AudienceAnalysisOverrideRequest,
 )
 from app.services.ai.review_service import build_workbench, compare_sessions, generate_findings
+from app.services.ai.unified_review import AnalysisGenerationBusyError, generate_unified_review
+from app.services.ai.unified_review import get_unified_review, refresh_unified_summary_counts
 
 
 router = APIRouter(prefix="/reviews", tags=["直播复盘工作台"])
@@ -57,13 +61,57 @@ def get_workbench(
 def generate_session_review(session_id: int, db: Session = Depends(get_db)):
     try:
         findings = generate_findings(db, session_id)
+        unified_review = generate_unified_review(db, session_id, force=True)
         return {
             "status": "ok",
             "finding_count": len(findings),
             "workbench": build_workbench(db, session_id),
+            "unified_ai_review": unified_review,
         }
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except AnalysisGenerationBusyError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.patch("/{session_id}/audience/{analysis_id}", response_model=dict)
+def override_audience_analysis(
+    session_id: int,
+    analysis_id: int,
+    data: AudienceAnalysisOverrideRequest,
+    db: Session = Depends(get_db),
+):
+    """人工确认或清除用户画像结论，人工结果展示时优先于AI。"""
+    row = db.query(AudienceInteractionAnalysis).filter(
+        AudienceInteractionAnalysis.id == analysis_id,
+        AudienceInteractionAnalysis.session_id == session_id,
+    ).first()
+    if not row:
+        raise HTTPException(404, "用户AI分析不存在")
+    if data.clear:
+        row.manual_override = None
+    else:
+        values = data.model_dump(exclude={"clear"}, exclude_none=True)
+        if not values:
+            raise HTTPException(400, "请至少提交一项人工结论")
+        # 分类采用一致的状态机，避免“精准新客 + 已开店/恶意/非目标”等矛盾组合。
+        if values.get("business_stage") == "opened_store":
+            values.update(precision_status="existing_store", is_precision_lead=False)
+        elif values.get("demand_scope") in {"non_snack_store", "industry_peer"}:
+            values.update(
+                precision_status="non_target" if values["demand_scope"] == "non_snack_store" else "industry_peer",
+                is_precision_lead=False,
+            )
+        elif values.get("interaction_type") == "malicious":
+            values.update(precision_status="malicious", is_precision_lead=False)
+        elif values.get("precision_status") == "precision_new_lead" or values.get("is_precision_lead") is True:
+            values.update(precision_status="precision_new_lead", is_precision_lead=True)
+        elif "precision_status" in values:
+            values["is_precision_lead"] = False
+        row.manual_override = values
+    db.commit()
+    refresh_unified_summary_counts(db, session_id)
+    return get_unified_review(db, session_id) or {}
 
 
 @router.get("/{session_id}/comparison", response_model=ReviewComparisonResponse)

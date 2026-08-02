@@ -2234,6 +2234,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/reviews/{session_id}/audience/{analysis_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Override Audience Analysis
+         * @description 人工确认或清除用户画像结论，人工结果展示时优先于AI。
+         */
+        patch: operations["override_audience_analysis_api_v1_reviews__session_id__audience__analysis_id__patch"];
+        trace?: never;
+    };
     "/api/v1/reviews/{session_id}/comparison": {
         parameters: {
             query?: never;
@@ -2958,6 +2978,31 @@ export interface components {
              */
             message: string;
         };
+        /**
+         * AudienceAnalysisOverrideRequest
+         * @description 人工纠正用户画像；为空的字段保留AI结果。
+         */
+        AudienceAnalysisOverrideRequest: {
+            /**
+             * Clear
+             * @default false
+             */
+            clear: boolean;
+            /** Business Stage */
+            business_stage?: ("preparing" | "selecting_location" | "comparing_brand" | "opened_store" | "suspected_paid" | "unknown") | null;
+            /** Follow Up Status */
+            follow_up_status?: ("not_lead" | "confirmed_lead" | "suspected_contacted" | "unknown") | null;
+            /** Demand Scope */
+            demand_scope?: ("snack_store" | "non_snack_store" | "industry_peer" | "unknown") | null;
+            /** Interaction Type */
+            interaction_type?: ("normal_inquiry" | "high_intent" | "rational_question" | "malicious" | "casual" | "information_insufficient") | null;
+            /** Precision Status */
+            precision_status?: ("precision_new_lead" | "nurture" | "existing_store" | "in_follow_up" | "existing_customer" | "non_target" | "industry_peer" | "malicious" | "information_insufficient") | null;
+            /** Is Precision Lead */
+            is_precision_lead?: boolean | null;
+            /** Exclusion Reason */
+            exclusion_reason?: string | null;
+        };
         /** AudienceCommentResponse */
         AudienceCommentResponse: {
             /** Id */
@@ -3046,6 +3091,10 @@ export interface components {
             related_hook_ids?: number[];
             /** Recommendation */
             recommendation: string;
+            /** Ai Analysis */
+            ai_analysis?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** ChatRequest */
         ChatRequest: {
@@ -4863,6 +4912,10 @@ export interface components {
             /** Audience Users */
             audience_users?: components["schemas"]["AudienceUserInsightResponse"][];
             data_coverage: components["schemas"]["SessionDataCoverageResponse"];
+            /** Unified Ai Review */
+            unified_ai_review?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * LiveSessionListItemResponse
@@ -5745,6 +5798,10 @@ export interface components {
             workbench?: {
                 [key: string]: unknown;
             };
+            /** Unified Ai Review */
+            unified_ai_review?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * ReviewScriptAssetOut
@@ -5833,6 +5890,10 @@ export interface components {
             latest_reports?: {
                 [key: string]: unknown;
             }[];
+            /** Unified Ai Review */
+            unified_ai_review?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** ScraperAccountCreate */
         ScraperAccountCreate: {
@@ -11032,6 +11093,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewGenerateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    override_audience_analysis_api_v1_reviews__session_id__audience__analysis_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+                analysis_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AudienceAnalysisOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */

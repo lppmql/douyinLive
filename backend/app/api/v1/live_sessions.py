@@ -17,6 +17,7 @@ from app.models.live_metrics import LiveMetric
 from app.models.comments import Comment
 from app.models.stream_sources import StreamSource
 from app.services.analysis.session_conversion import build_session_conversion_analysis
+from app.services.ai.unified_review import overlay_user_analyses
 from app.services.collector.comment_profile_enrichment import comment_profile_enrichment_manager
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.asr_audio_chunks import AsrAudioChunk
@@ -281,6 +282,7 @@ def get_session_details(
         .all()
     )
     conversion = build_session_conversion_analysis(db, session, analysis_comments, total_comment_count)
+    unified_ai_review = overlay_user_analyses(db, session_id, conversion["audience_users"])
     enrichment = comment_profile_enrichment_manager.snapshot()
     enrichment_is_current_session = enrichment.get("scope") == f"session:{session_id}"
     conversion["data_coverage"].update(
@@ -301,6 +303,7 @@ def get_session_details(
         hook_events=conversion["hook_events"],
         audience_users=conversion["audience_users"],
         data_coverage=conversion["data_coverage"],
+        unified_ai_review=unified_ai_review,
     )
 
 
@@ -641,8 +644,8 @@ def delete_session(session_id: int, db: Session = Depends(get_db)):
     child_tables = [
         "ai_call_traces", "analysis_reports", "asr_audio_chunks", "asr_tasks",
         "comments", "high_intent_users", "knowledge_base", "knowledge_time_slices",
-        "leads", "live_audience_profiles", "live_metrics",
-        "review_action_items", "review_findings",
+        "lead_conversion_pairs", "leads", "live_audience_profiles", "live_metrics",
+        "audience_interaction_analyses", "unified_ai_review_runs", "review_action_items", "review_findings",
         "script_assets", "stream_sources",
         "transcript_full_texts", "transcript_segments",
     ]

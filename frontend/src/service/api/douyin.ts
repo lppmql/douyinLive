@@ -401,6 +401,18 @@ export function generateSessionReview(sessionId: number) {
   });
 }
 
+export function overrideAudienceAnalysis(
+  sessionId: number,
+  analysisId: number,
+  data: Partial<Pick<Api.Douyin.UnifiedAiUserAnalysis, 'business_stage' | 'follow_up_status' | 'demand_scope' | 'interaction_type' | 'precision_status' | 'is_precision_lead' | 'exclusion_reason'>> & { clear?: boolean }
+) {
+  return backendRequest<Api.Douyin.UnifiedAiReview>({
+    url: `${API_PREFIX}/reviews/${sessionId}/audience/${analysisId}`,
+    method: 'PATCH',
+    data
+  });
+}
+
 export function fetchSessionComparison(sessionId: number, otherSessionId?: number) {
   return backendRequest<Api.Douyin.SessionComparison>({
     url: `${API_PREFIX}/reviews/${sessionId}/comparison`,

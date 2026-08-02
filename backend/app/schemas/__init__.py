@@ -290,6 +290,7 @@ class AudienceUserInsightResponse(BaseModel):
     host_evidence: Optional[str] = None
     related_hook_ids: list[int] = Field(default_factory=list)
     recommendation: str
+    ai_analysis: Optional[dict] = None
 
 
 class SessionDataCoverageResponse(BaseModel):
@@ -341,6 +342,7 @@ class LiveSessionDetailResponse(BaseModel):
     hook_events: list[HookEventResponse] = Field(default_factory=list)
     audience_users: list[AudienceUserInsightResponse] = Field(default_factory=list)
     data_coverage: SessionDataCoverageResponse
+    unified_ai_review: Optional[dict] = None
 
 
 # ===== 评论 =====

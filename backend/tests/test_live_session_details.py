@@ -106,6 +106,9 @@ class DetailQuery:
     def count(self):
         return len(self.rows)
 
+    def scalar(self):
+        return self.rows[0] if self.rows else None
+
 
 class DetailDb:
     def __init__(self, session, stream):
@@ -119,6 +122,7 @@ class DetailDb:
         from app.models.asr_audio_chunks import AsrAudioChunk
         from app.models.asr_tasks import AsrTask
         from app.models.lead_conversion_pairs import LeadConversionPair
+        from app.models.unified_ai_review import AudienceInteractionAnalysis, UnifiedAiReviewRun
         from app.models.transcript_segments import TranscriptSegment
 
         rows = {
@@ -130,8 +134,10 @@ class DetailDb:
             AsrAudioChunk: [],
             TranscriptSegment: [],
             LeadConversionPair: [],
+            UnifiedAiReviewRun: [],
+            AudienceInteractionAnalysis: [],
             Lead: [],
-        }[model]
+        }.get(model, [])
         return DetailQuery(rows)
 
 
