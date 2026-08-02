@@ -2,7 +2,9 @@
 import { computed, ref, watch } from 'vue';
 import { useMessage } from 'naive-ui';
 import { overrideAudienceAnalysis } from '@/service/api/douyin';
+import { getCommentUserAvatarUrl } from '@/service/api/douyin';
 import { unwrapServiceData } from '@/utils/service';
+import AnchorAvatar from '@/components/business/anchor-avatar.vue';
 
 defineOptions({ name: 'UnifiedAudienceReview' });
 const props = defineProps<{ review: Api.Douyin.UnifiedAiReview | null; sessionId?: number }>();
@@ -29,6 +31,11 @@ const precisionLabels: Record<string, string> = {
 const responseLabels: Record<string, string> = {
   excellent: '优秀承接', effective: '有效回应', average: '回应一般', irrelevant: '答非所问', no_response: '未回应', unknown: '待判断'
 };
+
+async function copyValue(label: string, value: string) {
+  await navigator.clipboard.writeText(value);
+  message.success(`${label}已复制`);
+}
 
 async function applyOverride(user: Api.Douyin.UnifiedAiUserAnalysis, action: string) {
   if (!props.sessionId) return;
@@ -95,7 +102,36 @@ async function applyOverride(user: Api.Douyin.UnifiedAiUserAnalysis, action: str
       </NGi>
     </NGrid>
     <NCollapse>
-      <NCollapseItem v-for="user in displayReview.users" :key="user.identity_key" :title="user.user_nickname || '匿名用户'">
+      <NCollapseItem v-for="user in displayReview.users" :key="user.identity_key">
+        <template #header>
+          <div class="flex min-w-0 flex-wrap items-center gap-8px py-3px">
+            <AnchorAvatar
+              :src="user.user_avatar_comment_id && sessionId ? getCommentUserAvatarUrl(sessionId, user.user_avatar_comment_id) : ''"
+              :name="user.user_nickname || '匿名用户'"
+              :size="30"
+            />
+            <span class="font-600">{{ user.user_nickname || '匿名用户' }}</span>
+            <NButton
+              v-if="user.user_douyin_id"
+              text
+              type="primary"
+              size="tiny"
+              @click.stop="copyValue('抖音号', user.user_douyin_id)"
+            >
+              {{ user.douyin_id_type === 'short_id' ? '数字短号' : '抖音号' }} {{ user.user_douyin_id }} · 复制
+            </NButton>
+            <NTag :type="user.has_lead ? 'success' : 'default'" size="small" :bordered="false" round>
+              {{ user.has_lead ? '已留资' : '未留资' }}
+            </NTag>
+          </div>
+        </template>
+        <div v-if="user.has_lead && user.lead_contacts.length" class="mb-10px rounded-8px bg-success-50 p-10px dark:bg-dark">
+          <div class="mb-5px text-12px font-600 text-success">已留资联系方式</div>
+          <div v-for="contact in user.lead_contacts" :key="`${contact.type}-${contact.value}`" class="flex items-center gap-8px text-12px">
+            <span>{{ contact.type === 'phone' ? '手机号' : '微信号' }}：{{ contact.value }}</span>
+            <NButton text type="primary" size="tiny" @click="copyValue(contact.type === 'phone' ? '手机号' : '微信号', contact.value)">复制</NButton>
+          </div>
+        </div>
         <div class="flex flex-wrap gap-6px">
           <NTag :type="user.is_precision_lead ? 'success' : 'default'">{{ precisionLabels[user.precision_status] }}</NTag>
           <NTag type="info">{{ stageLabels[user.business_stage] }}</NTag>

@@ -55,23 +55,6 @@ const kpis = computed(() => {
     : [];
 });
 
-const qualityView = computed(() => {
-  const quality = transcriptQuality.value;
-  if (!quality) return { label: '等待检测', type: 'default' as const, description: '后台正在读取话术状态。' };
-  const views = {
-    complete: { label: '话术完整', type: 'success' as const, description: '整场真实音频时间轴已全部转写。' },
-    repairing: { label: '自动补齐中', type: 'warning' as const, description: '系统正在只转写缺失区间，已有话术不会重复。' },
-    repair_failed: { label: '补齐失败', type: 'error' as const, description: '已完成自动重试，请在话术转写任务中查看真实失败原因。' },
-    incomplete: { label: '话术不完整', type: 'warning' as const, description: '检测到音频时间轴存在缺失区间。' },
-    waiting_duration: { label: '等待时长', type: 'default' as const, description: '场次真实时长尚未采集完成，暂不计算覆盖率。' },
-    waiting_transcript: { label: '等待转写', type: 'default' as const, description: '该场次尚未建立话术转写任务。' }
-  };
-  return views[quality.status] || views.waiting_transcript;
-});
-
-function formatTime(value?: string | null) {
-  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
-}
 function formatNumber(value?: number | null) {
   return Number(value || 0).toLocaleString();
 }
@@ -231,83 +214,39 @@ onMounted(load);
         </NGi>
       </NGrid>
 
-      <NGrid :x-gap="16" :y-gap="16" cols="1 l:3" responsive="screen">
-        <NGi span="1 l:2">
-          <NCard :bordered="false" class="card-wrapper" title="场次信息与话术完整度">
-            <div class="mb-16px rounded-8px bg-gray-50 p-12px dark:bg-dark">
-              <div class="mb-8px flex flex-wrap items-center justify-between gap-8px">
-                <div class="flex items-center gap-8px">
-                  <span class="text-13px font-600">话术时间轴覆盖</span>
-                  <NTag :type="qualityView.type" :bordered="false" size="small">
-                    {{ qualityView.label }}
-                  </NTag>
-                </div>
-                <span class="text-13px text-gray-500">
-                  {{
-                    transcriptQuality?.coverage_percent == null
-                      ? '待计算'
-                      : `${transcriptQuality.coverage_percent.toFixed(1)}%`
-                  }}
-                </span>
-              </div>
-              <NProgress
-                type="line"
-                :percentage="transcriptQuality?.coverage_percent || 0"
-                :status="transcriptQuality?.status === 'repair_failed' ? 'error' : 'success'"
-                :show-indicator="false"
-                :height="8"
-                :border-radius="4"
-              />
-              <div class="mt-8px text-12px text-gray-500">{{ qualityView.description }}</div>
-            </div>
-            <NDescriptions bordered :column="2" size="small">
-              <NDescriptionsItem label="开始时间">{{ formatTime(session?.live_start_time) }}</NDescriptionsItem>
-              <NDescriptionsItem label="结束时间">{{ formatTime(session?.live_end_time) }}</NDescriptionsItem>
-              <NDescriptionsItem label="平均在线">{{ formatNumber(session?.avg_online_count) }}</NDescriptionsItem>
-              <NDescriptionsItem label="看过人数">{{ formatNumber(session?.viewed_count) }}</NDescriptionsItem>
-              <NDescriptionsItem label="互动次数">{{ formatNumber(session?.interaction_count) }}</NDescriptionsItem>
-              <NDescriptionsItem label="私信人数">{{ formatNumber(session?.private_message_count) }}</NDescriptionsItem>
-              <NDescriptionsItem label="广告消耗">¥{{ Number(session?.ad_cost || 0).toFixed(2) }}</NDescriptionsItem>
-              <NDescriptionsItem label="详情状态">{{ session?.detail_collection_status || '-' }}</NDescriptionsItem>
-            </NDescriptions>
-          </NCard>
-        </NGi>
-        <NGi>
-          <NCard :bordered="false" class="card-wrapper h-full" title="回放源与下载">
-            <NAlert v-if="!detail?.stream_url" type="warning" :show-icon="true">
-              尚未采集到 m3u8 地址，请先到“数据采集”刷新该场次。
-            </NAlert>
-            <div v-else class="flex h-full flex-col gap-12px">
-              <NInput
-                :value="detail.stream_url"
-                readonly
-                type="textarea"
-                :autosize="{ minRows: 2, maxRows: 3 }"
-                placeholder="m3u8 原始地址"
-              />
-              <div class="flex flex-wrap gap-8px">
-                <NButton secondary @click="copyStreamUrl">复制 m3u8</NButton>
-                <NTooltip :disabled="session?.live_status !== 'live'">
-                  <template #trigger>
-                    <NButton
-                      type="primary"
-                      :loading="videoDownloading"
-                      :disabled="session?.live_status === 'live'"
-                      @click="downloadVideo"
-                    >
-                      下载 MP4
-                    </NButton>
-                  </template>
-                  当前仍在直播，请下播后下载完整视频
-                </NTooltip>
-              </div>
-              <div class="text-12px leading-20px text-gray-500">
-                使用原码流低开销封装，同一时间仅下载 1 场；播放器已在上方复盘工作台中展示。
-              </div>
-            </div>
-          </NCard>
-        </NGi>
-      </NGrid>
+      <NCard :bordered="false" class="card-wrapper" title="回放源与下载">
+        <NAlert v-if="!detail?.stream_url" type="warning" :show-icon="true">
+          尚未采集到 m3u8 地址，请先到“数据采集”刷新该场次。
+        </NAlert>
+        <div v-else class="flex h-full flex-col gap-12px">
+          <NInput
+            :value="detail.stream_url"
+            readonly
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 3 }"
+            placeholder="m3u8 原始地址"
+          />
+          <div class="flex flex-wrap gap-8px">
+            <NButton secondary @click="copyStreamUrl">复制 m3u8</NButton>
+            <NTooltip :disabled="session?.live_status !== 'live'">
+              <template #trigger>
+                <NButton
+                  type="primary"
+                  :loading="videoDownloading"
+                  :disabled="session?.live_status === 'live'"
+                  @click="downloadVideo"
+                >
+                  下载 MP4
+                </NButton>
+              </template>
+              当前仍在直播，请下播后下载完整视频
+            </NTooltip>
+          </div>
+          <div class="text-12px leading-20px text-gray-500">
+            使用原码流低开销封装，同一时间仅下载 1 场；播放器已在上方复盘工作台中展示。
+          </div>
+        </div>
+      </NCard>
 
       <SessionMetricsGrid :session="detail.session" />
 

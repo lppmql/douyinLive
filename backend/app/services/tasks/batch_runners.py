@@ -25,6 +25,10 @@ from app.services.ai.review_service import generate_findings
 from app.services.ai.scoring import score_session_transcript
 from app.services.collector.log_service import add_collector_log
 from app.services.collector.manual_collect import collect_all
+from app.services.collector.comment_profile_enrichment import (
+    comment_profile_enrichment_manager,
+    profile_configuration_status,
+)
 from app.services.sync.de_sync import (
     cleanup_stale_dataease_rows,
     completed_offline_transcript_exists,
@@ -67,6 +71,16 @@ async def run_data_refresh(
     )
     if not succeeded:
         raise TaskBatchFailed(result.get("message") or "没有采集到可用真实数据", result)
+    # 每次真实数据刷新后自动低速补齐新增评论用户。服务自身负责缓存、退避、
+    # 单并发和平台风控；未配置独立 Cookie 时静默跳过，不阻断主采集任务。
+    profile_enrichment_started = False
+    if profile_configuration_status()["configured"]:
+        try:
+            comment_profile_enrichment_manager.start(session_id=None, force=False)
+            profile_enrichment_started = True
+        except RuntimeError:
+            pass
+    result["profile_enrichment_started"] = profile_enrichment_started
     return result
 
 

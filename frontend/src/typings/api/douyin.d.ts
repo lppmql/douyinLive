@@ -408,6 +408,19 @@ declare namespace Api {
       confidence: number;
       evidence: UnifiedAiEvidence[];
       manual_confirmed: boolean;
+      user_avatar_comment_id: number | null;
+      user_douyin_id: string | null;
+      douyin_id_type: 'unique_id' | 'short_id' | null;
+      profile_status: string;
+      has_lead: boolean;
+      lead_match_method: 'douyin_id_exact' | 'unique_id_exact' | 'short_id_exact' | null;
+      lead_time: string | null;
+      lead_contacts: Array<{
+        type: 'phone' | 'wechat';
+        value: string;
+        converted_at: string | null;
+        gap_seconds: number;
+      }>;
     }
 
     interface UnifiedAiReview {

@@ -8,7 +8,7 @@ import logging
 import re
 import threading
 import uuid
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -327,7 +327,103 @@ def _serialize_analysis(row: AudienceInteractionAnalysis) -> dict[str, Any]:
     return result
 
 
-def get_unified_review(db: Session, session_id: int) -> dict[str, Any] | None:
+def _enrich_user_business_facts(
+    db: Session,
+    session_id: int,
+    serialized_users: list[dict[str, Any]],
+    business_users: list[dict[str, Any]] | None = None,
+) -> None:
+    """把公开资料和系统留资事实合并到AI结果，两个页面共用同一展示口径。"""
+    if not serialized_users:
+        return
+    if business_users is None:
+        comments = db.query(Comment).filter(Comment.session_id == session_id).order_by(
+            Comment.comment_time.desc(), Comment.id.desc()
+        ).limit(2000).all()
+        grouped: dict[str, list[Comment]] = defaultdict(list)
+        for comment in comments:
+            public_id = re.sub(r"[\s@]", "", comment.user_douyin_id or "").casefold()
+            identity = comment.user_sec_uid or public_id or (comment.user_nickname or "匿名用户")
+            grouped[identity].append(comment)
+        sec_uids = {row.user_sec_uid for row in comments if row.user_sec_uid}
+        profiles = {
+            row.sec_uid: row for row in db.query(CommentUserProfile)
+            .filter(CommentUserProfile.sec_uid.in_(sec_uids)).all()
+        } if sec_uids else {}
+        pairs = db.query(LeadConversionPair).filter(
+            LeadConversionPair.session_id == session_id,
+            LeadConversionPair.attribution_status == "attributed",
+        ).order_by(LeadConversionPair.converted_at.asc(), LeadConversionPair.id.asc()).all()
+        pairs_by_id: dict[str, list[LeadConversionPair]] = defaultdict(list)
+        for pair in pairs:
+            normalized = re.sub(r"[\s@]", "", pair.douyin_id or "").casefold()
+            if normalized:
+                pairs_by_id[normalized].append(pair)
+        business_users = []
+        for identity, rows in grouped.items():
+            profile = next((profiles[row.user_sec_uid] for row in rows if row.user_sec_uid in profiles), None)
+            public_id = (
+                profile.public_douyin_id if profile and profile.public_douyin_id
+                else next((row.user_douyin_id for row in rows if row.user_douyin_id), None)
+            )
+            candidates = list(dict.fromkeys(filter(None, [
+                public_id,
+                profile.unique_id if profile else None,
+                profile.short_id if profile else None,
+            ])))
+            matched: list[LeadConversionPair] = []
+            matched_id = None
+            for candidate in candidates:
+                matched = pairs_by_id.get(re.sub(r"[\s@]", "", candidate).casefold(), [])
+                if matched:
+                    matched_id = candidate
+                    break
+            business_users.append({
+                "identity_key": identity,
+                "user_avatar_comment_id": next((row.id for row in rows if row.user_avatar_url), None),
+                "user_douyin_id": public_id,
+                "douyin_id_type": profile.douyin_id_type if profile else None,
+                "profile_status": profile.fetch_status if profile else "pending",
+                "has_lead": bool(matched),
+                "lead_match_method": (
+                    "unique_id_exact" if matched and profile and matched_id == profile.unique_id
+                    else "short_id_exact" if matched and profile and matched_id == profile.short_id
+                    else "douyin_id_exact" if matched else None
+                ),
+                "lead_time": matched[0].converted_at if matched else None,
+                "lead_contacts": [{
+                    "type": row.contact_type,
+                    "value": row.contact_value,
+                    "converted_at": row.converted_at,
+                    "gap_seconds": row.gap_seconds,
+                } for row in matched],
+            })
+    facts_by_identity = {item["identity_key"]: item for item in business_users}
+    for user in serialized_users:
+        facts = facts_by_identity.get(user["identity_key"], {})
+        has_lead = bool(facts.get("has_lead"))
+        user.update({
+            "user_avatar_comment_id": facts.get("user_avatar_comment_id"),
+            "user_douyin_id": facts.get("user_douyin_id"),
+            "douyin_id_type": facts.get("douyin_id_type"),
+            "profile_status": facts.get("profile_status", "pending"),
+            "has_lead": has_lead,
+            "lead_contacts": facts.get("lead_contacts", []),
+            "lead_match_method": facts.get("lead_match_method"),
+            "lead_time": facts.get("lead_time"),
+        })
+        # 确认留资只能来自实时系统配对事实；AI历史结果不得与页面标识冲突。
+        if has_lead:
+            user["follow_up_status"] = "confirmed_lead"
+        elif user.get("follow_up_status") == "confirmed_lead":
+            user["follow_up_status"] = "unknown"
+
+
+def get_unified_review(
+    db: Session,
+    session_id: int,
+    business_users: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     run = db.query(UnifiedAiReviewRun).filter(UnifiedAiReviewRun.session_id == session_id).first()
     if not run:
         return None
@@ -335,6 +431,7 @@ def get_unified_review(db: Session, session_id: int) -> dict[str, Any] | None:
         AudienceInteractionAnalysis.session_id == session_id
     ).order_by(AudienceInteractionAnalysis.is_precision_lead.desc(), AudienceInteractionAnalysis.id.asc()).all()
     serialized_users = [_serialize_analysis(row) for row in rows]
+    _enrich_user_business_facts(db, session_id, serialized_users, business_users)
     comment_ids: set[int] = set()
     segment_ids: set[int] = set()
     for user in serialized_users:
@@ -382,7 +479,7 @@ def get_unified_review(db: Session, session_id: int) -> dict[str, Any] | None:
 
 def overlay_user_analyses(db: Session, session_id: int, users: list[dict[str, Any]]) -> dict[str, Any] | None:
     """将已保存 AI 结果叠加到详情页用户，不在 GET 请求中调用模型。"""
-    review = get_unified_review(db, session_id)
+    review = get_unified_review(db, session_id, users)
     if not review:
         return None
     by_identity = {item["identity_key"]: item for item in review["users"]}

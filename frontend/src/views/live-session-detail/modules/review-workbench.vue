@@ -13,7 +13,6 @@ import MetricsChart from './metrics-chart.vue';
 import ReviewVideoPlayer from './review-video-player.vue';
 import ReviewTimeline from './review-timeline.vue';
 import SessionComparison from './session-comparison.vue';
-import AiPanel from './ai-panel.vue';
 import UnifiedAudienceReview from '@/components/business/unified-audience-review.vue';
 
 defineOptions({ name: 'LiveReviewWorkbench' });
@@ -187,9 +186,6 @@ onBeforeUnmount(() => {
             </NTabPane>
             <NTabPane name="metrics" :tab="`分钟曲线 (${detail.metrics.length})`" display-directive="if">
               <MetricsChart :metrics="detail.metrics || []" />
-            </NTabPane>
-            <NTabPane name="ai" tab="AI 分析" display-directive="if">
-              <AiPanel :session-id="sessionId" :detail="detail" />
             </NTabPane>
             <NTabPane name="audience-ai" tab="用户与转化" display-directive="if">
               <UnifiedAudienceReview

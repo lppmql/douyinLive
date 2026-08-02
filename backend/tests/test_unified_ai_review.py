@@ -91,5 +91,15 @@ def test_unified_review_uses_cache_and_keeps_business_facts(db):
     assert second["users"][0]["follow_up_status"] == "unknown"
     assert second["users"][0]["evidence"][0]["evidence_id"] == f"C{comment.id}"
     assert "13800138000" in second["users"][0]["evidence"][0]["text"]
+    rule_user.update({
+        "has_lead": True,
+        "user_avatar_comment_id": comment.id,
+        "user_douyin_id": "douyin-test-001",
+        "profile_status": "success",
+        "lead_contacts": [{"type": "phone", "value": "13800138000"}],
+    })
     assert overlay_user_analyses(db, session.id, [rule_user])["status"] == "completed"
     assert rule_user["ai_analysis"]["is_precision_lead"] is True
+    assert rule_user["ai_analysis"]["has_lead"] is True
+    assert rule_user["ai_analysis"]["follow_up_status"] == "confirmed_lead"
+    assert rule_user["ai_analysis"]["user_douyin_id"] == "douyin-test-001"
