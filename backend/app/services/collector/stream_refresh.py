@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.logger import logger
 from app.models.live_sessions import LiveSession
 from app.models.stream_sources import StreamSource
+from app.services.collector.stream_health import probe_stream_url
 
 
 async def refresh_session_stream_url(
@@ -100,7 +101,47 @@ async def refresh_session_stream_url(
                     "source": None,
                 }
 
-            # ── 3. 更新 LiveSession.stream_url ──
+            # ── 3. 新地址必须先通过真实拉流验证 ──
+            # 页面 DOM 可能仍残留已经失效的直播 FLV。没有验证就标记 active，
+            # Worker 会在同一个坏地址上重复消耗全部分片重试次数。
+            candidate_source = (
+                db.query(StreamSource)
+                .filter(
+                    StreamSource.session_id == session_id,
+                    StreamSource.status == "pending",
+                )
+                .order_by(StreamSource.fetched_at.desc(), StreamSource.id.desc())
+                .first()
+            )
+            if not candidate_source:
+                return {
+                    "success": False,
+                    "stream_url": None,
+                    "error": "页面提取到了媒体地址，但没有保存待验证的流来源",
+                    "source": None,
+                }
+            headers = dict(candidate_source.headers_json or {})
+            health = await probe_stream_url(new_url, headers, probe_seconds=2.0)
+            if not health["alive"]:
+                candidate_source.status = "error"
+                db.commit()
+                return {
+                    "success": False,
+                    "stream_url": None,
+                    "error": (
+                        "页面提取到了媒体地址，但真实拉流验证失败："
+                        f"{health.get('error') or '未知错误'}。"
+                        "直播回放可能尚未生成或已经过期"
+                    ),
+                    "source": None,
+                }
+
+            # ── 4. 验证通过后原子切换 active 并更新场次 ──
+            db.query(StreamSource).filter(
+                StreamSource.session_id == session_id,
+                StreamSource.status == "active",
+            ).update({StreamSource.status: "expired"}, synchronize_session=False)
+            candidate_source.status = "active"
             session.stream_url = new_url[:2000]
             db.commit()
 

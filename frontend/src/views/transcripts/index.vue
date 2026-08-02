@@ -38,10 +38,14 @@ const {
   livePreview,
   wsConnected,
   // 统计卡片
-  segments,
+  readableSegments,
   totalCharacters,
-  coveragePercent,
+  coverageLabel,
   averageAiScore,
+  contentVersion,
+  contentVersionLabel,
+  hiddenDuplicateCount,
+  canRunAiPipeline,
   // 内容面板
   viewMode,
   searchKeyword,
@@ -50,7 +54,7 @@ const {
   filteredSegments,
   visibleSegments,
   visibleSegmentLimit,
-  fullText,
+  displayedFullText,
   transcribedSeconds,
   categoryStats,
   // 任务抽屉
@@ -73,6 +77,7 @@ const {
   jumpToSegment,
   openTaskDrawer,
   selectTask,
+  retryTask,
   openSessionDetail
 } = wb;
 </script>
@@ -87,14 +92,7 @@ const {
       <NButton size="small" secondary :loading="loading" @click="initializePage">重新加载</NButton>
     </NAlert>
 
-    <!-- 1. 任务状态卡片 -->
-    <TranscriptTaskCards
-      :task-status-cards="taskStatusCards"
-      :failed-count="taskSummary.failed"
-      @open-drawer="(status: any) => openTaskDrawer(status)"
-    />
-
-    <!-- 2. 场次选择 + 操作工具栏 -->
+    <!-- 1. 当前场次工作台：先完成选择、修复和生成终稿等核心任务。 -->
     <TranscriptSessionControl
       :session-options="sessionOptions"
       :selected-session-id="selectedSessionId"
@@ -105,6 +103,9 @@ const {
       :queue-loading="queueLoading"
       :batch-loading="batchLoading"
       :ai-loading="aiLoading"
+      :can-run-ai-pipeline="canRunAiPipeline"
+      :content-version="contentVersion"
+      :content-version-label="contentVersionLabel"
       :live-preview="livePreview"
       :ws-connected="wsConnected"
       @update:selected-session-id="(val: number) => loadTranscript(val)"
@@ -116,16 +117,25 @@ const {
       @open-session-detail="openSessionDetail"
     />
 
-    <!-- 3. 统计卡片 -->
+    <!-- 2. 当前场次数据质量 -->
     <TranscriptStatCards
       :visible="Boolean(selectedSessionId)"
-      :segment-count="segments.length"
+      :segment-count="readableSegments.length"
       :total-characters="totalCharacters"
-      :coverage-percent="coveragePercent"
+      :coverage-label="coverageLabel"
       :average-ai-score="averageAiScore"
+      :content-version-label="contentVersionLabel"
+      :hidden-duplicate-count="hiddenDuplicateCount"
     />
 
-    <!-- 4. 话术内容面板（主内容 + 侧边栏） -->
+    <!-- 3. 全局任务队列压缩为一行，不再遮挡当前场次内容。 -->
+    <TranscriptTaskCards
+      :task-status-cards="taskStatusCards"
+      :failed-count="taskSummary.failed"
+      @open-drawer="(status: any) => openTaskDrawer(status)"
+    />
+
+    <!-- 4. 话术内容工作区（主内容 + 业务结构 + 时间导航） -->
     <TranscriptContentPanel
       :has-session="Boolean(selectedSessionId)"
       :loading="loading"
@@ -133,10 +143,10 @@ const {
       :search-keyword="searchKeyword"
       :category-filter="categoryFilter"
       :category-options="categoryOptions"
-      :segments="segments"
+      :segments="readableSegments"
       :filtered-segments="filteredSegments"
       :visible-segments="visibleSegments"
-      :full-text="fullText"
+      :full-text="displayedFullText"
       :transcribed-seconds="transcribedSeconds"
       :category-stats="categoryStats"
       @update:search-keyword="searchKeyword = $event"
@@ -163,6 +173,7 @@ const {
       @select-task="selectTask"
       @open-session-detail="openSessionDetail"
       @delete-task="deleteTask"
+      @retry-task="retryTask"
       @clear-failed-tasks="clearFailedTasks"
     />
   </NSpace>

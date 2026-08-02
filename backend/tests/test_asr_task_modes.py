@@ -17,6 +17,7 @@ from workers.asr_worker import (
     segment_type_for_task,
     should_handoff_realtime_failure,
     should_handoff_realtime_task,
+    should_refresh_stream_after_chunk_failure,
 )
 
 
@@ -120,6 +121,22 @@ def test_realtime_stream_end_failure_handoffs_after_live_ends():
         "offline",
         "ended",
         "HTTP error 404 Not Found",
+    )
+
+
+def test_offline_chunk_stream_failure_refreshes_before_retry():
+    """离线分片的 404/TLS/空音频应刷新地址，实时缓存错误不能误刷新。"""
+    assert should_refresh_stream_after_chunk_failure(
+        "offline",
+        "真实流未输出任何音频帧；ffmpeg 错误：404 Not Found",
+    )
+    assert should_refresh_stream_after_chunk_failure(
+        "offline",
+        "TLS Unknown error: Input/output error",
+    )
+    assert not should_refresh_stream_after_chunk_failure(
+        "realtime",
+        "直播音频缓存不完整：请求 120 秒，实际读取 52 秒",
     )
 
 

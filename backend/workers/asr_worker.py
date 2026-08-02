@@ -141,6 +141,27 @@ def build_chunk_failure_message(error: Exception, pipe: object | None = None) ->
     return message[:500]
 
 
+def should_refresh_stream_after_chunk_failure(task_type: str, error_message: str) -> bool:
+    """离线分片遇到取流错误时应刷新地址，而不是继续重试同一个坏 URL。"""
+    if task_type != "offline":
+        return False
+    message = (error_message or "").casefold()
+    return any(
+        marker in message
+        for marker in (
+            "未输出任何音频帧",
+            "404",
+            "403",
+            "410",
+            "input/output error",
+            "connection reset",
+            "connection refused",
+            "tls",
+            "流地址已失效",
+        )
+    )
+
+
 class AsrWorker:
     """ASR 转写 Worker"""
 
@@ -601,6 +622,10 @@ class AsrWorker:
                 m3u8_url, stream = await self._auto_refresh_stream_if_expired(
                     db, task, m3u8_url, headers
                 )
+                if stream and stream.headers_json:
+                    # 刷新后的地址可能依赖新的 Referer/User-Agent，不能继续沿用
+                    # 旧 StreamSource 的请求头（旧数据里的 UA 还可能多一层引号）。
+                    headers = dict(stream.headers_json)
 
                 is_live = task.task_type == "realtime"
                 if is_live:
@@ -647,6 +672,46 @@ class AsrWorker:
                             finally:
                                 await self._release_resource_slot(task.id)
                             db.refresh(chunk)
+                            if (
+                                chunk.status == TaskStatus.FAILED
+                                and chunk.retry_count < chunk.max_retries
+                                and should_refresh_stream_after_chunk_failure(
+                                    task.task_type,
+                                    chunk.error_message or "",
+                                )
+                            ):
+                                # 第一次失败后立即强制刷新，第二次尝试使用新地址。
+                                # 已完成分片保持不动，因此这里是真正的断点续传。
+                                previous_stream_id = task.stream_id
+                                refreshed_url, refreshed_source = await self._auto_refresh_stream_if_expired(
+                                    db,
+                                    task,
+                                    m3u8_url,
+                                    headers,
+                                    force_refresh=True,
+                                )
+                                if (
+                                    refreshed_url != m3u8_url
+                                    or (
+                                        refreshed_source is not None
+                                        and refreshed_source.id != previous_stream_id
+                                    )
+                                ):
+                                    m3u8_url = refreshed_url
+                                    if refreshed_source and refreshed_source.headers_json:
+                                        headers = dict(refreshed_source.headers_json)
+                                    chunk.source_url_hash = hashlib.sha256(
+                                        m3u8_url.encode("utf-8")
+                                    ).hexdigest()
+                                    chunk.status = TaskStatus.PENDING
+                                    chunk.error_message = "回放地址已自动刷新，正在从当前分片继续"
+                                    db.commit()
+                                    publish_task_event(
+                                        "asr",
+                                        task,
+                                        "stream_refreshed_for_chunk_retry",
+                                        {"chunk_index": chunk.chunk_index},
+                                    )
                         if chunk.status not in {TaskStatus.COMPLETED, TaskStatus.SKIPPED}:
                             db.refresh(session)
                             if should_handoff_realtime_failure(
@@ -1003,6 +1068,8 @@ class AsrWorker:
         task: AsrTask,
         m3u8_url: str,
         headers: dict,
+        *,
+        force_refresh: bool = False,
     ) -> tuple[str, StreamSource | None]:
         """
         转写前先探测 m3u8 是否有效；如果过期则调后端 API 自动刷新。
@@ -1010,12 +1077,16 @@ class AsrWorker:
         返回: (最终可用的 m3u8_url, 关联的 StreamSource 或 None)
         """
         # ── 1. 快速探测 ──
-        logger.info("任务 %s: 探测流地址可用性...", task.id)
-        health = await probe_stream_url(m3u8_url, headers, probe_seconds=2.0)
+        if force_refresh:
+            health = {"alive": False, "error": "分片读取失败"}
+            logger.warning("任务 %s: 分片取流失败，强制刷新回放地址", task.id)
+        else:
+            logger.info("任务 %s: 探测流地址可用性...", task.id)
+            health = await probe_stream_url(m3u8_url, headers, probe_seconds=2.0)
 
-        if health["alive"]:
-            logger.info("任务 %s: 流地址有效，直接开始转写", task.id)
-            return m3u8_url, db.get(StreamSource, task.stream_id) if task.stream_id else None
+            if health["alive"]:
+                logger.info("任务 %s: 流地址有效，直接开始转写", task.id)
+                return m3u8_url, db.get(StreamSource, task.stream_id) if task.stream_id else None
 
         logger.warning(
             "任务 %s: 流地址已过期（%s），尝试自动刷新...",

@@ -19,6 +19,8 @@ class StreamSource(Base, TimestampMixin):
     m3u8_url = Column(String(2000), nullable=False, comment="m3u8 播放地址")
     headers_json = Column(JSON, nullable=True, comment="请求头(Referer/User-Agent等)")
     quality = Column(String(20), nullable=True, comment="清晰度: origin/uhd/hd/sd")
+    # 运行时完整状态：pending（待验证）/active/expired/error。
+    # 数据库列注释保留历史文本，避免仅为说明文字生成一次 ALTER TABLE 迁移。
     status = Column(String(20), default="active", comment="状态: active/expired/error")
     expires_at = Column(DateTime, nullable=True, comment="过期时间")
     fetched_at = Column(DateTime, nullable=True, comment="采集时间")

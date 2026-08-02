@@ -23,57 +23,53 @@ defineEmits<{
 </script>
 
 <template>
-  <!-- 4 张状态卡片 -->
-  <div class="grid grid-cols-2 gap-12px lg:grid-cols-4">
-    <button
-      v-for="card in taskStatusCards"
-      :key="card.status"
-      type="button"
-      class="business-clickable-card business-focus-ring status-card rounded-12px bg-white p-14px text-left dark:bg-dark sm:p-16px"
-      :class="`status-card--${card.tone}`"
-      @click="$emit('openDrawer', card.status)"
-    >
-      <div class="flex items-center justify-between gap-8px">
-        <div>
-          <div class="text-12px text-gray-500">{{ card.label }}</div>
-          <div class="mt-5px text-26px font-800">{{ card.value }}</div>
-          <!-- 正在转写时显示最快进度 -->
-          <div v-if="card.status === 'processing' && card.maxProgress != null" class="mt-4px text-11px text-orange-500">
-            最快进度 {{ card.maxProgress }}%
+  <NCard :bordered="false" class="card-wrapper" size="small" title="全部转写任务">
+    <template #header-extra>
+      <NButton text type="primary" @click="$emit('openDrawer', 'all')">查看任务明细</NButton>
+    </template>
+    <div class="grid grid-cols-2 gap-8px lg:grid-cols-4">
+      <button
+        v-for="card in taskStatusCards"
+        :key="card.status"
+        type="button"
+        class="business-focus-ring queue-item flex items-center gap-10px rounded-10px px-12px py-10px text-left"
+        :class="`queue-item--${card.tone}`"
+        @click="$emit('openDrawer', card.status)"
+      >
+        <div class="status-icon flex-center shrink-0 rounded-8px p-7px">
+          <SvgIcon :icon="card.icon" class="text-20px" />
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center justify-between gap-8px">
+            <span class="truncate text-12px text-gray-500">{{ card.label }}</span>
+            <strong class="text-20px">{{ card.value }}</strong>
+          </div>
+          <div class="mt-2px truncate text-11px text-gray-400">
+            {{ card.status === 'processing' && card.maxProgress != null ? `最快 ${card.maxProgress}%` : '点击筛选查看' }}
           </div>
         </div>
-        <div class="status-icon flex-center rounded-10px p-8px">
-          <SvgIcon :icon="card.icon" class="text-24px" />
-        </div>
-      </div>
-      <div class="mt-8px text-11px text-gray-400">点击查看真实任务明细</div>
-    </button>
-  </div>
-
-  <!-- 失败任务提醒 -->
-  <NAlert v-if="failedCount" type="warning" :bordered="false" show-icon>
-    有 {{ failedCount }} 场转写需要处理，重试时会自动探测并刷新过期的流地址。
-    <NButton text type="warning" class="ml-8px" @click="$emit('openDrawer', 'failed')">
-      查看具体场次和错误
-    </NButton>
-  </NAlert>
+      </button>
+    </div>
+    <NAlert v-if="failedCount" class="mt-10px" type="warning" :bordered="false" show-icon>
+      {{ failedCount }} 场需要处理；系统会刷新回放地址并从失败分片续传。
+      <NButton text type="warning" class="ml-8px" @click="$emit('openDrawer', 'failed')">立即处理</NButton>
+    </NAlert>
+  </NCard>
 </template>
 
 <style scoped>
-.status-card {
+.queue-item {
   border: 1px solid rgba(128, 128, 128, 0.14);
-  box-shadow: 0 8px 24px rgba(20, 35, 50, 0.05);
+  background: rgba(128, 128, 128, 0.035);
   transition:
-    transform 0.2s ease,
     border-color 0.2s ease,
-    box-shadow 0.2s ease;
+    background 0.2s ease;
 }
 
-.status-card:hover,
-.status-card:focus-visible {
+.queue-item:hover,
+.queue-item:focus-visible {
   border-color: rgba(32, 128, 240, 0.45);
-  box-shadow: 0 12px 30px rgba(20, 35, 50, 0.1);
-  transform: translateY(-2px);
+  background: rgba(32, 128, 240, 0.05);
   outline: none;
 }
 
@@ -82,17 +78,17 @@ defineEmits<{
   color: rgb(var(--primary-color));
 }
 
-.status-card--warning .status-icon {
+.queue-item--warning .status-icon {
   background: rgba(var(--warning-color), 0.12);
   color: rgb(var(--warning-color));
 }
 
-.status-card--success .status-icon {
+.queue-item--success .status-icon {
   background: rgba(var(--success-color), 0.12);
   color: rgb(var(--success-color));
 }
 
-.status-card--error .status-icon {
+.queue-item--error .status-icon {
   background: rgba(var(--error-color), 0.12);
   color: rgb(var(--error-color));
 }

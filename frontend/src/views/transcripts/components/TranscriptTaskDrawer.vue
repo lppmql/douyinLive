@@ -12,7 +12,8 @@ import {
   getPostprocessLabel,
   getPostprocessType,
   formatDate,
-  formatDuration
+  formatDuration,
+  getTranscriptFailureInfo
 } from '@/utils/transcriptHelpers';
 import { computed } from 'vue';
 import { useAuthStore } from '@/store/modules/auth';
@@ -24,6 +25,10 @@ const authStore = useAuthStore();
 /** 删除会清理技术任务数据，因此只给超级管理员显示。 */
 const canDeleteTasks = computed(() =>
   authStore.userInfo.roles.some(role => role === 'R_SUPER' || role === 'R_ADMIN')
+);
+/** 转写是业务写操作，只读查看者不显示重试入口。 */
+const canRetryTasks = computed(() =>
+  authStore.userInfo.roles.some(role => ['R_SUPER', 'R_ADMIN', 'R_USER'].includes(role))
 );
 
 defineProps<{
@@ -46,6 +51,8 @@ defineEmits<{
   openSessionDetail: [sessionId: number];
   /** 删除单条失败任务 */
   deleteTask: [task: Api.Douyin.TranscriptTask];
+  /** 保留已完成分片并重试失败任务 */
+  retryTask: [task: Api.Douyin.TranscriptTask];
   /** 一键清空全部失败任务 */
   clearFailedTasks: [];
 }>();
@@ -140,7 +147,18 @@ defineEmits<{
                 />
               </div>
             </div>
-            <NButton size="tiny" secondary @click="$emit('selectTask', task)">查看话术</NButton>
+            <div class="flex shrink-0 flex-col gap-6px">
+              <NButton size="tiny" secondary @click="$emit('selectTask', task)">查看话术</NButton>
+              <NButton
+                v-if="canRetryTasks && (task.status === 'failed' || task.status === 'cancelled')"
+                size="tiny"
+                type="primary"
+                secondary
+                @click="$emit('retryTask', task)"
+              >
+                断点重试
+              </NButton>
+            </div>
             <!-- 失败/已取消任务显示删除按钮 -->
             <NButton
               v-if="canDeleteTasks && (task.status === 'failed' || task.status === 'cancelled')"
@@ -154,10 +172,15 @@ defineEmits<{
           </div>
           <!-- 转写错误 -->
           <NAlert v-if="task.error_message" type="error" :bordered="false" class="mt-10px">
-            {{ task.error_message }}
-            <NButton text type="error" class="ml-6px" @click="$emit('openSessionDetail', task.session_id)">
-              检查回放
-            </NButton>
+            <template #header>{{ getTranscriptFailureInfo(task.error_message).title }}</template>
+            <div>{{ getTranscriptFailureInfo(task.error_message).hint }}</div>
+            <div class="mt-8px flex flex-wrap items-center gap-10px">
+              <details class="min-w-0 flex-1 text-11px text-gray-500">
+                <summary class="cursor-pointer">技术详情</summary>
+                <div class="mt-5px break-all">{{ task.error_message }}</div>
+              </details>
+              <NButton text type="error" @click="$emit('openSessionDetail', task.session_id)">检查场次回放</NButton>
+            </div>
           </NAlert>
           <!-- 复盘入库错误 -->
           <NAlert v-if="task.postprocess_error" type="warning" :bordered="false" class="mt-10px">

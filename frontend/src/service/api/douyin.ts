@@ -302,10 +302,10 @@ export function syncDataEase(limit = 100) {
 /* ---------- 话术/ASR ---------- */
 
 /** 获取话术分段列表 */
-export function fetchTranscriptSegments(sessionId: number) {
+export function fetchTranscriptSegments(sessionId: number, offset = 0, limit = 500) {
   return backendRequest<Api.Douyin.TranscriptSegment[]>({
     url: `${API_PREFIX}/transcripts/${sessionId}/segments`,
-    params: { limit: 500 }
+    params: { offset, limit }
   });
 }
 

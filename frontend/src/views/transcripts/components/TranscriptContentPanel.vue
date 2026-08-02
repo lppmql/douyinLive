@@ -8,7 +8,7 @@
  * 所有格式化函数从 helpers 直接导入，无需通过 props 传递。
  */
 import { formatTime, getStatusLabel, getStatusType } from '@/utils/transcriptHelpers';
-import type { CategoryStat } from '@/adapters/transcript-adapter';
+import type { CategoryStat, TranscriptSegmentView } from '@/adapters/transcript-adapter';
 
 defineOptions({ name: 'TranscriptContentPanel' });
 
@@ -26,11 +26,11 @@ defineProps<{
   /** 分类下拉选项 */
   categoryOptions: Array<{ label: string; value: string }>;
   /** 全部片段 */
-  segments: Api.Douyin.TranscriptSegment[];
+  segments: TranscriptSegmentView[];
   /** 筛选后片段 */
-  filteredSegments: Api.Douyin.TranscriptSegment[];
+  filteredSegments: TranscriptSegmentView[];
   /** 可见片段（懒加载） */
-  visibleSegments: Api.Douyin.TranscriptSegment[];
+  visibleSegments: TranscriptSegmentView[];
   /** 全文文本 */
   fullText: string;
   /** 已转写最大秒数 */
@@ -46,7 +46,7 @@ defineEmits<{
   /** 加载更多片段 */
   loadMore: [];
   /** 点击时间戳跳转到片段 */
-  jumpToSegment: [segment: Api.Douyin.TranscriptSegment];
+  jumpToSegment: [segment: TranscriptSegmentView];
   /** 复制单个片段文本 */
   copySegment: [text: string];
   /** 点击分类跳转并筛选 */
@@ -55,7 +55,7 @@ defineEmits<{
 </script>
 
 <template>
-  <NCard title="真实话术内容" :bordered="false" class="card-wrapper">
+  <NCard title="话术阅读与检索" :bordered="false" class="card-wrapper transcript-content-card">
     <template #header-extra>
       <NRadioGroup :value="viewMode" size="small" @update:value="(val: string) => $emit('update:viewMode', val as 'segments' | 'full')">
         <NRadioButton value="segments">分段阅读</NRadioButton>
@@ -77,7 +77,7 @@ defineEmits<{
               <NInput
                 :value="searchKeyword"
                 clearable
-                placeholder="搜索真实话术内容"
+                placeholder="搜索品牌、预算、选址或资料钩子"
                 @update:value="(val: string) => $emit('update:searchKeyword', val)"
               >
                 <template #prefix><SvgIcon icon="mdi:magnify" /></template>
@@ -91,7 +91,7 @@ defineEmits<{
 
             <!-- 筛选结果统计 -->
             <div class="mb-10px flex items-center justify-between text-12px text-gray-500">
-              <span>显示 {{ filteredSegments.length }} / {{ segments.length }} 个真实片段</span>
+              <span>显示 {{ filteredSegments.length }} / {{ segments.length }} 个可读片段</span>
               <span>已覆盖到 {{ formatTime(transcribedSeconds) }}</span>
             </div>
 
@@ -105,6 +105,7 @@ defineEmits<{
                 :id="`transcript-segment-${item.id}`"
                 :key="item.id"
                 class="segment-card rounded-10px p-13px"
+                :class="{ 'segment-card--conversion': ['资料钩子', '留资承接'].includes(item.contentCategory) }"
               >
                 <div class="flex items-start gap-12px">
                   <!-- 时间戳按钮 -->
@@ -122,7 +123,12 @@ defineEmits<{
                       {{ item.text_content || '该片段没有识别出有效文字' }}
                     </p>
                     <div class="mt-8px flex flex-wrap items-center gap-8px">
-                      <NTag size="tiny" :bordered="false">{{ item.segment_type || '未分类' }}</NTag>
+                      <NTag size="tiny" :type="item.categoryTone" :bordered="false">
+                        {{ item.contentCategory }}
+                      </NTag>
+                      <NTag size="tiny" :type="item.sourceLabel === '离线终稿' ? 'success' : 'warning'" :bordered="false">
+                        {{ item.sourceLabel }}
+                      </NTag>
                       <NTag size="tiny" :type="getStatusType(item.asr_status)" :bordered="false">
                         {{ getStatusLabel(item.asr_status) }}
                       </NTag>
@@ -169,7 +175,10 @@ defineEmits<{
         <NGi span="1">
           <NSpace vertical :size="16">
             <!-- 话术结构 -->
-            <NCard title="本场话术结构" :bordered="false" class="card-wrapper">
+            <NCard title="内容结构" :bordered="false" class="inner-card">
+              <div class="mb-12px text-11px leading-18px text-gray-400">
+                根据真实话术关键词进行规则识别，用于快速定位，不代替 AI 复盘结论。
+              </div>
               <NEmpty v-if="!categoryStats.length" description="暂无可统计的真实分类" class="py-36px" />
               <div v-else class="space-y-13px">
                 <button
@@ -180,7 +189,9 @@ defineEmits<{
                   @click="$emit('filterByCategory', item.name)"
                 >
                   <div class="mb-5px flex items-center justify-between gap-10px text-12px">
-                    <span class="truncate font-600">{{ item.name }}</span>
+                    <span class="min-w-0 flex items-center gap-6px truncate font-600">
+                      <NTag size="tiny" :type="item.tone" :bordered="false">{{ item.name }}</NTag>
+                    </span>
                     <span class="shrink-0 text-gray-400">{{ item.count }} 段</span>
                   </div>
                   <NProgress :percentage="item.percent" :show-indicator="false" :height="6" />
@@ -189,7 +200,7 @@ defineEmits<{
             </NCard>
 
             <!-- 时间导航 -->
-            <NCard title="时间导航" :bordered="false" class="card-wrapper">
+            <NCard title="时间导航" :bordered="false" class="inner-card">
               <template #header-extra>
                 <NTag size="small" :bordered="false">{{ segments.length }} 个节点</NTag>
               </template>
@@ -237,6 +248,11 @@ defineEmits<{
   background: rgba(32, 128, 240, 0.045);
 }
 
+.segment-card--conversion {
+  border-left: 3px solid rgb(var(--warning-color));
+  background: color-mix(in srgb, rgb(var(--warning-color)) 5%, transparent);
+}
+
 .time-button {
   background: rgba(var(--primary-color), 0.1);
   color: rgb(var(--primary-color));
@@ -244,5 +260,10 @@ defineEmits<{
 
 .timeline-link:hover {
   background: rgba(32, 128, 240, 0.08);
+}
+
+.inner-card {
+  border: 1px solid rgba(128, 128, 128, 0.12);
+  background: rgba(128, 128, 128, 0.025);
 }
 </style>

@@ -33,8 +33,10 @@ import { formatTime } from '@/utils/transcriptHelpers';
 
 import {
   buildCategoryStats,
+  buildReadableSegments,
   buildSessionOptions,
-  buildTaskStatusCards
+  buildTaskStatusCards,
+  selectTranscriptVersionSegments
 } from '@/adapters/transcript-adapter';
 
 import { useTranscriptRealtime } from './useTranscriptRealtime';
@@ -151,9 +153,15 @@ export function useTranscriptWorkbench() {
     buildSessionOptions(sessions.value, taskBySession.value)
   );
 
-  /** 话术分类统计 */
+  /** 页面只选择一个话术版本：终稿存在时完全排除实时初稿，避免重复统计。 */
+  const versionSegments = computed(() => selectTranscriptVersionSegments(segments.value));
+
+  /** 页面可读片段：仅隐藏同一实时窗口的包含式短重复，不改数据库原文。 */
+  const readableSegments = computed(() => buildReadableSegments(versionSegments.value));
+
+  /** 话术业务内容结构统计 */
   const categoryStats = computed(() =>
-    buildCategoryStats(segments.value)
+    buildCategoryStats(readableSegments.value)
   );
 
   /** 分类筛选下拉选项 */
@@ -168,8 +176,8 @@ export function useTranscriptWorkbench() {
   /** 按关键词 + 分类筛选后的片段 */
   const filteredSegments = computed(() => {
     const keyword = searchKeyword.value.trim().toLowerCase();
-    return segments.value.filter(item => {
-      const matchesCategory = !categoryFilter.value || (item.segment_type || '未分类') === categoryFilter.value;
+    return readableSegments.value.filter(item => {
+      const matchesCategory = !categoryFilter.value || item.contentCategory === categoryFilter.value;
       const matchesKeyword = !keyword || item.text_content.toLowerCase().includes(keyword);
       return matchesCategory && matchesKeyword;
     });
@@ -182,12 +190,12 @@ export function useTranscriptWorkbench() {
 
   /** 话术总字数 */
   const totalCharacters = computed(() =>
-    segments.value.reduce((total, item) => total + item.text_content.length, 0)
+    readableSegments.value.reduce((total, item) => total + item.text_content.length, 0)
   );
 
   /** 已转写的最大秒数 */
   const transcribedSeconds = computed(() =>
-    Math.max(0, ...segments.value.map(item => item.segment_end || 0))
+    Math.max(0, ...versionSegments.value.map(item => item.segment_end || 0))
   );
 
   /** 话术时间覆盖率（已转写 / 直播时长） */
@@ -196,14 +204,52 @@ export function useTranscriptWorkbench() {
     return duration ? Math.min(100, (transcribedSeconds.value / duration) * 100) : 0;
   });
 
+  /** 时长未知时不显示误导性的 0%，改为明确的实时累计进度。 */
+  const coverageLabel = computed(() => {
+    const duration = selectedSession.value?.live_duration_seconds || 0;
+    if (!duration) {
+      return transcribedSeconds.value > 0 ? `已转到 ${formatTime(transcribedSeconds.value)}` : '等待话术';
+    }
+    return `${coveragePercent.value.toFixed(1)}%`;
+  });
+
   /** 平均 AI 评分 */
   const averageAiScore = computed(() => {
-    const scores = segments.value
+    const scores = readableSegments.value
       .map(item => item.ai_score)
       .filter((value): value is number => value !== null);
     return scores.length
       ? scores.reduce((total, value) => total + value, 0) / scores.length
       : null;
+  });
+
+  const contentVersion = computed<'offline-final' | 'realtime-draft' | 'empty'>(() => {
+    if (versionSegments.value.some(item => item.segment_type === 'asr_offline')) return 'offline-final';
+    return readableSegments.value.length ? 'realtime-draft' : 'empty';
+  });
+
+  const contentVersionLabel = computed(() => {
+    if (contentVersion.value === 'offline-final') return '离线终稿';
+    if (contentVersion.value === 'realtime-draft') return '实时初稿';
+    return '尚无话术';
+  });
+
+  const hiddenDuplicateCount = computed(() =>
+    Math.max(0, versionSegments.value.length - readableSegments.value.length)
+  );
+
+  /** AI 复盘只使用下播后的完整终稿，避免拿直播初稿生成错误结论。 */
+  const canRunAiPipeline = computed(() =>
+    contentVersion.value === 'offline-final'
+    && selectedTask.value?.task_type === 'offline'
+    && selectedTask.value.status === 'completed'
+  );
+
+  const displayedFullText = computed(() => {
+    if (contentVersion.value === 'offline-final' && fullText.value) return fullText.value;
+    return readableSegments.value
+      .map(item => `[${formatTime(item.segment_start)}] ${item.text_content}`)
+      .join('\n\n');
   });
 
   /** 按状态筛选后的任务列表 */
@@ -215,7 +261,7 @@ export function useTranscriptWorkbench() {
 
   /** 是否有话术内容（控制复制按钮等 UI 状态） */
   const hasContent = computed(() =>
-    segments.value.length > 0 || Boolean(fullText.value)
+    readableSegments.value.length > 0 || Boolean(fullText.value)
   );
 
   // ── 异步操作 ──
@@ -245,11 +291,11 @@ export function useTranscriptWorkbench() {
     if (!silent) loading.value = true;
     livePreview.value = '';
     try {
-      const [segmentResponse, textResponse] = await Promise.all([
-        fetchTranscriptSegments(sessionId),
+      const [loadedSegments, textResponse] = await Promise.all([
+        fetchAllTranscriptSegments(sessionId),
         fetchTranscriptFullText(sessionId).catch(() => ({ data: null }))
       ]);
-      segments.value = unwrapServiceData(segmentResponse, '话术分段读取失败');
+      segments.value = loadedSegments;
       fullText.value = textResponse.data?.full_text || '';
     } catch (error) {
       segments.value = [];
@@ -258,6 +304,20 @@ export function useTranscriptWorkbench() {
     } finally {
       loading.value = false;
     }
+  }
+
+  /** 分页读取全部真实话术，避免长直播被接口默认的前 500 段截断。 */
+  async function fetchAllTranscriptSegments(sessionId: number) {
+    const pageSize = 500;
+    const maxPages = 40;
+    const result: Api.Douyin.TranscriptSegment[] = [];
+    for (let page = 0; page < maxPages; page += 1) {
+      const response = await fetchTranscriptSegments(sessionId, page * pageSize, pageSize);
+      const batch = unwrapServiceData(response, '话术分段读取失败');
+      result.push(...batch);
+      if (batch.length < pageSize) return result;
+    }
+    throw new Error(`本场话术超过 ${pageSize * maxPages} 段，请缩小场次范围后重试`);
   }
 
   /** 页面初始化：加载场次列表 + 任务数据 + 默认打开最新场次 */
@@ -282,11 +342,16 @@ export function useTranscriptWorkbench() {
   /** 发起转写任务（对当前选中场次） */
   async function startTranscription() {
     if (!selectedSessionId.value) return;
+    const isRecovery = ['failed', 'cancelled'].includes(selectedTask.value?.status || '');
     queueLoading.value = true;
     try {
       const response = await queueTranscript(selectedSessionId.value);
       const data = unwrapServiceData(response, '转写任务响应为空');
-      message.success(`任务已${data.created ? '创建' : '在队列中'}，编号 ${data.task_id}`);
+      message.success(
+        isRecovery
+          ? `任务 #${data.task_id} 已断点续传，系统将自动刷新回放地址`
+          : `任务已${data.created ? '创建' : '在队列中'}，编号 ${data.task_id}`
+      );
       await loadTaskData();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '该场次暂无可用回放，请先刷新采集或检查 m3u8');
@@ -312,7 +377,10 @@ export function useTranscriptWorkbench() {
 
   /** 对当前场次执行 AI 复盘并入库 */
   async function runAiPipeline() {
-    if (!selectedSessionId.value || !segments.value.length) return;
+    if (!selectedSessionId.value || !canRunAiPipeline.value) {
+      message.warning('请先完成本场离线终稿，再生成 AI 复盘');
+      return;
+    }
     aiLoading.value = true;
     try {
       const response = await runTranscriptAiPipeline(selectedSessionId.value);
@@ -346,10 +414,7 @@ export function useTranscriptWorkbench() {
 
   /** 复制完整话术（全文优先，否则合并分段） */
   function copyFullText() {
-    const text =
-      fullText.value ||
-      segments.value.map(item => `[${formatTime(item.segment_start)}] ${item.text_content}`).join('\n');
-    return copyText(text, '完整话术已复制');
+    return copyText(displayedFullText.value, '当前可读话术已复制');
   }
 
   /** 跳转到指定片段并滚动到视图 */
@@ -374,6 +439,14 @@ export function useTranscriptWorkbench() {
   function selectTask(task: Api.Douyin.TranscriptTask) {
     taskDrawerVisible.value = false;
     void loadTranscript(task.session_id);
+  }
+
+  /** 从任务抽屉直接断点重试指定失败场次。 */
+  async function retryTask(task: Api.Douyin.TranscriptTask) {
+    selectedSessionId.value = task.session_id;
+    await startTranscription();
+    taskDrawerVisible.value = false;
+    await loadTranscript(task.session_id);
   }
 
   /** 正在删除中的任务 ID 集合（用于按钮 loading 状态） */
@@ -499,6 +572,8 @@ export function useTranscriptWorkbench() {
     sessions,
     selectedSessionId,
     segments,
+    versionSegments,
+    readableSegments,
     fullText,
     tasks,
     taskSummary,
@@ -529,7 +604,13 @@ export function useTranscriptWorkbench() {
     totalCharacters,
     transcribedSeconds,
     coveragePercent,
+    coverageLabel,
     averageAiScore,
+    contentVersion,
+    contentVersionLabel,
+    hiddenDuplicateCount,
+    canRunAiPipeline,
+    displayedFullText,
     wsConnected,
     hasContent,
     // 操作
@@ -543,6 +624,7 @@ export function useTranscriptWorkbench() {
     jumpToSegment,
     openTaskDrawer,
     selectTask,
+    retryTask,
     openSessionDetail,
     // 删除相关
     deletingTaskIds,

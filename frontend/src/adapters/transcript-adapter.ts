@@ -24,6 +24,14 @@ export interface CategoryStat {
   name: string;
   count: number;
   percent: number;
+  tone: 'info' | 'warning' | 'success' | 'error' | 'default';
+}
+
+/** 页面使用的可读话术片段：保留真实 ASR 字段，只增加规则标签。 */
+export interface TranscriptSegmentView extends Api.Douyin.TranscriptSegment {
+  contentCategory: string;
+  categoryTone: CategoryStat['tone'];
+  sourceLabel: string;
 }
 
 /** 任务状态卡片配置 */
@@ -40,22 +48,128 @@ export interface TaskStatusCard {
 // ========== 适配函数 ==========
 
 /**
- * 计算话术分类统计（按 segment_type 分组）
+ * 计算话术分类统计（按真实文本的业务规则分组）
  * 把平铺的片段列表转成按分类汇总的结构，用于侧边栏展示
  */
-export function buildCategoryStats(segments: Api.Douyin.TranscriptSegment[]): CategoryStat[] {
+export function buildCategoryStats(segments: TranscriptSegmentView[]): CategoryStat[] {
   const counts = new Map<string, number>();
   segments.forEach(item => {
-    const category = item.segment_type || '未分类';
+    const category = item.contentCategory;
     counts.set(category, (counts.get(category) || 0) + 1);
   });
   return Array.from(counts.entries())
     .map(([name, count]) => ({
       name,
       count,
-      percent: segments.length ? (count / segments.length) * 100 : 0
+      percent: segments.length ? (count / segments.length) * 100 : 0,
+      tone: categoryTone(name)
     }))
     .sort((a, b) => b.count - a.count);
+}
+
+const CATEGORY_RULES: Array<{ name: string; words: string[] }> = [
+  {
+    name: '留资承接',
+    words: ['联系方式', '手机号', '微信号', '小助理联系', '注意接听', '把电话', '把微信']
+  },
+  {
+    name: '资料钩子',
+    words: [
+      '领取资料',
+      '发资料',
+      '资料免费',
+      '免费送给你',
+      '资料送给你',
+      '找老师领',
+      '怎么领',
+      '避坑名单',
+      '评估表',
+      '计算表',
+      '调研报告',
+      '免费分析',
+      '红色按钮',
+      '弹窗',
+      '后台私信'
+    ]
+  },
+  {
+    name: '互动引导',
+    words: ['欢迎', '公屏', '扣个一', '扣1', '点点赞', '点关注', '还有什么问题', '打在评论区']
+  },
+  {
+    name: '用户答疑',
+    words: ['你问', '你这个问题', '老板你', '你在哪', '你的预算', '你准备', '你想开']
+  },
+  {
+    name: '开店知识',
+    words: ['零食店', '开店', '选址', '预算', '品牌', '加盟', '快招', '供应链', '货源', '毛利', '利润', '回本', '房租']
+  }
+];
+
+function categoryTone(name: string): CategoryStat['tone'] {
+  const tones: Record<string, CategoryStat['tone']> = {
+    留资承接: 'success',
+    资料钩子: 'warning',
+    互动引导: 'info',
+    用户答疑: 'info',
+    开店知识: 'default',
+    其他话术: 'default'
+  };
+  return tones[name] || 'default';
+}
+
+function classifyTranscriptContent(text: string): string {
+  const normalized = text.replace(/\s+/g, '').toLowerCase();
+  return CATEGORY_RULES.find(rule => rule.words.some(word => normalized.includes(word.toLowerCase())))?.name || '其他话术';
+}
+
+function normalizedTranscriptText(text: string): string {
+  return text.replace(/[\s，。！？、：；,.!?:;“”'"（）()-]/g, '').toLowerCase();
+}
+
+/** 同场同时存在初稿和终稿时只返回一个可信版本，禁止跨版本重复统计。 */
+export function selectTranscriptVersionSegments(
+  segments: Api.Douyin.TranscriptSegment[]
+): Api.Douyin.TranscriptSegment[] {
+  const hasOfflineFinal = segments.some(item => item.segment_type === 'asr_offline');
+  return hasOfflineFinal
+    ? segments.filter(item => item.segment_type === 'asr_offline')
+    : segments.filter(item => item.segment_type !== 'asr_offline_pending');
+}
+
+/**
+ * 合并实时两遍识别产生的重复片段。
+ * 只对实时初稿中时间区间重叠（或起点误差不超过 3 秒）的包含文本隐藏短片段；
+ * 离线终稿和 45 秒内正常重复的 CTA 均保留，不改写真实原文。
+ */
+export function buildReadableSegments(segments: Api.Douyin.TranscriptSegment[]): TranscriptSegmentView[] {
+  const sorted = [...segments].sort((a, b) => a.segment_start - b.segment_start || a.id - b.id);
+  const normalized = sorted.map(item => normalizedTranscriptText(item.text_content));
+  return sorted
+    .filter((item, index) => {
+      if (item.segment_type !== 'asr_realtime') return true;
+      const text = normalized[index];
+      if (text.length < 8) return true;
+      return !sorted.some((other, otherIndex) => {
+        if (index === otherIndex || other.segment_type !== 'asr_realtime') return false;
+        const itemEnd = Math.max(item.segment_start, item.segment_end || item.segment_start);
+        const otherEnd = Math.max(other.segment_start, other.segment_end || other.segment_start);
+        const intervalsOverlap = Math.max(item.segment_start, other.segment_start) <= Math.min(itemEnd, otherEnd);
+        const startsNear = Math.abs(other.segment_start - item.segment_start) <= 3;
+        if (!intervalsOverlap && !startsNear) return false;
+        const otherText = normalized[otherIndex];
+        return otherText.length >= text.length + 8 && otherText.includes(text);
+      });
+    })
+    .map(item => {
+      const contentCategory = classifyTranscriptContent(item.text_content);
+      return {
+        ...item,
+        contentCategory,
+        categoryTone: categoryTone(contentCategory),
+        sourceLabel: item.segment_type === 'asr_offline' ? '离线终稿' : '实时初稿'
+      };
+    });
 }
 
 /**

@@ -400,9 +400,6 @@ class SchedulerManager:
             db.refresh(task)
             publish_task_event("scraper", task, "started", {"session_id": session_id, "task_type": job_type})
 
-            context, is_valid, message = await browser_manager.get_logged_in_context()
-            if not is_valid or not context:
-                raise RuntimeError(message or "采集账号登录状态不可用")
             from app.services.collector.live_collector import (
                 MetricsCollector, CommentCollector, ProfileCollector,
             )
@@ -414,17 +411,23 @@ class SchedulerManager:
             }
 
             if job_type == "stream_refresh":
-                from app.services.collector.stream_collector import StreamCollector
+                # 定时刷新与 Worker/播放端统一走“提取候选 → 真实 probe → 原子切换”，
+                # 禁止定时器绕过验证直接覆盖当前可用回放。
+                from app.services.collector.stream_refresh import refresh_session_stream_url
 
-                stream_url = await StreamCollector(db, context).fetch_stream_url(dashboard_url, session_id)
-                if stream_url:
-                    from app.models.live_sessions import LiveSession
+                refresh_result = await refresh_session_stream_url(db, session_id)
+                if not refresh_result["success"]:
+                    raise RuntimeError(refresh_result["error"] or "流地址刷新失败")
+                task.progress_percent = 100
+                task.progress_stage = "stream_refresh"
+                task.progress_message = "流地址真实拉流验证通过并已安全切换"
+                touch_task(task)
+            else:
+                context, is_valid, message = await browser_manager.get_logged_in_context()
+                if not is_valid or not context:
+                    raise RuntimeError(message or "采集账号登录状态不可用")
 
-                    session = db.get(LiveSession, session_id)
-                    if session:
-                        session.stream_url = stream_url[:2000]
-                        db.commit()
-            elif job_type == "live_detail":
+            if job_type == "live_detail":
                 from app.models.live_sessions import LiveSession
                 from app.services.collector.history import collect_live_session_snapshot
 
@@ -439,7 +442,7 @@ class SchedulerManager:
                     f"指标写入 {result['new_metric_count']} 条，评论记录 {result['new_comment_count']} 条，"
                     f"画像 {result['profile_count']} 条；DataEase 等待独立同步任务处理"
                 )
-            else:
+            elif job_type != "stream_refresh":
                 collector_cls = collector_map.get(job_type)
                 if not collector_cls:
                     raise ValueError(f"未知采集任务类型: {job_type}")

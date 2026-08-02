@@ -83,3 +83,57 @@ export function getPostprocessType(status: string): 'info' | 'warning' | 'succes
   };
   return map[status] || 'info';
 }
+
+export interface TranscriptFailureInfo {
+  category: 'stream' | 'engine' | 'live-ended' | 'duration' | 'unknown';
+  title: string;
+  hint: string;
+  actionLabel: string;
+}
+
+/** 将后端真实错误归纳为运营人员可以直接执行的恢复建议。 */
+export function getTranscriptFailureInfo(errorMessage?: string | null): TranscriptFailureInfo {
+  const message = (errorMessage || '').toLowerCase();
+  if (
+    ['404', '403', '410', 'input/output error', 'tls', '未输出任何音频帧', '流地址已失效'].some(marker =>
+      message.includes(marker)
+    )
+  ) {
+    return {
+      category: 'stream',
+      title: '直播回放地址已失效或读取中断',
+      hint: '系统会重新进入大屏页面获取可用回放，并从失败分片继续，不会重跑已经完成的部分。',
+      actionLabel: '刷新回放并断点续传'
+    };
+  }
+  if (message.includes('直播音频缓存不完整') || message.includes('直播音频缓存等待超时')) {
+    return {
+      category: 'live-ended',
+      title: '直播结束时实时缓存没有覆盖完整窗口',
+      hint: '已有实时初稿会保留；下播回放生成后重新转写，即可补齐离线终稿。',
+      actionLabel: '生成离线终稿'
+    };
+  }
+  if (message.includes('funasr') || message.includes('容器') || message.includes('模型')) {
+    return {
+      category: 'engine',
+      title: '话术识别服务暂时不可用',
+      hint: '重新转写会自动检查并启动 FunASR；模型准备完成后任务继续执行。',
+      actionLabel: '检查服务并重试'
+    };
+  }
+  if (message.includes('完整度') || message.includes('直播时长仍在变化')) {
+    return {
+      category: 'duration',
+      title: '场次时长仍在变化，终稿暂未收齐',
+      hint: '请先刷新场次采集数据，确认下播时间后再从已有分片继续。',
+      actionLabel: '重新检查并续传'
+    };
+  }
+  return {
+    category: 'unknown',
+    title: '本场话术转写需要重新处理',
+    hint: '系统会保留已完成片段，并从失败位置继续。若再次失败，可展开技术详情进一步排查。',
+    actionLabel: '断点重试'
+  };
+}

@@ -1,4 +1,6 @@
 """Phase 5: WebSocket 转写 + REST 话术接口"""
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -345,11 +347,12 @@ def delete_transcription_task(task_id: int, db: Session = Depends(get_db)):
 @rest_router.get("/{session_id:int}/segments", response_model=list[TranscriptSegmentOut])
 def list_transcript_segments(
     session_id: int,
-    limit: int = Query(200, ge=1, le=500),
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
     db: Session = Depends(get_db),
 ):
     """获取某场直播的话术分段列表"""
-    segments = (
+    query = (
         db.query(TranscriptSegment)
         .filter(
             TranscriptSegment.session_id == session_id,
@@ -358,10 +361,12 @@ def list_transcript_segments(
                 TranscriptSegment.segment_type != "asr_offline_pending",
             ),
         )
-        .order_by(TranscriptSegment.segment_start.asc())
-        .limit(limit)
-        .all()
+        .order_by(TranscriptSegment.segment_start.asc(), TranscriptSegment.id.asc())
     )
+    # 默认第一页保持原查询链，既兼容内部直接调用，也避免生成无意义 OFFSET 0。
+    if offset:
+        query = query.offset(offset)
+    segments = query.limit(limit).all()
     return [
         {
             "id": s.id,
