@@ -41,6 +41,7 @@ class M3u8Pipe:
         headers: Optional[dict] = None,
         start_seconds: float = 0,
         duration_seconds: float | None = None,
+        seek_mode: str = "fast",
     ):
         self.m3u8_url = m3u8_url
         self.headers = headers or {}
@@ -48,6 +49,10 @@ class M3u8Pipe:
         self.duration_seconds = (
             max(0.1, float(duration_seconds)) if duration_seconds is not None else None
         )
+        # fast: -ss 放在 -i 前（快速跳转，HLS 末尾段可能越界读到 0 帧）；
+        # slow: -ss 放在 -i 后（精确解码定位，末尾段可靠但更慢），
+        # 只在离线分片快速定位失败时兜底使用，正常分片不增加开销。
+        self.seek_mode = seek_mode if seek_mode in ("fast", "slow") else "fast"
         self._process: Optional[asyncio.subprocess.Process] = None
         # 保存 ffmpeg 最近一次 stderr。Worker 会把它拼到任务失败原因里，
         # 这样前端任务抽屉能直接看到 404、403、流失效等真实原因。
@@ -62,13 +67,18 @@ class M3u8Pipe:
             if key.lower() in ("referer", "user-agent", "origin"):
                 cmd.extend(["-headers", f"{key}: {val}\r\n"])
 
-        if self.start_seconds > 0:
+        if self.start_seconds > 0 and self.seek_mode == "fast":
             cmd.extend(["-ss", f"{self.start_seconds:.3f}"])
 
         cmd.extend([
             "-protocol_whitelist", "https,http,tcp,tls,crypto,file,pipe",
             "-i", self.m3u8_url,
         ])
+        if self.start_seconds > 0 and self.seek_mode == "slow":
+            # slow-seek：-ss 必须在 -i 之后、-t 之前，ffmpeg 先解析到目标时间再输出。
+            # 实测 HLS 回放末尾用 fast-seek 会直接跳到边界之外（0 音频帧），
+            # slow-seek 能可靠读到回放末尾剩余的真实音频。
+            cmd.extend(["-ss", f"{self.start_seconds:.3f}"])
         if self.duration_seconds is not None:
             cmd.extend(["-t", f"{self.duration_seconds:.3f}"])
         cmd.extend([

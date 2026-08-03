@@ -1,6 +1,8 @@
 """直播中与下播后必须走不同的 FunASR 协议。"""
 
+import asyncio
 from datetime import datetime
+from types import SimpleNamespace
 
 from app.api.v1.ws import delete_transcription_task, list_transcript_segments
 from app.models.asr_audio_chunks import AsrAudioChunk
@@ -112,16 +114,79 @@ def test_realtime_stream_end_failure_handoffs_after_live_ends():
         "ended",
         "真实流未输出任何音频帧；ffmpeg 错误：HTTP error 404 Not Found",
     )
+    assert should_handoff_realtime_failure(
+        "realtime",
+        "ended",
+        "直播音频缓存不完整：请求 120.0 秒，实际仅读取 52.4 秒",
+    )
     assert not should_handoff_realtime_failure(
         "realtime",
         "live",
         "真实流未输出任何音频帧",
     )
     assert not should_handoff_realtime_failure(
+        "realtime",
+        "live",
+        "直播音频缓存不完整：请求 120.0 秒，实际仅读取 52.4 秒",
+    )
+    assert not should_handoff_realtime_failure(
         "offline",
         "ended",
         "HTTP error 404 Not Found",
     )
+    assert not should_handoff_realtime_failure(
+        "offline",
+        "ended",
+        "直播音频缓存不完整：请求 120.0 秒，实际仅读取 52.4 秒",
+    )
+
+
+def test_classify_chunk_failure_out_of_bounds_skips(monkeypatch):
+    """分片起点超出回放真实时长时应安全跳过，而不是刷新地址。"""
+
+    async def fake_probe(_url, _headers, probe_seconds=3.0, timeout=12.0, start_seconds=0.0):
+        return {"alive": True, "error": None, "duration_seconds": 2883.61}
+
+    monkeypatch.setattr("workers.asr_worker.probe_stream_url", fake_probe)
+    chunk = SimpleNamespace(chunk_index=24, start_seconds=2884.0)
+    result = asyncio.run(
+        AsrWorker._classify_chunk_failure(
+            None, SimpleNamespace(id=59), chunk, "https://example.invalid/a.m3u8", {}
+        )
+    )
+    assert result == "skip"
+
+
+def test_classify_chunk_failure_slow_retry_when_seek_misses(monkeypatch):
+    """地址有效且起点在回放时长内但 fast-seek 读不到 → 用 slow-seek 兜底。"""
+
+    async def fake_probe(_url, _headers, probe_seconds=3.0, timeout=12.0, start_seconds=0.0):
+        return {"alive": True, "error": None, "duration_seconds": 2883.61}
+
+    monkeypatch.setattr("workers.asr_worker.probe_stream_url", fake_probe)
+    chunk = SimpleNamespace(chunk_index=24, start_seconds=2880.0)
+    result = asyncio.run(
+        AsrWorker._classify_chunk_failure(
+            None, SimpleNamespace(id=59), chunk, "https://example.invalid/a.m3u8", {}
+        )
+    )
+    assert result == "slow_retry"
+
+
+def test_classify_chunk_failure_refreshes_on_dead_stream(monkeypatch):
+    """地址真正失效（404）且时长未知时，保持原有刷新行为。"""
+
+    async def fake_probe(_url, _headers, probe_seconds=3.0, timeout=12.0, start_seconds=0.0):
+        return {"alive": False, "error": "流地址已失效（404 Not Found）", "duration_seconds": None}
+
+    monkeypatch.setattr("workers.asr_worker.probe_stream_url", fake_probe)
+    chunk = SimpleNamespace(chunk_index=24, start_seconds=0.0)
+    result = asyncio.run(
+        AsrWorker._classify_chunk_failure(
+            None, SimpleNamespace(id=59), chunk, "https://example.invalid/a.m3u8", {}
+        )
+    )
+    assert result == "refresh"
 
 
 def test_offline_chunk_stream_failure_refreshes_before_retry():

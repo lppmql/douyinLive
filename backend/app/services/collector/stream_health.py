@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
@@ -30,26 +31,31 @@ async def probe_stream_url(
     headers: Optional[dict] = None,
     probe_seconds: float = 3.0,
     timeout: float = 12.0,
+    start_seconds: float = 0.0,
 ) -> dict:
     """
     用 ffmpeg 快速探测 m3u8 流地址是否有效。
 
-    原理：让 ffmpeg 拉几秒流，输出到 /dev/null（不做转码），
-    看退出码和 stderr 判断流是否可访问。
+    原理：让 ffmpeg 从指定起点拉几秒流，输出到 /dev/null（不做转码），
+    看退出码和 stderr 判断流是否可访问，同时解析回放真实总时长。
 
     Args:
         stream_url: m3u8 流地址
         headers: 请求头（Referer/User-Agent 等）
         probe_seconds: 探测时长（秒），默认 3 秒
         timeout: 整体超时（秒），默认 12 秒
+        start_seconds: 从回放的第几秒开始探测，默认 0（流开头）。
+            分片失败时按分片起点探测，可以区分“地址有效但末尾定位读不到”
+            和“地址真正失效”，避免反复刷新同一个坏地址。
 
     Returns:
-        {"alive": bool, "error": str|None, "stderr_sample": str|None}
+        {"alive": bool, "error": str|None, "stderr_sample": str|None,
+         "duration_seconds": float|None}  # duration 为 ffmpeg 实测回放总时长
     """
     if not is_valid_stream_url(stream_url):
         return {"alive": False, "error": "流地址格式无效", "stderr_sample": None}
 
-    cmd = _build_ffprobe_command(stream_url, headers, probe_seconds)
+    cmd = _build_ffprobe_command(stream_url, headers, probe_seconds, start_seconds)
 
     try:
         process = await asyncio.wait_for(
@@ -71,12 +77,23 @@ async def probe_stream_url(
                 await process.wait()
             except Exception:
                 pass
-            return {"alive": True, "error": None, "stderr_sample": "探测超时，流可能仍然可用"}
+            return {
+                "alive": True,
+                "error": None,
+                "stderr_sample": "探测超时，流可能仍然可用",
+                "duration_seconds": None,
+            }
 
         stderr_text = stderr.decode(errors="ignore") if stderr else ""
+        duration_seconds = _parse_duration_seconds(stderr_text)
 
         if process.returncode == 0:
-            return {"alive": True, "error": None, "stderr_sample": stderr_text[:200]}
+            return {
+                "alive": True,
+                "error": None,
+                "stderr_sample": stderr_text[:200],
+                "duration_seconds": duration_seconds,
+            }
 
         # 常见的过期/失效错误关键词
         expired_keywords = [
@@ -99,28 +116,42 @@ async def probe_stream_url(
                     "alive": False,
                     "error": f"流地址已失效（{keyword.strip()}）",
                     "stderr_sample": stderr_text[:200],
+                    "duration_seconds": duration_seconds,
                 }
 
         return {
             "alive": False,
             "error": f"ffmpeg 退出码 {process.returncode}",
             "stderr_sample": stderr_text[:200],
+            "duration_seconds": duration_seconds,
         }
 
     except FileNotFoundError:
-        return {"alive": False, "error": "ffmpeg 未安装，无法探测流地址", "stderr_sample": None}
+        return {
+            "alive": False,
+            "error": "ffmpeg 未安装，无法探测流地址",
+            "stderr_sample": None,
+            "duration_seconds": None,
+        }
     except Exception as exc:
-        return {"alive": False, "error": f"探测异常: {exc}", "stderr_sample": None}
+        return {
+            "alive": False,
+            "error": f"探测异常: {exc}",
+            "stderr_sample": None,
+            "duration_seconds": None,
+        }
 
 
 def _build_ffprobe_command(
     stream_url: str,
     headers: Optional[dict],
     probe_seconds: float,
+    start_seconds: float = 0.0,
 ) -> list[str]:
-    """构建 ffmpeg 探测命令（拉指定秒数后立即退出，写入 /dev/null）。"""
+    """构建 ffmpeg 探测命令（从指定起点拉指定秒数，写入 /dev/null）。"""
     cmd = [
         "ffmpeg", "-y",
+        "-hide_banner",
         "-t", f"{probe_seconds:.1f}",
         "-rw_timeout", "10000000",       # 10 秒连接超时
         "-protocol_whitelist", "https,http,tcp,tls,crypto",
@@ -133,13 +164,36 @@ def _build_ffprobe_command(
         if safe_headers:
             cmd.extend(["-headers", "\r\n".join(safe_headers) + "\r\n"])
 
+    if start_seconds > 0:
+        # 与 ASR 分片拉流一致：在 -i 前做快速定位，探测该时间点是否还能读到音频。
+        cmd.extend(["-ss", f"{float(start_seconds):.3f}"])
+
     cmd.extend([
         "-i", stream_url,
         "-f", "null",                    # 输出到空设备（不存文件）
-        "-loglevel", "error",
+        # info 级别才能让 ffmpeg 打印 Duration，用于解析回放真实总时长；
+        # -hide_banner 已控制输出体积，超时机制防止异常流拖长探测。
+        "-loglevel", "info",
         "/dev/null",
     ])
     return cmd
+
+
+# ffmpeg 输出的 Duration 行示例：
+# Duration: 00:48:03.61, start: 0.049000, bitrate: 0 kb/s
+_DURATION_RE = re.compile(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)")
+
+
+def _parse_duration_seconds(stderr_text: str) -> Optional[float]:
+    """从 ffmpeg stderr 解析回放总时长（秒）；解析失败返回 None。"""
+    match = _DURATION_RE.search(stderr_text or "")
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    try:
+        return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except ValueError:
+        return None
 
 
 # ── 过期时间解析 ───────────────────────────────────────────────

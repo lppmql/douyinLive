@@ -3,6 +3,9 @@
 import asyncio
 from contextlib import asynccontextmanager
 
+import pytest
+
+from app.services.collector.stream_health import _parse_duration_seconds
 from app.services.collector.stream_collector import StreamCollector
 
 
@@ -27,6 +30,16 @@ def test_blob_and_non_media_requests_are_ignored():
     )
 
     assert selected is None
+
+
+def test_parse_duration_seconds_from_ffmpeg_stderr():
+    """从 ffmpeg Duration 行解析回放真实总时长（秒）。"""
+    assert _parse_duration_seconds(
+        "Duration: 00:48:03.61, start: 0.049000, bitrate: 0 kb/s"
+    ) == pytest.approx(2883.61)
+    assert _parse_duration_seconds("Duration: 01:00:00.00") == 3600.0
+    assert _parse_duration_seconds("no duration here") is None
+    assert _parse_duration_seconds("") is None
 
 
 class _FakePage:

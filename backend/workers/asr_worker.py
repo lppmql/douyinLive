@@ -118,7 +118,15 @@ def should_handoff_realtime_failure(
     message = (error_message or "").lower()
     return any(
         marker in message
-        for marker in ("未输出任何音频帧", "404", "流地址已失效", "直播音频缓存等待超时")
+        for marker in (
+            "未输出任何音频帧",
+            "404",
+            "流地址已失效",
+            "直播音频缓存等待超时",
+            # 直播收尾时缓存停止增长也会读不满 120 秒窗口，属于正常下播场景，
+            # 应转交离线终稿补齐而不是把整场实时任务标成失败。
+            "直播音频缓存不完整",
+        )
     )
 
 
@@ -656,7 +664,16 @@ class AsrWorker:
                         self._ensure_task_running(db, task)
                         if chunk.status in {TaskStatus.COMPLETED, TaskStatus.SKIPPED}:
                             continue
-                        while chunk.status != TaskStatus.COMPLETED and chunk.retry_count < chunk.max_retries:
+                        # slow_seek_retried 只作用于当前分片：fast-seek 定位失败后，
+                        # 下一次尝试改用精确定位，不让其它分片背负这个标志。
+                        slow_seek_retried = False
+                        while (
+                            chunk.status not in {
+                                TaskStatus.COMPLETED,
+                                TaskStatus.SKIPPED,
+                            }
+                            and chunk.retry_count < chunk.max_retries
+                        ):
                             self._ensure_task_running(db, task)
                             await self._wait_for_resource_slot(db, task)
                             try:
@@ -668,6 +685,9 @@ class AsrWorker:
                                     headers,
                                     is_live=is_live,
                                     audio_buffer=live_audio_buffer,
+                                    seek_mode=(
+                                        "slow" if slow_seek_retried else "fast"
+                                    ),
                                 )
                             finally:
                                 await self._release_resource_slot(task.id)
@@ -675,43 +695,86 @@ class AsrWorker:
                             if (
                                 chunk.status == TaskStatus.FAILED
                                 and chunk.retry_count < chunk.max_retries
-                                and should_refresh_stream_after_chunk_failure(
+                            ):
+                                # 离线分片读到 0 帧时先按分片起点分类，避免两种误判：
+                                # 1) 分片起点已超出回放真实时长 → 内容不存在，安全跳过；
+                                # 2) 地址有效但 fast-seek 在 HLS 末尾定位越界 → slow-seek 兜底。
+                                # 两者都不该反复刷新同一个其实没有问题的地址。
+                                if not is_live:
+                                    boundary = await self._classify_chunk_failure(
+                                        db,
+                                        task,
+                                        chunk,
+                                        m3u8_url,
+                                        headers,
+                                    )
+                                    if boundary == "skip":
+                                        chunk.status = TaskStatus.SKIPPED
+                                        chunk.error_message = (
+                                            "分片起点超出回放真实时长，该区间在回放中不存在，已安全跳过"
+                                        )
+                                        chunk.completed_at = datetime.utcnow()
+                                        db.commit()
+                                        publish_task_event(
+                                            "asr",
+                                            task,
+                                            "chunk_skipped_out_of_bounds",
+                                            {
+                                                "chunk_index": chunk.chunk_index,
+                                                "start_seconds": chunk.start_seconds,
+                                            },
+                                        )
+                                        continue
+                                    if boundary == "slow_retry" and not slow_seek_retried:
+                                        slow_seek_retried = True
+                                        chunk.status = TaskStatus.PENDING
+                                        chunk.error_message = (
+                                            "fast-seek 定位未读到音频，改用精确定位重试"
+                                        )
+                                        db.commit()
+                                        publish_task_event(
+                                            "asr",
+                                            task,
+                                            "chunk_slow_seek_retry",
+                                            {"chunk_index": chunk.chunk_index},
+                                        )
+                                        continue
+                                if should_refresh_stream_after_chunk_failure(
                                     task.task_type,
                                     chunk.error_message or "",
-                                )
-                            ):
-                                # 第一次失败后立即强制刷新，第二次尝试使用新地址。
-                                # 已完成分片保持不动，因此这里是真正的断点续传。
-                                previous_stream_id = task.stream_id
-                                refreshed_url, refreshed_source = await self._auto_refresh_stream_if_expired(
-                                    db,
-                                    task,
-                                    m3u8_url,
-                                    headers,
-                                    force_refresh=True,
-                                )
-                                if (
-                                    refreshed_url != m3u8_url
-                                    or (
-                                        refreshed_source is not None
-                                        and refreshed_source.id != previous_stream_id
-                                    )
                                 ):
-                                    m3u8_url = refreshed_url
-                                    if refreshed_source and refreshed_source.headers_json:
-                                        headers = dict(refreshed_source.headers_json)
-                                    chunk.source_url_hash = hashlib.sha256(
-                                        m3u8_url.encode("utf-8")
-                                    ).hexdigest()
-                                    chunk.status = TaskStatus.PENDING
-                                    chunk.error_message = "回放地址已自动刷新，正在从当前分片继续"
-                                    db.commit()
-                                    publish_task_event(
-                                        "asr",
+                                    # 第一次失败后立即强制刷新，第二次尝试使用新地址。
+                                    # 已完成分片保持不动，因此这里是真正的断点续传。
+                                    previous_stream_id = task.stream_id
+                                    refreshed_url, refreshed_source = await self._auto_refresh_stream_if_expired(
+                                        db,
                                         task,
-                                        "stream_refreshed_for_chunk_retry",
-                                        {"chunk_index": chunk.chunk_index},
+                                        m3u8_url,
+                                        headers,
+                                        force_refresh=True,
                                     )
+                                    if (
+                                        refreshed_url != m3u8_url
+                                        or (
+                                            refreshed_source is not None
+                                            and refreshed_source.id != previous_stream_id
+                                        )
+                                    ):
+                                        m3u8_url = refreshed_url
+                                        if refreshed_source and refreshed_source.headers_json:
+                                            headers = dict(refreshed_source.headers_json)
+                                        chunk.source_url_hash = hashlib.sha256(
+                                            m3u8_url.encode("utf-8")
+                                        ).hexdigest()
+                                        chunk.status = TaskStatus.PENDING
+                                        chunk.error_message = "回放地址已自动刷新，正在从当前分片继续"
+                                        db.commit()
+                                        publish_task_event(
+                                            "asr",
+                                            task,
+                                            "stream_refreshed_for_chunk_retry",
+                                            {"chunk_index": chunk.chunk_index},
+                                        )
                         if chunk.status not in {TaskStatus.COMPLETED, TaskStatus.SKIPPED}:
                             db.refresh(session)
                             if should_handoff_realtime_failure(
@@ -1269,6 +1332,51 @@ class AsrWorker:
         publish_task_event("asr", task, "chunks_created", {"chunk_count": len(chunks), "duration_seconds": duration})
         return chunks
 
+    @staticmethod
+    async def _classify_chunk_failure(
+        db,
+        task: AsrTask,
+        chunk: AsrAudioChunk,
+        m3u8_url: str,
+        headers: dict,
+    ) -> str:
+        """按分片起点探测回放，区分三种失败来源。
+
+        返回：
+            "skip"        — 分片起点已超出回放真实时长，该区间在回放中不存在；
+            "slow_retry"  — 地址可拉且起点在回放时长内，但 fast-seek 定位读不到
+                             音频（HLS 末尾定位越界），应改用 slow-seek 精确定位；
+            "refresh"     — 地址失效或无法判断，走原有刷新逻辑。
+        """
+        try:
+            health = await probe_stream_url(
+                m3u8_url,
+                headers,
+                probe_seconds=2.0,
+                start_seconds=float(chunk.start_seconds or 0),
+            )
+        except Exception as exc:
+            logger.warning(
+                "任务 %s 分片 %s 失败分类探测异常，按刷新处理: %s",
+                task.id,
+                chunk.chunk_index,
+                exc,
+            )
+            return "refresh"
+
+        duration_seconds = health.get("duration_seconds")
+        start = float(chunk.start_seconds or 0)
+        if duration_seconds is not None:
+            # 起点已落在回放末尾之外（含 0.5 秒容差）：这块内容在回放中不存在，
+            # 刷新地址也拿不到，直接跳过而不是继续消耗重试次数。
+            if start >= float(duration_seconds) - 0.5:
+                return "skip"
+        if health.get("alive"):
+            # 地址可拉且起点在回放时长内，但 fast-seek 读到 0 帧：
+            # 属于 HLS 末尾定位问题，用 slow-seek 精确定位兜底。
+            return "slow_retry"
+        return "refresh"
+
     async def _process_chunk(
         self,
         db,
@@ -1279,6 +1387,7 @@ class AsrWorker:
         *,
         is_live: bool = False,
         audio_buffer: LiveAudioBuffer | None = None,
+        seek_mode: str = "fast",
     ) -> None:
         """执行单个真实音频分片；失败只回滚本分片的话术。"""
         client = FunasrClient()
@@ -1310,6 +1419,8 @@ class AsrWorker:
                 # 已结束回放则按整场绝对时间定位。
                 start_seconds=0 if is_live else chunk.start_seconds,
                 duration_seconds=duration_seconds,
+                # 分片快速定位失败后由上层切换为 slow-seek 精确定位重试。
+                seek_mode=seek_mode,
             )
         heartbeat_task: asyncio.Task | None = None
         try:

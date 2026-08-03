@@ -230,6 +230,33 @@ def test_m3u8_pipe_adds_seek_and_duration_for_offline_chunk():
     assert "https://example.invalid/real-playback.m3u8" in command
 
 
+def test_m3u8_pipe_slow_seek_places_ss_after_input():
+    """slow-seek 必须把 -ss 放在 -i 之后，才能精确读到 HLS 回放末尾音频。"""
+    pipe = M3u8Pipe(
+        "https://example.invalid/real-playback.m3u8",
+        {"Referer": "https://example.invalid/live"},
+        start_seconds=300,
+        duration_seconds=120,
+        seek_mode="slow",
+    )
+    command = pipe._build_cmd()
+
+    assert command.index("-ss") > command.index("-i")
+    assert command[command.index("-ss") + 1] == "300.000"
+
+
+def test_m3u8_pipe_default_fast_seek_places_ss_before_input():
+    """默认 fast-seek 保持 -ss 在 -i 前，正常分片不改变原有定位方式。"""
+    pipe = M3u8Pipe(
+        "https://example.invalid/real-playback.m3u8",
+        start_seconds=300,
+        duration_seconds=120,
+    )
+    command = pipe._build_cmd()
+
+    assert command.index("-ss") < command.index("-i")
+
+
 def test_chunk_failure_message_includes_ffmpeg_stream_error():
     """空音频失败要把 ffmpeg 的真实 404/403 原因带到任务抽屉。"""
     pipe = SimpleNamespace(
