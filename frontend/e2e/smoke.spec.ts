@@ -1,9 +1,9 @@
 /**
  * P0-05：核心页面 Playwright 冒烟测试
  *
- * 覆盖 10 个核心页面的基本可用性检查：
+ * 覆盖 11 个核心页面的基本可用性检查：
  *   登录 → 首页 → DataEase → 采集 → 场次列表 → 场次详情
- *   → 话术 → AI复盘 → 知识库 → 主播排班 → 用户管理
+ *   → 话术 → AI复盘 → AI自动剪辑 → 知识库 → 主播排班 → 用户管理
  *
  * 每页检查：
  *   1. 页面主标题存在（无白屏）
@@ -177,6 +177,35 @@ test.describe('核心页面冒烟', () => {
 
     // 页面标题存在
     await expect(page.locator('text=AI 复盘').first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test('AI 自动剪辑', async ({ page }) => {
+    await page.goto('/clip');
+    await page.waitForLoadState('networkidle');
+    await checkNotBlank(page);
+
+    // 页面标题存在
+    await expect(page.locator('text=AI自动剪辑').first()).toBeVisible({ timeout: 5000 });
+
+    // 场次下拉与生成按钮存在（naive-ui NSelect 的 placeholder 是自绘文本，非 input 属性）
+    await expect(page.getByRole('button', { name: '生成/重新生成 5 条成片' })).toBeVisible({ timeout: 5000 });
+    const sessionSelect = page.locator('.clip-page__session-select');
+    await expect(sessionSelect).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('搜索主播或场次')).toBeVisible({ timeout: 5000 });
+
+    // 选中第一个候选场次后应加载出成片区（卡片或空提示）
+    const selector = page.locator('.clip-page__session-select');
+    await selector.click();
+    const firstOption = page.locator('.clip-page__option, [class*="n-base-select-option"]').first();
+    if (await firstOption.isVisible().catch(() => false)) {
+      await firstOption.click();
+      await page.waitForTimeout(2000);
+      await checkNotBlank(page);
+      const hasClipsOrEmpty = await page
+        .locator('.clip-card, .n-empty, [class*="n-alert"]')
+        .count();
+      expect(hasClipsOrEmpty, '应显示成片卡片或提示').toBeGreaterThan(0);
+    }
   });
 
   test('知识库', async ({ page }) => {

@@ -23,10 +23,11 @@
 - 成片预览与卡片改为竖屏 9:16 比例展示（预览高度撑开居中、卡片封面 aspect-ratio 9/16），卡片网格改用 CSS Grid 大屏固定 5 列一排（1280/1024/720 断点自动降 4/3/2 列）。
 
 ### Verified
-- 真实场次 #2130（81 分钟回放，3.7GB）全链路验收：AI 选段 5/5 通过校验（主题：开店预算、品牌避坑、下沉市场、一线vs二线、避坑指南），5 条成片全部渲染成功（1080x1920 H.264+AAC，每条 10-12MB，含字幕与封面），API 与文件服务 200。
-- 媒体链路复测：http 协议下 `getUserInfo` 返回的媒体 Cookie 不再带 `Secure`，用该 Cookie 播放成片视频返回 200（完整 11MB）；候选场次接口返回真实主播与话术统计。
+- 验收人：项目运营/开发者（2026-08-07，本机环境）。真实场次 #2130（81 分钟回放，3.7GB）全链路验收：AI 选段 5/5 通过校验（主题：开店预算、品牌避坑、下沉市场、一线vs二线、避坑指南），5 条成片全部渲染成功（1080x1920 H.264+AAC，每条 10-12MB，含字幕与封面），API 与文件服务 200。选段调用 Trace ID：`4db7e7de3a7b47678edd54fae38d9339`（success）。
+- 失败项与恢复：选段调试期两次 DeepSeek 调用失败（`07b51803c1434f7a9d26bbfd49261a5a`、`e2304d5c91d74ada9260b2d664f8890f`，推理模型 max_tokens 不足导致输出为空），提高 max_tokens 并改为行号契约后恢复，未影响最终验收。
+- 媒体链路复测：http 协议下 `getUserInfo` 返回的媒体 Cookie 不再带 `Secure`，用该 Cookie 播放成片视频返回 200（完整 11MB）；候选场次接口返回真实主播与话术统计；9527 dev server 实测 `/proxy-default` 前缀返回 `video/mp4`（裸 `/api` 返回 SPA 回退页）。
 - 后端 385 项测试（新增 23 项剪辑测试）与 Ruff 检查通过；前端 typecheck、oxlint、eslint（0 错误）、Vite build 通过；`make doctor` 0 失败、`make check` 全绿。
-- 新增 ADR 0038（直播回放 AI 自动剪辑架构决策）。
+- 新增 ADR 0038（直播回放 AI 自动剪辑架构决策），数据字典同步 clip_clips 表（36 业务表/55 对象）。
 
 ### Notes
 - 每场自动任务消耗 1 次 DeepSeek 选段调用（5 方案一起出）+ 回放存储空间（每场约 1-4GB 在 `data/videos/`，已被 .gitignore 覆盖）；可在 `.env` 关闭 `CLIP_AUTO_GENERATE` 改手动触发。
