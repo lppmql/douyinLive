@@ -141,6 +141,15 @@ onMounted(load);
           <template #icon><SvgIcon icon="mdi:arrow-left" /></template>
           返回列表
         </NButton>
+        <NButton
+          size="small"
+          type="primary"
+          ghost
+          @click="router.push({ name: 'clip', query: { sessionId: id } })"
+        >
+          <template #icon><SvgIcon icon="mdi:movie-open" /></template>
+          AI 剪辑
+        </NButton>
         <AnchorIdentity
           v-if="session"
           class="max-w-240px"

@@ -1,4 +1,5 @@
 import { h, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import type { SelectOption } from 'naive-ui';
 import { useMessage } from 'naive-ui';
 import AnchorIdentity from '@/components/business/anchor-identity.vue';
@@ -57,6 +58,7 @@ export function transcriptStatusText(status: string): string {
 }
 
 export function useClipData(message: ReturnType<typeof useMessage>) {
+  const route = useRoute();
   const loading = ref(false);
   const overview = ref<Api.Douyin.ClipSessionOverview | null>(null);
   const sessionOptions = ref<SessionSelectOption[]>([]);
@@ -281,6 +283,11 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
   onMounted(() => {
     mountedFlag = true;
     void loadSessionOptions();
+    // 支持从场次详情页「AI 剪辑」入口直达：/clip?sessionId=N
+    const routeSessionId = Number(route.query.sessionId);
+    if (Number.isInteger(routeSessionId) && routeSessionId > 0) {
+      void loadOverview(routeSessionId);
+    }
   });
 
   onActivated(() => {

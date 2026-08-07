@@ -208,6 +208,26 @@ test.describe('核心页面冒烟', () => {
     }
   });
 
+  test('AI 自动剪辑 - sessionId 直达（场次详情入口）', async ({ page }) => {
+    // 取一个真实候选场次
+    const response = await page.request.get(`${BACKEND}/api/v1/clip/candidate-sessions`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+      params: { limit: 1 }
+    });
+    expect(response.ok(), '候选场次读取失败').toBeTruthy();
+    const items = await response.json();
+    expect(items.length, '至少有一个候选场次').toBeGreaterThan(0);
+
+    // 带 sessionId 直达：应自动加载该场次（显示场次信息或成片区）
+    await page.goto(`/clip?sessionId=${items[0].session_id}`);
+    await page.waitForLoadState('networkidle');
+    await checkNotBlank(page);
+    const hasSessionContent = await page
+      .locator('.clip-page__session-info, .clip-card, .n-empty')
+      .count();
+    expect(hasSessionContent, '应显示场次信息或成片区').toBeGreaterThan(0);
+  });
+
   test('知识库', async ({ page }) => {
     await page.goto('/knowledge');
     await page.waitForLoadState('networkidle');
