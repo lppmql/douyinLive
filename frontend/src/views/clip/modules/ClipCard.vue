@@ -42,14 +42,15 @@ const durationText = computed(() => {
   >
     <div class="clip-card__cover" role="button" tabindex="0" @click="emit('preview', clip)" @keydown.enter="emit('preview', clip)">
       <NImage
+        v-if="clip.cover_path"
         :src="clipCoverUrl(clip.id)"
-        :fallback-src="clipCoverUrl(clip.id)"
         object-fit="cover"
         width="100%"
         height="100%"
         :show-toolbar="false"
         preview-disabled
       />
+      <div v-else class="clip-card__cover-placeholder">暂未生成封面</div>
       <div class="clip-card__duration">{{ durationText }}</div>
       <div class="clip-card__order">#{{ clip.clip_order }}</div>
     </div>
@@ -122,6 +123,17 @@ const durationText = computed(() => {
   overflow: hidden;
   border-radius: 6px;
   background-color: #000;
+}
+
+.clip-card__cover-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 12px;
+  background: linear-gradient(160deg, #2c3e50 0%, #1a1a2e 100%);
 }
 
 .clip-card__duration {

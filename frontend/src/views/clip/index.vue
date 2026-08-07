@@ -15,6 +15,7 @@ import {
   useMessage
 } from 'naive-ui';
 import { useClipData, clipVideoUrl } from './composables/useClipData';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import ClipCard from './modules/ClipCard.vue';
 
 defineOptions({ name: 'Clip' });
@@ -104,7 +105,7 @@ function fmtDateTime(val: string | null): string {
       <NSelect
         v-model:value="selectedSessionId"
         class="clip-page__session-select"
-        placeholder="搜索主播、日期或场次"
+        placeholder="搜索主播或场次"
         filterable
         clearable
         :options="sessionOptions"
@@ -137,16 +138,25 @@ function fmtDateTime(val: string | null): string {
 
     <!-- 场次信息 -->
     <div v-if="overview" class="clip-page__session-info">
-      <NText strong>{{ overview.session_title || '未知场次' }}</NText>
-      <NSpace :size="12">
-        <NTag size="small" :bordered="false" type="info">{{ overview.anchor_name || '未知主播' }}</NTag>
-        <NTag size="small" :bordered="false" type="default">
-          {{ fmtDateTime(overview.live_start_time) }}
-        </NTag>
-        <NTag size="small" :bordered="false" type="default">
-          时长 {{ Math.floor((overview.live_duration_seconds || 0) / 60) }} 分钟
-        </NTag>
-      </NSpace>
+      <AnchorIdentity
+        :session-id="overview.session_id"
+        :avatar-url="overview.anchor_avatar_url"
+        :name="overview.anchor_name || '未知主播'"
+        :nickname="overview.anchor_nickname"
+        :douyin-id="overview.douyin_id"
+        :size="32"
+      />
+      <div class="clip-page__session-info-text">
+        <NText strong>{{ overview.session_title || '未知场次' }}</NText>
+        <NSpace :size="12">
+          <NTag size="small" :bordered="false" type="default">
+            {{ fmtDateTime(overview.live_start_time) }}
+          </NTag>
+          <NTag size="small" :bordered="false" type="default">
+            时长 {{ Math.floor((overview.live_duration_seconds || 0) / 60) }} 分钟
+          </NTag>
+        </NSpace>
+      </div>
     </div>
 
     <!-- 成片网格 -->
@@ -273,26 +283,6 @@ function fmtDateTime(val: string | null): string {
   width: min(480px, 100%);
 }
 
-.clip-page__option {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px 0;
-  max-width: 460px;
-}
-
-.clip-page__option-main {
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.clip-page__option-sub {
-  font-size: 12px;
-  color: rgba(128, 128, 128, 0.9);
-}
-
 .clip-page__video-error {
   margin-bottom: 8px;
 }
@@ -312,6 +302,12 @@ function fmtDateTime(val: string | null): string {
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+}
+
+.clip-page__session-info-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .clip-page__grid-area {
@@ -363,6 +359,7 @@ function fmtDateTime(val: string | null): string {
   height: 100%;
   aspect-ratio: 9 / 16;
   max-width: 100%;
+  object-fit: contain; /* 极窄视口下防止纵向拉伸变形 */
   background: #000;
 }
 

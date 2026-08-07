@@ -1268,6 +1268,9 @@ declare namespace Api {
       session_id: number;
       session_title: string | null;
       anchor_name: string | null;
+      anchor_nickname: string | null;
+      anchor_avatar_url: string | null;
+      douyin_id: string | null;
       live_start_time: string | null;
       live_duration_seconds: number | null;
       detail_collection_status: string | null;

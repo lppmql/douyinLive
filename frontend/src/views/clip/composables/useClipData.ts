@@ -84,9 +84,10 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     const transcript = `${transcriptStatusText(raw?.transcript_status || 'none')}（${raw?.transcript_completed_count || 0}/${raw?.transcript_segment_count || 0}段）`;
     const clips = raw?.clip_available_count ? `已有${raw.clip_available_count}条成片` : '无成片';
     const start = raw?.live_start_time ? new Date(raw.live_start_time) : null;
-    const timeText = start
-      ? `${start.getMonth() + 1}/${start.getDate()} ${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`
-      : '时间未知';
+    const timeText =
+      start && !Number.isNaN(start.getTime())
+        ? `${start.getMonth() + 1}/${start.getDate()} ${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`
+        : '时间未知';
     const metaLabel = `${timeText} · ${transcript} · ${clips}`;
     return h('div', { class: 'flex min-w-0 items-center justify-between gap-12px py-2px' }, [
       h(AnchorIdentity, {
