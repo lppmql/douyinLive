@@ -337,6 +337,91 @@ class TestClipApi:
         )
         assert resp.status_code == 404
 
+    def test_candidate_sessions_returns_aggregates(
+        self, client: TestClient, db, auth_headers
+    ):
+        """候选场次列表：只返回已结束+详情完整的场次，并带话术/成片统计。"""
+        session = _seed_session(db)  # ended + detail complete
+        db.add_all(
+            [
+                TranscriptSegment(
+                    session_id=session.id,
+                    segment_start=100,
+                    segment_end=110,
+                    text_content="第一句",
+                    asr_status="completed",
+                    segment_type="asr_offline",
+                ),
+                TranscriptSegment(
+                    session_id=session.id,
+                    segment_start=200,
+                    segment_end=210,
+                    text_content="第二句",
+                    asr_status="completed",
+                    segment_type="asr_offline",
+                ),
+                TranscriptSegment(
+                    session_id=session.id,
+                    segment_start=300,
+                    segment_end=310,
+                    text_content="第三句",
+                    asr_status="pending",
+                    segment_type="asr_offline",
+                ),
+            ]
+        )
+        db.add(
+            ClipClip(
+                session_id=session.id,
+                clip_order=1,
+                status="draft",
+                title="t",
+                description="d",
+                segments_json=[{"start": 1.0, "end": 5.0, "text": "x"}],
+                video_path="2130/x.mp4",
+            )
+        )
+        db.add(
+            ClipClip(
+                session_id=session.id,
+                clip_order=2,
+                status="discarded",
+                title="t",
+                description="d",
+                segments_json=[{"start": 1.0, "end": 5.0, "text": "x"}],
+            )
+        )
+        # 未结束的场次不应出现在候选中
+        room = LiveRoom(account_name="测试账号", anchor_name="主播B")
+        db.add(room)
+        db.flush()
+        db.add(
+            LiveSession(
+                room_id=room.id,
+                session_title="直播中场次",
+                anchor_name="主播B",
+                live_status="live",
+                detail_collection_status="complete",
+            )
+        )
+        db.commit()
+
+        resp = client.get("/api/v1/clip/candidate-sessions", headers=auth_headers)
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        item = items[0]
+        assert item["session_id"] == session.id
+        assert item["anchor_name"] == "测试主播"
+        # 3 段话术里 2 段完成 → partial
+        assert item["transcript_segment_count"] == 3
+        assert item["transcript_completed_count"] == 2
+        assert item["transcript_status"] == "partial"
+        # 2 条成片记录里只有 1 条可用（draft）
+        assert item["clip_count"] == 2
+        assert item["clip_available_count"] == 1
+        assert item["clip_status"] == "has_clips"
+
 
 def _seed_session(db) -> LiveSession:
     """插入最小可用的直播间 + 场次种子数据。"""

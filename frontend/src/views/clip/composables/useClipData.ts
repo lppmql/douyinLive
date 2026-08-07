@@ -120,7 +120,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
         raw: item,
         render: (option: SelectOption) => renderSessionOption(option as SessionSelectOption)
       }));
-    } catch (error) {
+    } catch {
       // 新接口不可用（后端未升级）时，回退到项目公共的场次列表接口，保证下拉始终有内容
       await loadSessionOptionsFallback();
     }

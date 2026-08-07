@@ -11,18 +11,24 @@
 - 选段采用"行号引用"契约（DeepSeek 只输出话术行号，程序映射回真实时间戳），实测消除推理模型偏移/编造时间戳的问题；单方案 1-3 段、总时长 30-90 秒、重叠拒绝，非法方案自动丢弃。
 - 回放素材按需下载：从 `stream_sources` 流拷贝整场回放到 `data/videos/<session_id>/replay.mp4`（幂等复用），流地址过期时用已保存 Cookie 自动刷新后重试。
 - 剪辑管线：ffmpeg 逐片段精确切割 + 竖屏转换 + 字幕烧录（一次重编码）→ concat 无损拼接 → 首帧封面；字幕烧录使用项目内 `.runtime/ffmpeg/ffmpeg`（evermeet.cx 静态版 9.0，含 libass），可用 `CLIP_FFMPEG_BIN` 覆盖。
-- 新增 `clip_clips` 成片表与 12 个 `/api/v1/clip/*` 接口（任务列表/触发/重剪/确认/丢弃/视频/封面/字幕/统计）；视频与封面纳入媒体 Cookie 白名单，浏览器原生 `<video>` 可直播放。
+- 新增 `clip_clips` 成片表与 13 个 `/api/v1/clip/*` 接口（任务列表/触发/重剪/确认/丢弃/视频/封面/字幕/统计/候选场次）；视频与封面纳入媒体 Cookie 白名单，浏览器原生 `<video>` 可直播放。
 - 自动触发：离线终稿后处理链完成后自动排队剪辑（`CLIP_AUTO_GENERATE` 开关，默认开）；页面支持整场重新生成与单条重剪（可填选题方向）。
 - 成片只生成内容不自动发布：确认后由运营复制标题/文案/话题人工发布到抖音，规避开放平台授权与风控成本。
 
+### Fixed
+- 修复成片页面视频无法播放：媒体 Cookie 的 `secure` 属性原为 `not DEBUG`，`DEBUG=false` 时通过 http 访问页面浏览器拒绝保存/发送该 Cookie，视频请求恒 401。改为 `secure` 跟随请求协议（https 生产仍安全标记，http 开发环境可正常种发），头像/回放等全部媒体链路一并受益；打开预览前自动续期 30 分钟媒体 Cookie，播放失败时给出明确提示。
+- 修复剪辑页面场次下拉空白/信息不足：新增 `GET /api/v1/clip/candidate-sessions` 聚合候选场次（主播、时间、话术转写完成度 x/y 段、已有成片数）；新接口不可用（后端未升级）时自动回退项目公共场次列表接口，保证下拉始终有内容。
+
 ### Verified
 - 真实场次 #2130（81 分钟回放，3.7GB）全链路验收：AI 选段 5/5 通过校验（主题：开店预算、品牌避坑、下沉市场、一线vs二线、避坑指南），5 条成片全部渲染成功（1080x1920 H.264+AAC，每条 10-12MB，含字幕与封面），API 与文件服务 200。
-- 后端 383 项测试（新增 21 项剪辑测试）与 Ruff 检查通过；前端 typecheck、oxlint、eslint（0 错误）、Vite build 通过。
+- 媒体链路复测：http 协议下 `getUserInfo` 返回的媒体 Cookie 不再带 `Secure`，用该 Cookie 播放成片视频返回 200（完整 11MB）；候选场次接口返回真实主播与话术统计。
+- 后端 385 项测试（新增 23 项剪辑测试）与 Ruff 检查通过；前端 typecheck、oxlint、eslint（0 错误）、Vite build 通过；`make doctor` 0 失败、`make check` 全绿。
 - 新增 ADR 0038（直播回放 AI 自动剪辑架构决策）。
 
 ### Notes
 - 每场自动任务消耗 1 次 DeepSeek 选段调用（5 方案一起出）+ 回放存储空间（每场约 1-4GB 在 `data/videos/`，已被 .gitignore 覆盖）；可在 `.env` 关闭 `CLIP_AUTO_GENERATE` 改手动触发。
-- 依赖变更：需要带 libass 的 ffmpeg 做字幕烧录（系统 ffmpeg 8.1.2 无 libass，项目内静态版已就位）。
+- 依赖变更：需要带 libass 的 ffmpeg 做字幕烧录（系统 ffmpeg 8.1.2 无 libass，项目内静态版已就位）；换机器部署见 `docs/开发.md` 说明。
+- 候选场次接口与前端回退逻辑兼容新旧后端；页面重启后端后下拉展示完整富信息。
 
 ---
 

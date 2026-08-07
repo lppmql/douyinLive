@@ -21,7 +21,7 @@
 - Docker Desktop
 - Python 3.10+
 - Node.js 20+ 与 pnpm
-- ffmpeg
+- ffmpeg（AI 自动剪辑字幕烧录需带 libass 的版本，见 `docs/开发.md`）
 
 ```bash
 docker --version && python3 --version && node --version && pnpm --version && ffmpeg -version
