@@ -158,8 +158,8 @@ function fmtDateTime(val: string | null): string {
           v-if="!loading && (!overview || overview.clips.length === 0)"
           description="该场次还没有成片，点击上方按钮生成；或换一场直播试试"
         />
-        <NGrid v-else :cols="1" :x-gap="16" :y-gap="16" responsive="screen" item-responsive>
-          <NGi v-for="clip in overview?.clips || []" :key="clip.id" span="24 s:12 m:8 l:6">
+        <NGrid v-else cols="1 s:2 m:3 l:5" :x-gap="12" :y-gap="16">
+          <NGi v-for="clip in overview?.clips || []" :key="clip.id">
             <ClipCard
               :clip="clip"
               @preview="openPreview"
