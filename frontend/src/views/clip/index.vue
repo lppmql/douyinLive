@@ -177,14 +177,21 @@ function fmtDateTime(val: string | null): string {
       :show="previewVisible"
       preset="card"
       class="clip-page__preview"
-      :style="{ width: 'min(720px, 92vw)' }"
+      :style="{ width: 'min(560px, 92vw)' }"
       :title="previewClip?.title || '成片预览'"
       @close="closePreview"
       @update:show="show => !show && closePreview()"
     >
       <div v-if="previewClip" class="clip-page__preview-body">
         <NAlert v-if="videoError" type="warning" class="clip-page__video-error">{{ videoError }}</NAlert>
-        <video :src="clipVideoUrl(previewClip.id)" controls class="clip-page__video" @error="onVideoError" />
+        <div class="clip-page__video-wrap">
+          <video
+            :src="clipVideoUrl(previewClip.id)"
+            controls
+            class="clip-page__video"
+            @error="onVideoError"
+          />
+        </div>
         <div class="clip-page__publish">
           <div class="clip-page__publish-row">
             <NText strong>标题</NText>
@@ -319,10 +326,20 @@ function fmtDateTime(val: string | null): string {
   gap: 16px;
 }
 
-.clip-page__video {
-  width: 100%;
-  max-height: 420px;
+.clip-page__video-wrap {
+  /* 竖屏 9:16 预览：固定高度 + 视频按比例居中（左右黑边），不拉伸变形 */
+  height: min(52vh, 460px);
+  background: #000;
   border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.clip-page__video {
+  height: 100%;
+  aspect-ratio: 9 / 16;
+  max-width: 100%;
   background: #000;
 }
 
