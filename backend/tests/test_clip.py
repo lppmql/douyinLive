@@ -337,6 +337,33 @@ class TestClipApi:
         )
         assert resp.status_code == 404
 
+    def test_regenerate_validates_order_and_session(
+        self, client: TestClient, db, auth_headers
+    ):
+        """重剪参数校验：order 越界 400；场次不存在 404；该场无对应成片 404。"""
+        session = _seed_session(db)
+
+        # clip_order 越界
+        resp = client.post(
+            f"/api/v1/clip/sessions/{session.id}/clips/9/regenerate",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400
+
+        # 场次不存在
+        resp = client.post(
+            "/api/v1/clip/sessions/999999/clips/1/regenerate",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404
+
+        # 该场次还没有成片记录
+        resp = client.post(
+            f"/api/v1/clip/sessions/{session.id}/clips/1/regenerate",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404
+
     def test_candidate_sessions_returns_aggregates(
         self, client: TestClient, db, auth_headers
     ):
