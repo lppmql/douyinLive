@@ -106,10 +106,11 @@ function fmtDateTime(val: string | null): string {
       <NSelect
         v-model:value="selectedSessionId"
         class="clip-page__session-select"
-        placeholder="选择一场已结束的直播（有完整话术）"
+        placeholder="搜索主播、日期或场次"
         filterable
         clearable
         :options="sessionOptions"
+        :render-label="clipData.renderSessionLabel"
         :loading="loading"
         @update:value="value => clipData.loadOverview(value as number)"
       />

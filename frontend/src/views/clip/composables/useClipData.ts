@@ -1,6 +1,7 @@
 import { h, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
 import type { SelectOption } from 'naive-ui';
 import { useMessage } from 'naive-ui';
+import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import { fetchGetUserInfo } from '@/service/api/auth';
 import {
   approveClip,
@@ -16,8 +17,13 @@ import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
 /** 剪辑任务运行中的状态集合，用于驱动轮询 */
 const RUNNING_STATUSES = new Set(['pending', 'running', 'queued', 'processing']);
 
-/** 下拉选项：附带候选场次原始信息供富信息渲染 */
+/** 下拉选项：与主播话术工作台同款结构（主播身份字段 + 富信息 raw） */
 export interface SessionSelectOption extends SelectOption {
+  sessionId: number;
+  anchorName: string;
+  anchorNickname: string | null;
+  douyinId: string | null;
+  avatarUrl: string | null;
   raw?: Api.Douyin.ClipCandidateSession;
 }
 
@@ -62,26 +68,33 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     }
   }
 
-  /** 下拉选项富信息渲染：主播、标题、时间、话术转写、成片情况 */
-  function renderSessionOption(option: SessionSelectOption) {
-    const raw = option.raw;
+  /** 下拉选项渲染（与主播话术工作台同款公共模式：主播头像 + 元信息） */
+  function renderSessionLabel(option: SelectOption) {
+    const sessionOption = option as SessionSelectOption;
+    const raw = sessionOption.raw;
     const transcript = `${transcriptStatusText(raw?.transcript_status || 'none')}（${raw?.transcript_completed_count || 0}/${raw?.transcript_segment_count || 0}段）`;
     const clips = raw?.clip_available_count ? `已有${raw.clip_available_count}条成片` : '无成片';
     const start = raw?.live_start_time ? new Date(raw.live_start_time) : null;
     const timeText = start
       ? `${start.getMonth() + 1}/${start.getDate()} ${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`
-      : '-';
-    return h('div', { class: 'clip-page__option' }, [
-      h(
-        'div',
-        { class: 'clip-page__option-main' },
-        `#${raw?.session_id} ${raw?.anchor_name || ''} ${raw?.session_title || ''}`
-      ),
-      h('div', { class: 'clip-page__option-sub' }, `${timeText} · ${transcript} · ${clips}`)
+      : '时间未知';
+    const metaLabel = `${timeText} · ${transcript} · ${clips}`;
+    return h('div', { class: 'flex min-w-0 items-center justify-between gap-12px py-2px' }, [
+      h(AnchorIdentity, {
+        class: 'min-w-0 max-w-200px flex-1',
+        sessionId: sessionOption.sessionId,
+        avatarUrl: sessionOption.avatarUrl,
+        name: sessionOption.anchorName,
+        nickname: sessionOption.anchorNickname,
+        douyinId: sessionOption.douyinId,
+        size: 28,
+        dense: true
+      }),
+      h('span', { class: 'shrink-0 text-11px text-gray-400' }, metaLabel)
     ]);
   }
 
-  /** 回退数据源：项目公共场次列表接口（主播/标题/时间/详情状态，无话术统计） */
+  /** 回退数据源：项目公共场次列表接口（主播/标题/时间，无话术统计） */
   async function loadSessionOptionsFallback() {
     try {
       const { data } = await fetchLiveSessionPage({ current: 1, size: 50 });
@@ -91,10 +104,18 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
       sessionOptions.value = records.map(item => ({
         label: `#${item.id} ${item.anchor_name || item.anchor_nickname || ''} ${item.session_title || ''}`,
         value: item.id,
+        sessionId: item.id,
+        anchorName: item.anchor_name || item.anchor_nickname || '未知主播',
+        anchorNickname: item.anchor_nickname,
+        douyinId: item.douyin_id,
+        avatarUrl: item.anchor_avatar_url,
         raw: {
           session_id: item.id,
           session_title: item.session_title,
           anchor_name: item.anchor_name || item.anchor_nickname,
+          anchor_nickname: item.anchor_nickname,
+          anchor_avatar_url: item.anchor_avatar_url,
+          douyin_id: item.douyin_id,
           live_start_time: item.live_start_time,
           live_duration_seconds: item.live_duration_seconds,
           transcript_segment_count: 0,
@@ -117,10 +138,12 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
       sessionOptions.value = (data || []).map(item => ({
         label: `#${item.session_id} ${item.anchor_name || ''} ${item.session_title || ''}`,
         value: item.session_id,
-        raw: item,
-        // naive-ui 的 render 回调参数是 { node, option, selected }，取 info.option 才是选项本身
-        render: (info: { option: SelectOption }) =>
-          renderSessionOption(info.option as SessionSelectOption)
+        sessionId: item.session_id,
+        anchorName: item.anchor_name || '未知主播',
+        anchorNickname: item.anchor_nickname,
+        douyinId: item.douyin_id,
+        avatarUrl: item.anchor_avatar_url,
+        raw: item
       }));
     } catch {
       // 新接口不可用（后端未升级）时，回退到项目公共的场次列表接口，保证下拉始终有内容
@@ -282,6 +305,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     approve,
     discard,
     isTaskRunning,
-    refreshMediaCookie
+    refreshMediaCookie,
+    renderSessionLabel
   };
 }
