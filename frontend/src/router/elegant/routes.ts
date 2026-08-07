@@ -64,6 +64,18 @@ export const generatedRoutes: GeneratedRoute[] = [
     }
   },
   {
+    name: 'clip',
+    path: '/clip',
+    component: 'layout.base$view.clip',
+    meta: {
+      title: 'clip',
+      i18nKey: 'route.clip',
+      icon: 'mdi:movie-open',
+      order: 11,
+      keepAlive: true
+    }
+  },
+  {
     name: 'collector',
     path: '/collector',
     component: 'layout.base$view.collector',

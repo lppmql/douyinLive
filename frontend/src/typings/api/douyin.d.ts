@@ -1226,5 +1226,71 @@ declare namespace Api {
       sources: { id: number; title: string | null; category: string | null }[];
       has_result: boolean;
     }
+
+    /* ---------- AI 自动剪辑 ---------- */
+
+    interface ClipSegment {
+      start: number;
+      end: number;
+      text: string;
+    }
+
+    interface ClipClip {
+      id: number;
+      session_id: number;
+      clip_order: number;
+      status: 'draft' | 'approved' | 'discarded' | 'failed';
+      title: string | null;
+      description: string | null;
+      topics: string[];
+      segments: ClipSegment[];
+      duration_seconds: number | null;
+      video_path: string | null;
+      cover_path: string | null;
+      is_manual: number;
+      error_message: string | null;
+      created_at: string | null;
+      updated_at: string | null;
+    }
+
+    interface ClipTaskInfo {
+      id: number;
+      status: string;
+      progress_percent: number;
+      progress_stage: string | null;
+      progress_message: string | null;
+      error_message: string | null;
+      created_at: string | null;
+      completed_at: string | null;
+    }
+
+    interface ClipSessionOverview {
+      session_id: number;
+      session_title: string | null;
+      anchor_name: string | null;
+      live_start_time: string | null;
+      live_duration_seconds: number | null;
+      detail_collection_status: string | null;
+      task: ClipTaskInfo | null;
+      clips: ClipClip[];
+    }
+
+    interface ClipTaskListResult {
+      total: number;
+      items: Array<Record<string, unknown>>;
+    }
+
+    interface ClipActionResult {
+      success: boolean;
+      message: string;
+      task: ClipTaskInfo | null;
+    }
+
+    interface ClipStats {
+      pending_confirm_count: number;
+      failed_task_count: number;
+      storage_root: string;
+      storage_available: boolean;
+    }
   }
 }

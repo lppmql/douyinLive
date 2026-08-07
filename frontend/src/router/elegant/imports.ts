@@ -22,6 +22,7 @@ export const views: Record<LastLevelRouteKey, RouteComponent | (() => Promise<Ro
   login: () => import("@/views/_builtin/login/index.vue"),
   analysis: () => import("@/views/analysis/index.vue"),
   "anchor-schedule": () => import("@/views/anchor-schedule/index.vue"),
+  clip: () => import("@/views/clip/index.vue"),
   collector: () => import("@/views/collector/index.vue"),
   dashboard: () => import("@/views/dashboard/index.vue"),
   home: () => import("@/views/home/index.vue"),

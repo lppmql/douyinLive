@@ -49,3 +49,7 @@ dataease/conf/*
 
 # Claude Code generated files
 .claude/
+
+# Reasonix 工具配置与运行目录
+.reasonix/
+reasonix.toml

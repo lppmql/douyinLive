@@ -18,7 +18,7 @@ from app.models.user import User
 
 MEDIA_ACCESS_COOKIE = "douyin_media_access"
 _MEDIA_PATH_PATTERN = re.compile(
-    r"^/api/v1/live-sessions/\d+/(?:avatar|video|stream|playback|comments/\d+/avatar)$"
+    r"^/api/v1/(?:live-sessions/\d+/(?:avatar|video|stream|playback|comments/\d+/avatar)|clip/clips/\d+/(?:video|cover))$"
 )
 
 # auto_error=False 让依赖有机会读取只用于原生媒体标签的 HttpOnly Cookie。

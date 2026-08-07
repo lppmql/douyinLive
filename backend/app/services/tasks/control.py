@@ -10,6 +10,7 @@ import asyncio
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import String, cast
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -24,12 +25,18 @@ from app.services.collector.log_service import add_collector_log
 from app.services.collector.scheduler import scheduler_manager
 from app.services.tasks.batch_runners import (
     run_ai_review_batch,
+    run_clip_batch,
     run_data_refresh,
     run_dataease_sync_batch,
     run_knowledge_sync_batch,
 )
 from app.services.tasks.exceptions import TaskBatchFailed, TaskCancellationRequested
-from app.services.tasks.runtime import current_worker_id, ensure_task_identity, publish_task_event, touch_task
+from app.services.tasks.runtime import (
+    current_worker_id,
+    ensure_task_identity,
+    publish_task_event,
+    touch_task,
+)
 
 
 MODULE_TASK_TYPES = {
@@ -37,14 +44,18 @@ MODULE_TASK_TYPES = {
     "ai_review": "ai_review",
     "knowledge": "knowledge_sync",
     "dataease": "dataease_sync",
+    "clip": "clip_task",
 }
-TASK_TYPE_MODULES = {task_type: module for module, task_type in MODULE_TASK_TYPES.items()}
+TASK_TYPE_MODULES = {
+    task_type: module for module, task_type in MODULE_TASK_TYPES.items()
+}
 CONTROL_TASK_TYPES = tuple(TASK_TYPE_MODULES)
 TASK_LABELS = {
     "collect_all": "全部场次数据补齐刷新",
     "ai_review": "AI 复盘",
     "knowledge_sync": "存入知识库",
     "dataease_sync": "DataEase 数据库同步",
+    "clip_task": "AI 自动剪辑",
 }
 
 
@@ -57,7 +68,9 @@ def is_cancel_requested(task_id: int) -> bool:
     db = SessionLocal()
     try:
         task = db.get(ScraperTask, task_id)
-        return bool(not task or task.cancel_requested_at or task.status == TaskStatus.CANCELLED)
+        return bool(
+            not task or task.cancel_requested_at or task.status == TaskStatus.CANCELLED
+        )
     finally:
         db.close()
 
@@ -81,7 +94,9 @@ def _apply_progress_details(task: ScraperTask, details: dict[str, Any]) -> None:
         "remaining_detail_count": ("remaining_count", "history_detail_remaining_count"),
     }
     for task_field, source_keys in field_sources.items():
-        value = next((details[key] for key in source_keys if details.get(key) is not None), None)
+        value = next(
+            (details[key] for key in source_keys if details.get(key) is not None), None
+        )
         if value is not None:
             setattr(task, task_field, max(0, int(value or 0)))
 
@@ -172,7 +187,9 @@ class CollectorTaskControlManager:
             return
         self._stop_event = asyncio.Event()
         self._shutdown_requested = False
-        self._loop_task = asyncio.create_task(self._run_loop(), name="collector-control-loop")
+        self._loop_task = asyncio.create_task(
+            self._run_loop(), name="collector-control-loop"
+        )
         logger.info("采集控制中心任务循环已启动")
 
     async def stop(self) -> None:
@@ -223,7 +240,9 @@ class CollectorTaskControlManager:
             if tasks:
                 db.commit()
                 for task in recovered_tasks:
-                    publish_task_event("scraper", task, "requeued", {"reason": "service_restart"})
+                    publish_task_event(
+                        "scraper", task, "requeued", {"reason": "service_restart"}
+                    )
             return len(recovered_tasks)
         finally:
             db.close()
@@ -232,21 +251,26 @@ class CollectorTaskControlManager:
         """同时响应用户停止和应用安全关机，供各执行器在阶段间检查。"""
         return self._shutdown_requested or is_cancel_requested(task_id)
 
-    def enqueue(self, module_key: str, options: dict[str, Any] | None = None) -> tuple[ScraperTask, bool]:
+    def enqueue(
+        self, module_key: str, options: dict[str, Any] | None = None
+    ) -> tuple[ScraperTask, bool]:
         task_type = MODULE_TASK_TYPES.get(module_key)
         if not task_type:
             raise ValueError("不支持的采集处理模块")
         db = SessionLocal()
         try:
-            existing = (
-                db.query(ScraperTask)
-                .filter(
-                    ScraperTask.task_type == task_type,
-                    ScraperTask.status.in_([TaskStatus.PENDING, TaskStatus.RUNNING]),
-                )
-                .order_by(ScraperTask.id.desc())
-                .first()
+            existing_query = db.query(ScraperTask).filter(
+                ScraperTask.task_type == task_type,
+                ScraperTask.status.in_([TaskStatus.PENDING, TaskStatus.RUNNING]),
             )
+            session_id = (options or {}).get("session_id")
+            if session_id is not None:
+                # 按场次级去重：同一场次不能重复排队（clip 等按场次处理的任务）
+                existing_query = existing_query.filter(
+                    cast(ScraperTask.task_options_json["session_id"], String)
+                    == str(session_id)
+                )
+            existing = existing_query.order_by(ScraperTask.id.desc()).first()
             if existing:
                 return existing, False
 
@@ -255,7 +279,9 @@ class CollectorTaskControlManager:
                 account = (
                     db.query(ScraperAccount)
                     .filter(ScraperAccount.login_status == "logged_in")
-                    .order_by(ScraperAccount.last_login_at.desc(), ScraperAccount.id.desc())
+                    .order_by(
+                        ScraperAccount.last_login_at.desc(), ScraperAccount.id.desc()
+                    )
                     .first()
                 )
                 if not account or not account.cookie_saved:
@@ -362,7 +388,9 @@ class CollectorTaskControlManager:
             db.add(task)
             db.commit()
             db.refresh(task)
-            publish_task_event("scraper", task, "retried", {"retry_of_task_id": original.id})
+            publish_task_event(
+                "scraper", task, "retried", {"retry_of_task_id": original.id}
+            )
             return task
         finally:
             db.close()
@@ -421,7 +449,9 @@ class CollectorTaskControlManager:
             task.retry_count = int(task.retry_count or 0) + 1
             touch_task(task, current_worker_id("collector-control"))
             db.commit()
-            publish_task_event("scraper", task, "started", {"task_type": task.task_type})
+            publish_task_event(
+                "scraper", task, "started", {"task_type": task.task_type}
+            )
             return task.task_type
         finally:
             db.close()
@@ -434,7 +464,9 @@ class CollectorTaskControlManager:
             if task_type == "collect_all":
                 result = await self._run_data_refresh(task_id)
             else:
-                result = await asyncio.to_thread(self._run_sync_batch, task_id, task_type)
+                result = await asyncio.to_thread(
+                    self._run_sync_batch, task_id, task_type
+                )
             self._finish(task_id, TaskStatus.COMPLETED, result=result)
         except TaskCancellationRequested as exc:
             if self._shutdown_requested and not is_cancel_requested(task_id):
@@ -442,12 +474,16 @@ class CollectorTaskControlManager:
             else:
                 self._finish(task_id, TaskStatus.CANCELLED, error_message=str(exc))
         except TaskBatchFailed as exc:
-            self._finish(task_id, TaskStatus.FAILED, result=exc.result, error_message=str(exc))
+            self._finish(
+                task_id, TaskStatus.FAILED, result=exc.result, error_message=str(exc)
+            )
         except asyncio.CancelledError:
             self._requeue_after_shutdown(task_id)
             raise
         except Exception as exc:
-            logger.exception("控制任务失败 task_id=%s type=%s: %s", task_id, task_type, exc)
+            logger.exception(
+                "控制任务失败 task_id=%s type=%s: %s", task_id, task_type, exc
+            )
             self._finish(task_id, TaskStatus.FAILED, error_message=str(exc)[:1000])
 
     async def _run_data_refresh(self, task_id: int) -> dict[str, Any]:
@@ -462,7 +498,13 @@ class CollectorTaskControlManager:
                 f"data-refresh:{task_id}",
                 kind="refresh",
             ):
-                report("browser_takeover", 2, 0, 0, "已接管浏览器，实时监控将在刷新结束后自动恢复")
+                report(
+                    "browser_takeover",
+                    2,
+                    0,
+                    0,
+                    "已接管浏览器，实时监控将在刷新结束后自动恢复",
+                )
                 return await run_data_refresh(
                     db,
                     task_id,
@@ -477,16 +519,23 @@ class CollectorTaskControlManager:
         db = SessionLocal()
         try:
             task = db.get(ScraperTask, task_id)
-            options = task.task_options_json if task and isinstance(task.task_options_json, dict) else {}
+            options = (
+                task.task_options_json
+                if task and isinstance(task.task_options_json, dict)
+                else {}
+            )
             batch_size = options.get("batch_size")
             if batch_size is not None:
                 parsed_batch_size = int(batch_size)
-                batch_size = max(1, parsed_batch_size) if parsed_batch_size > 0 else None
+                batch_size = (
+                    max(1, parsed_batch_size) if parsed_batch_size > 0 else None
+                )
             report = _make_reporter(db, task_id)
             runner = {
                 "ai_review": run_ai_review_batch,
                 "knowledge_sync": run_knowledge_sync_batch,
                 "dataease_sync": run_dataease_sync_batch,
+                "clip_task": run_clip_batch,
             }.get(task_type)
             if not runner:
                 raise RuntimeError(f"未注册任务执行器: {task_type}")
@@ -533,14 +582,18 @@ class CollectorTaskControlManager:
             add_collector_log(
                 db,
                 task_id=task.id,
-                level="info" if status in (TaskStatus.COMPLETED, TaskStatus.CANCELLED) else "error",
+                level="info"
+                if status in (TaskStatus.COMPLETED, TaskStatus.CANCELLED)
+                else "error",
                 stage=status,
                 event_type=f"task_{status}",
                 message=f"{TASK_LABELS.get(task.task_type, task.task_type)}{task.progress_message}",
                 details=result or {"error": task.error_message},
             )
             db.commit()
-            publish_task_event("scraper", task, status, result or {"error": task.error_message or ""})
+            publish_task_event(
+                "scraper", task, status, result or {"error": task.error_message or ""}
+            )
         finally:
             db.close()
 

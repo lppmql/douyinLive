@@ -161,6 +161,18 @@ class Settings(BaseSettings):
     BOOTSTRAP_ADMIN_USERNAME: str = ""
     BOOTSTRAP_ADMIN_PASSWORD: str = ""
 
+    # AI 自动剪辑。回放与成片统一存 data/videos/<session_id>/ 下（data/ 已被 .gitignore 覆盖）。
+    CLIP_STORAGE_DIR: str = "data/videos"
+    # ffmpeg 重编码并发上限：剪辑是 CPU/GPU 重活，默认单并发避免拖垮直播采集。
+    CLIP_MAX_CONCURRENT: int = 1
+    # 竖屏成片目标分辨率（抖音主流 9:16）
+    CLIP_TARGET_WIDTH: int = 1080
+    CLIP_TARGET_HEIGHT: int = 1920
+    # 回放下载超时（秒）：2 小时直播流拷贝到本地一般几分钟，30 分钟兜底。
+    CLIP_REPLAY_DOWNLOAD_TIMEOUT_SECONDS: int = 1800
+    # 离线终稿完成后是否自动触发 AI 剪辑（每场消耗 1 次 DeepSeek 调用 + 剪辑资源）。
+    CLIP_AUTO_GENERATE: bool = True
+
     # 跨域与部署
     CORS_ORIGINS: str = "http://localhost:9527,http://127.0.0.1:9527"
 

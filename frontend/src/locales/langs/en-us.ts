@@ -237,6 +237,7 @@ const local: App.I18n.Schema = {
     'live-session-detail': 'Live Session Detail',
     transcripts: 'Transcripts',
     analysis: 'AI Analysis',
+    clip: 'AI Auto Clip',
     knowledge: 'Knowledge Base',
     'anchor-schedule': 'Anchor Schedule',
     'prompt-management': 'Prompt Management',

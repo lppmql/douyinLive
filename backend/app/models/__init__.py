@@ -27,6 +27,7 @@ from app.models.review import ReviewFinding, ReviewActionItem, ScriptAsset, Comp
 from app.models.ai_call_traces import AiCallTrace
 from app.models.collector_module_states import CollectorModuleState
 from app.models.conversations import Conversation, ConversationMessage
+from app.models.clip_clips import ClipClip
 
 __all__ = [
     "Base",
@@ -63,4 +64,5 @@ __all__ = [
     "CollectorModuleState",
     "Conversation",
     "ConversationMessage",
+    "ClipClip",
 ]

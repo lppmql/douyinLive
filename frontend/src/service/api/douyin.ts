@@ -875,3 +875,61 @@ export function codeLogin(phone: string, code: string) {
     data: { phone, code }
   });
 }
+
+/* ---------- AI 自动剪辑 ---------- */
+
+/** 获取某场直播的剪辑总览（任务 + 成片列表） */
+export function fetchClipSessionOverview(sessionId: number) {
+  return backendRequest<Api.Douyin.ClipSessionOverview>({
+    url: `${API_PREFIX}/clip/sessions/${sessionId}`
+  });
+}
+
+/** 手动触发整场 AI 剪辑（重新生成全部成片） */
+export function generateClipSession(sessionId: number, userHint?: string) {
+  return backendRequest<Api.Douyin.ClipActionResult>({
+    url: `${API_PREFIX}/clip/sessions/${sessionId}/generate`,
+    method: 'post',
+    data: userHint ? { user_hint: userHint } : {}
+  });
+}
+
+/** 手动重剪单条成片 */
+export function regenerateClip(sessionId: number, clipOrder: number, userHint?: string) {
+  return backendRequest<Api.Douyin.ClipActionResult>({
+    url: `${API_PREFIX}/clip/sessions/${sessionId}/clips/${clipOrder}/regenerate`,
+    method: 'post',
+    data: userHint ? { user_hint: userHint } : {}
+  });
+}
+
+/** 确认成片（可发布） */
+export function approveClip(clipId: number) {
+  return backendRequest<Api.Douyin.ClipActionResult>({
+    url: `${API_PREFIX}/clip/clips/${clipId}/approve`,
+    method: 'post'
+  });
+}
+
+/** 丢弃成片 */
+export function discardClip(clipId: number) {
+  return backendRequest<Api.Douyin.ClipActionResult>({
+    url: `${API_PREFIX}/clip/clips/${clipId}/discard`,
+    method: 'post'
+  });
+}
+
+/** 剪辑任务列表 */
+export function fetchClipTasks(params: { page?: number; page_size?: number; status?: string }) {
+  return backendRequest<Api.Douyin.ClipTaskListResult>({
+    url: `${API_PREFIX}/clip/tasks`,
+    params
+  });
+}
+
+/** 剪辑模块统计 */
+export function fetchClipStats() {
+  return backendRequest<Api.Douyin.ClipStats>({
+    url: `${API_PREFIX}/clip/stats`
+  });
+}

@@ -233,6 +233,7 @@ const local: App.I18n.Schema = {
     'live-session-detail': '直播场次详情',
     transcripts: '主播话术',
     analysis: 'AI 复盘',
+    clip: 'AI自动剪辑',
     knowledge: '知识库',
     'anchor-schedule': '主播排班',
     'prompt-management': 'Prompt 管理',

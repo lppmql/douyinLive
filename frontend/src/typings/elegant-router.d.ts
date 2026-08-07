@@ -22,6 +22,7 @@ declare module "@elegant-router/types" {
     "500": "/500";
     "analysis": "/analysis";
     "anchor-schedule": "/anchor-schedule";
+    "clip": "/clip";
     "collector": "/collector";
     "dashboard": "/dashboard";
     "home": "/home";
@@ -69,6 +70,7 @@ declare module "@elegant-router/types" {
     | "500"
     | "analysis"
     | "anchor-schedule"
+    | "clip"
     | "collector"
     | "dashboard"
     | "home"
@@ -103,6 +105,7 @@ declare module "@elegant-router/types" {
     | "login"
     | "analysis"
     | "anchor-schedule"
+    | "clip"
     | "collector"
     | "dashboard"
     | "home"

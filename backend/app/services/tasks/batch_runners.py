@@ -19,6 +19,7 @@ from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
 from app.models.live_sessions import LiveSession
 from app.models.review import ReviewFinding
+from app.models.scraper_tasks import ScraperTask
 from app.models.transcript_segments import TranscriptSegment
 from app.services.ai.kb_service import sync_session_to_kb
 from app.services.ai.review_service import generate_findings
@@ -34,6 +35,10 @@ from app.services.sync.de_sync import (
     completed_offline_transcript_exists,
     pending_complete_session_ids,
     sync_session,
+)
+from app.services.clips.clip_service import (
+    generate_and_render_session,
+    pending_clip_session_ids,
 )
 from app.services.tasks.exceptions import TaskBatchFailed, TaskCancellationRequested
 
@@ -109,14 +114,11 @@ def _pending_ai_query(db: Session):
         AnalysisReport.report_type == "speech_score",
     )
     has_finding = exists().where(ReviewFinding.session_id == LiveSession.id)
-    return (
-        db.query(LiveSession.id)
-        .filter(
-            LiveSession.live_status != "live",
-            completed_offline_transcript_exists(),
-            has_offline_transcript,
-            or_(~has_score, ~has_finding),
-        )
+    return db.query(LiveSession.id).filter(
+        LiveSession.live_status != "live",
+        completed_offline_transcript_exists(),
+        has_offline_transcript,
+        or_(~has_score, ~has_finding),
     )
 
 
@@ -145,7 +147,14 @@ def run_ai_review_batch(
     failed = 0
     warnings = 0
     errors: list[dict[str, Any]] = []
-    report("ai_review", 0, 0, total, f"发现 {total} 场待生成 AI 复盘", {"pending_count": total})
+    report(
+        "ai_review",
+        0,
+        0,
+        total,
+        f"发现 {total} 场待生成 AI 复盘",
+        {"pending_count": total},
+    )
 
     for index, session_id in enumerate(session_ids, start=1):
         _ensure_running(should_cancel)
@@ -215,7 +224,9 @@ def run_ai_review_batch(
             f"AI 复盘已处理 {index}/{total} 场，成功 {completed} 场，失败 {failed} 场",
             {
                 "session_id": session_id,
-                "anchor_name": session.anchor_name or session.anchor_nickname if session else None,
+                "anchor_name": session.anchor_name or session.anchor_nickname
+                if session
+                else None,
                 "completed_count": completed,
                 "failed_count": failed,
                 "warning_count": warnings,
@@ -298,7 +309,9 @@ def _pending_knowledge_session_ids(db: Session, limit: int | None = None) -> lis
 def pending_knowledge_session_count(db: Session) -> int:
     """返回源数据有更新、需要重新写入知识库的场次数。"""
     query = _pending_knowledge_query(db)
-    return int(query.order_by(None).with_entities(func.count(LiveSession.id)).scalar() or 0)
+    return int(
+        query.order_by(None).with_entities(func.count(LiveSession.id)).scalar() or 0
+    )
 
 
 def run_knowledge_sync_batch(
@@ -315,7 +328,14 @@ def run_knowledge_sync_batch(
     failed = 0
     saved_items = 0
     errors: list[dict[str, Any]] = []
-    report("knowledge_sync", 0, 0, total, f"发现 {total} 场知识需要更新", {"pending_count": total})
+    report(
+        "knowledge_sync",
+        0,
+        0,
+        total,
+        f"发现 {total} 场知识需要更新",
+        {"pending_count": total},
+    )
 
     for index, session_id in enumerate(session_ids, start=1):
         _ensure_running(should_cancel)
@@ -327,7 +347,8 @@ def run_knowledge_sync_batch(
             changed = sum(
                 int(value or 0)
                 for key, value in result.items()
-                if key.endswith("_saved") or key in {"time_slices_created", "time_slices_updated"}
+                if key.endswith("_saved")
+                or key in {"time_slices_created", "time_slices_updated"}
             )
             saved_items += changed
             completed += 1
@@ -370,7 +391,9 @@ def run_knowledge_sync_batch(
             f"知识库已处理 {index}/{total} 场，成功 {completed} 场，失败 {failed} 场",
             {
                 "session_id": session_id,
-                "anchor_name": session.anchor_name or session.anchor_nickname if session else None,
+                "anchor_name": session.anchor_name or session.anchor_nickname
+                if session
+                else None,
                 "completed_count": completed,
                 "failed_count": failed,
                 "saved_item_count": saved_items,
@@ -464,7 +487,9 @@ def run_dataease_sync_batch(
             f"DataEase 已同步 {index}/{total} 场，成功 {completed} 场，失败 {failed} 场",
             {
                 "session_id": session_id,
-                "anchor_name": session.anchor_name or session.anchor_nickname if session else None,
+                "anchor_name": session.anchor_name or session.anchor_nickname
+                if session
+                else None,
                 "completed_count": completed,
                 "failed_count": failed,
                 "removed_stale_row_count": removed,
@@ -480,4 +505,119 @@ def run_dataease_sync_batch(
     }
     if total and completed == 0:
         raise TaskBatchFailed("待处理场次全部同步 DataEase 失败", result)
+    return result
+
+
+def run_clip_batch(
+    db: Session,
+    task_id: int,
+    report: ProgressReporter,
+    should_cancel: CancellationChecker,
+    batch_size: int | None = None,
+) -> dict[str, Any]:
+    """AI 自动剪辑任务执行器。
+
+    任务参数（task_options_json）：
+    - session_id: 指定场次（自动触发或手动触发都带）；
+    - clip_order: 手动重剪时替换的成片序号（可选）；
+    - user_hint: 人工指定的主题/时间范围要求（可选）；
+    未指定 session_id 时为历史场次补生成模式（只处理还没有成片的场次）。
+    """
+    task = db.get(ScraperTask, task_id)
+    options = dict(task.task_options_json or {}) if task else {}
+
+    specified = options.get("session_ids") or (options.get("session_id"),)
+    if specified:
+        session_ids = [int(s) for s in specified if s is not None]
+    else:
+        session_ids = pending_clip_session_ids(db, limit=batch_size)
+
+    total = len(session_ids)
+    completed = 0
+    failed = 0
+    rendered_total = 0
+    errors: list[dict[str, Any]] = []
+    report("clip", 0, 0, total, f"发现 {total} 场待剪辑", {"pending_count": total})
+
+    for index, session_id in enumerate(session_ids, start=1):
+        _ensure_running(should_cancel)
+        session = db.get(LiveSession, session_id)
+        if not session:
+            failed += 1
+            errors.append({"session_id": session_id, "message": "场次不存在"})
+            continue
+        try:
+            result = generate_and_render_session(
+                db,
+                session_id,
+                task_id=task_id,
+                report=report,
+                should_cancel=should_cancel,
+                user_hint=options.get("user_hint"),
+                clip_order=int(options["clip_order"])
+                if options.get("clip_order")
+                else None,
+            )
+            completed += 1
+            rendered_total += int(result.get("rendered_count") or 0)
+            add_collector_log(
+                db,
+                task_id=task_id,
+                session=session,
+                level="info",
+                stage="clip",
+                event_type="session_clip_completed",
+                message=(
+                    f"主播 {session.anchor_name or session.anchor_nickname or '未知主播'}，"
+                    f"场次 #{session.id} AI 剪辑完成，成功 {result.get('rendered_count')} 条"
+                ),
+                details=result,
+            )
+            db.commit()
+        except TaskCancellationRequested:
+            # 用户取消/安全关机：交给 control.py 统一标记 CANCELLED，不记失败
+            db.rollback()
+            raise
+        except Exception as exc:
+            db.rollback()
+            failed += 1
+            errors.append({"session_id": session_id, "message": str(exc)[:300]})
+            add_collector_log(
+                db,
+                task_id=task_id,
+                session=session,
+                level="error",
+                stage="clip",
+                event_type="session_clip_failed",
+                message=f"场次 #{session_id} AI 剪辑失败：{str(exc)[:300]}",
+                details={"error": str(exc)[:500]},
+            )
+            db.commit()
+
+        report(
+            "clip",
+            int(index / max(total, 1) * 99),
+            index,
+            total,
+            f"剪辑已处理 {index}/{total} 场，成功 {completed} 场，失败 {failed} 场",
+            {
+                "session_id": session_id,
+                "anchor_name": session.anchor_name or session.anchor_nickname
+                if session
+                else None,
+                "completed_count": completed,
+                "failed_count": failed,
+                "rendered_count": rendered_total,
+            },
+        )
+
+    result = {
+        "selected_count": total,
+        "completed_count": completed,
+        "failed_count": failed,
+        "rendered_count": rendered_total,
+        "errors": errors[:20],
+    }
+    if total and completed == 0:
+        raise TaskBatchFailed("待处理场次的 AI 剪辑全部失败", result)
     return result

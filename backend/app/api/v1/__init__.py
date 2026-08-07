@@ -24,6 +24,7 @@ from app.api.v1.dashboard import router as dashboard_router
 from app.api.v1.dataease import router as dataease_router
 from app.api.v1.reviews import router as reviews_router
 from app.api.v1.anchor_schedules import router as anchor_schedules_router
+from app.api.v1.clip import router as clip_router
 
 # 所有业务 API 统一要求登录（auth 路由含 login/refreshToken 公开接口，单独注册）
 v1_router = APIRouter(prefix="/api/v1", dependencies=[Depends(enforce_business_permissions)])
@@ -45,5 +46,6 @@ v1_router.include_router(dashboard_router)
 v1_router.include_router(dataease_router)
 v1_router.include_router(reviews_router)
 v1_router.include_router(anchor_schedules_router)
+v1_router.include_router(clip_router)
 
 __all__ = ["v1_router"]

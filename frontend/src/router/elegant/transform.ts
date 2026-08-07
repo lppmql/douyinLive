@@ -168,6 +168,7 @@ const routeMap: RouteMap = {
   "500": "/500",
   "analysis": "/analysis",
   "anchor-schedule": "/anchor-schedule",
+  "clip": "/clip",
   "collector": "/collector",
   "dashboard": "/dashboard",
   "home": "/home",
