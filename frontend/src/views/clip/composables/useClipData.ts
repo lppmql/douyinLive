@@ -118,7 +118,9 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
         label: `#${item.session_id} ${item.anchor_name || ''} ${item.session_title || ''}`,
         value: item.session_id,
         raw: item,
-        render: (option: SelectOption) => renderSessionOption(option as SessionSelectOption)
+        // naive-ui 的 render 回调参数是 { node, option, selected }，取 info.option 才是选项本身
+        render: (info: { option: SelectOption }) =>
+          renderSessionOption(info.option as SessionSelectOption)
       }));
     } catch {
       // 新接口不可用（后端未升级）时，回退到项目公共的场次列表接口，保证下拉始终有内容
