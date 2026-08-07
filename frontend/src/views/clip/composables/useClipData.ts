@@ -7,6 +7,7 @@ import {
   discardClip,
   fetchClipCandidateSessions,
   fetchClipSessionOverview,
+  fetchLiveSessionPage,
   generateClipSession,
   regenerateClip
 } from '@/service/api/douyin';
@@ -80,7 +81,36 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     ]);
   }
 
-  /** 场次下拉数据：可剪辑候选场次（含主播、话术、成片情况） */
+  /** 回退数据源：项目公共场次列表接口（主播/标题/时间/详情状态，无话术统计） */
+  async function loadSessionOptionsFallback() {
+    try {
+      const { data } = await fetchLiveSessionPage({ current: 1, size: 50 });
+      const records = ((data as Api.Common.PaginatingQueryRecord<Api.Douyin.LiveSessionListItem>)?.records || []).filter(
+        item => item.live_status !== 'live'
+      );
+      sessionOptions.value = records.map(item => ({
+        label: `#${item.id} ${item.anchor_name || item.anchor_nickname || ''} ${item.session_title || ''}`,
+        value: item.id,
+        raw: {
+          session_id: item.id,
+          session_title: item.session_title,
+          anchor_name: item.anchor_name || item.anchor_nickname,
+          live_start_time: item.live_start_time,
+          live_duration_seconds: item.live_duration_seconds,
+          transcript_segment_count: 0,
+          transcript_completed_count: 0,
+          transcript_status: 'none',
+          clip_count: 0,
+          clip_available_count: 0,
+          clip_status: 'none'
+        }
+      }));
+    } catch (fallbackError) {
+      errorMessage.value = getServiceErrorMessage(fallbackError, '加载失败');
+    }
+  }
+
+  /** 场次下拉数据：优先候选场次接口（含主播、话术、成片情况），失败回退公共场次列表接口 */
   async function loadSessionOptions() {
     try {
       const data = unwrapServiceData(await fetchClipCandidateSessions(50), '候选场次加载失败');
@@ -91,7 +121,8 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
         render: (option: SelectOption) => renderSessionOption(option as SessionSelectOption)
       }));
     } catch (error) {
-      errorMessage.value = getServiceErrorMessage(error, '加载失败');
+      // 新接口不可用（后端未升级）时，回退到项目公共的场次列表接口，保证下拉始终有内容
+      await loadSessionOptionsFallback();
     }
   }
 
