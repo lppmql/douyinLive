@@ -114,8 +114,10 @@ const durationText = computed(() => {
 }
 
 .clip-card__cover {
+  /* 竖版 9:16 封面：宽度随卡片自适应，高度按比例 */
   position: relative;
-  height: 260px;
+  width: 100%;
+  aspect-ratio: 9 / 16;
   cursor: pointer;
   overflow: hidden;
   border-radius: 6px;
