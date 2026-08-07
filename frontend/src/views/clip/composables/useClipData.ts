@@ -17,6 +17,16 @@ import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
 /** 剪辑任务运行中的状态集合，用于驱动轮询 */
 const RUNNING_STATUSES = new Set(['pending', 'running', 'queued', 'processing']);
 
+/**
+ * 成片媒体地址（浏览器原生 video/img 标签经媒体 Cookie 鉴权）。
+ * - dev（VITE_HTTP_PROXY=Y）：必须带 /proxy-default 前缀，vite 代理才转发到后端，
+ *   裸 /api 路径在 dev server 上 404（这是此前页面视频无法播放的根因）；
+ * - 生产：走同源 /api 相对路径（nginx 已代理 /api 到后端），
+ *   跨域绝对地址会导致浏览器 video 不带媒体 Cookie 而 401。
+ */
+const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
+const mediaApiPrefix = isHttpProxy ? '/proxy-default' : '';
+
 /** 下拉选项：与主播话术工作台同款结构（主播身份字段 + 富信息 raw） */
 export interface SessionSelectOption extends SelectOption {
   sessionId: number;
@@ -27,13 +37,12 @@ export interface SessionSelectOption extends SelectOption {
   raw?: Api.Douyin.ClipCandidateSession;
 }
 
-/** 成片视频播放地址（浏览器原生 video 标签经媒体 Cookie 鉴权） */
 export function clipVideoUrl(clipId: number): string {
-  return `/api/v1/clip/clips/${clipId}/video`;
+  return `${mediaApiPrefix}/api/v1/clip/clips/${clipId}/video`;
 }
 
 export function clipCoverUrl(clipId: number): string {
-  return `/api/v1/clip/clips/${clipId}/cover`;
+  return `${mediaApiPrefix}/api/v1/clip/clips/${clipId}/cover`;
 }
 
 /** 转写状态可读文案 */
