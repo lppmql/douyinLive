@@ -23,6 +23,7 @@ from app.core.status import TaskStatus
 from app.models.clip_clips import ClipClip
 from app.models.live_sessions import LiveSession
 from app.models.scraper_tasks import ScraperTask
+from app.models.transcript_segments import TranscriptSegment
 from app.schemas.clip import (
     ClipActionResponse,
     ClipClipResponse,
@@ -91,6 +92,100 @@ def _session_overview(db: Session, session_id: int) -> ClipSessionOverview:
         task=serialize_scraper_task(task) if task else None,
         clips=[_serialize_clip(clip) for clip in clips],
     )
+
+
+# ── 候选场次列表（页面下拉用：主播、话术转写、成片情况一目了然）──
+
+
+@router.get("/candidate-sessions")
+def list_candidate_sessions(
+    limit: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    """可剪辑的候选场次：已结束、详情完整，按开播时间倒序。
+
+    每条附带：主播信息、话术段数（转写情况）、已有成片数与最近任务状态，
+    供前端下拉展示富信息，不用再单独查场次页。
+    """
+    from sqlalchemy import case as sql_case
+    from sqlalchemy import func as sql_func
+
+    transcript_stats = (
+        db.query(
+            TranscriptSegment.session_id.label("sid"),
+            sql_func.count(TranscriptSegment.id).label("segment_count"),
+            sql_func.sum(
+                sql_case(
+                    (TranscriptSegment.asr_status == "completed", 1),
+                    else_=0,
+                )
+            ).label("completed_count"),
+        )
+        .group_by(TranscriptSegment.session_id)
+        .subquery()
+    )
+    clip_stats = (
+        db.query(
+            ClipClip.session_id.label("sid"),
+            sql_func.count(ClipClip.id).label("clip_count"),
+            sql_func.sum(
+                sql_case(
+                    (ClipClip.status.in_(["draft", "approved"]), 1),
+                    else_=0,
+                )
+            ).label("available_count"),
+        )
+        .group_by(ClipClip.session_id)
+        .subquery()
+    )
+    rows = (
+        db.query(
+            LiveSession,
+            transcript_stats.c.segment_count,
+            transcript_stats.c.completed_count,
+            clip_stats.c.clip_count,
+            clip_stats.c.available_count,
+        )
+        .outerjoin(transcript_stats, transcript_stats.c.sid == LiveSession.id)
+        .outerjoin(clip_stats, clip_stats.c.sid == LiveSession.id)
+        .filter(
+            LiveSession.live_status != "live",
+            LiveSession.detail_collection_status == "complete",
+        )
+        .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .limit(limit)
+        .all()
+    )
+    items: list[dict[str, Any]] = []
+    for session, segment_count, completed_count, clip_count, available_count in rows:
+        segment_count = int(segment_count or 0)
+        completed_count = int(completed_count or 0)
+        clip_count = int(clip_count or 0)
+        available_count = int(available_count or 0)
+        if segment_count == 0:
+            transcript_status = "none"
+        elif completed_count >= segment_count:
+            transcript_status = "completed"
+        elif completed_count > 0:
+            transcript_status = "partial"
+        else:
+            transcript_status = "processing"
+        items.append(
+            {
+                "session_id": session.id,
+                "session_title": session.session_title,
+                "anchor_name": session.anchor_name or session.anchor_nickname,
+                "live_start_time": session.live_start_time,
+                "live_duration_seconds": session.live_duration_seconds,
+                "transcript_segment_count": segment_count,
+                "transcript_completed_count": completed_count,
+                "transcript_status": transcript_status,
+                "clip_count": clip_count,
+                "clip_available_count": available_count,
+                "clip_status": "has_clips" if available_count > 0 else "none",
+            }
+        )
+    return items
 
 
 # ── 任务列表与详情 ──

@@ -30,10 +30,6 @@ const { loading, overview, sessionOptions, actionLoading, errorMessage, selected
 const previewClip = ref<Api.Douyin.ClipClip | null>(null);
 const previewVisible = computed(() => Boolean(previewClip.value));
 
-function closePreview() {
-  previewClip.value = null;
-}
-
 /* ---------- 生成 / 重剪弹窗 ---------- */
 const regenerateTarget = ref<Api.Douyin.ClipClip | null>(null);
 const regenerateAllMode = ref(false);
@@ -44,6 +40,23 @@ function openGenerateAll() {
   regenerateAllMode.value = true;
   regenerateTarget.value = null;
   hintText.value = '';
+}
+
+function openPreview(clip: Api.Douyin.ClipClip) {
+  previewClip.value = clip;
+  // 浏览器原生 video 依赖短时媒体 Cookie（30 分钟），打开预览前续期，避免播放 401
+  void clipData.refreshMediaCookie();
+}
+
+const videoError = ref('');
+
+function onVideoError() {
+  videoError.value = '视频加载失败：媒体凭证可能已过期，请刷新页面后重试（或重新登录）';
+}
+
+function closePreview() {
+  previewClip.value = null;
+  videoError.value = '';
 }
 
 function openRegenerate(clip: Api.Douyin.ClipClip) {
@@ -148,7 +161,7 @@ function fmtDateTime(val: string | null): string {
           <NGi v-for="clip in overview?.clips || []" :key="clip.id" span="24 s:12 m:8 l:6">
             <ClipCard
               :clip="clip"
-              @preview="previewClip = $event"
+              @preview="openPreview"
               @approve="clipData.approve(clip.id)"
               @discard="clipData.discard(clip.id)"
               @regenerate="openRegenerate"
@@ -169,7 +182,8 @@ function fmtDateTime(val: string | null): string {
       @update:show="show => !show && closePreview()"
     >
       <div v-if="previewClip" class="clip-page__preview-body">
-        <video :src="clipVideoUrl(previewClip.id)" controls class="clip-page__video" />
+        <NAlert v-if="videoError" type="warning" class="clip-page__video-error">{{ videoError }}</NAlert>
+        <video :src="clipVideoUrl(previewClip.id)" controls class="clip-page__video" @error="onVideoError" />
         <div class="clip-page__publish">
           <div class="clip-page__publish-row">
             <NText strong>标题</NText>
@@ -251,6 +265,30 @@ function fmtDateTime(val: string | null): string {
 
 .clip-page__session-select {
   width: min(480px, 100%);
+}
+
+.clip-page__option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 0;
+  max-width: 460px;
+}
+
+.clip-page__option-main {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip-page__option-sub {
+  font-size: 12px;
+  color: rgba(128, 128, 128, 0.9);
+}
+
+.clip-page__video-error {
+  margin-bottom: 8px;
 }
 
 .clip-page__task {

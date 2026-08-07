@@ -1,11 +1,12 @@
-import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
+import { h, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
 import type { SelectOption } from 'naive-ui';
 import { useMessage } from 'naive-ui';
+import { fetchGetUserInfo } from '@/service/api/auth';
 import {
   approveClip,
   discardClip,
+  fetchClipCandidateSessions,
   fetchClipSessionOverview,
-  fetchLiveSessionPage,
   generateClipSession,
   regenerateClip
 } from '@/service/api/douyin';
@@ -13,6 +14,11 @@ import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
 
 /** 剪辑任务运行中的状态集合，用于驱动轮询 */
 const RUNNING_STATUSES = new Set(['pending', 'running', 'queued', 'processing']);
+
+/** 下拉选项：附带候选场次原始信息供富信息渲染 */
+export interface SessionSelectOption extends SelectOption {
+  raw?: Api.Douyin.ClipCandidateSession;
+}
 
 /** 成片视频播放地址（浏览器原生 video 标签经媒体 Cookie 鉴权） */
 export function clipVideoUrl(clipId: number): string {
@@ -23,10 +29,21 @@ export function clipCoverUrl(clipId: number): string {
   return `/api/v1/clip/clips/${clipId}/cover`;
 }
 
+/** 转写状态可读文案 */
+export function transcriptStatusText(status: string): string {
+  const map: Record<string, string> = {
+    none: '无话术',
+    processing: '转写中',
+    partial: `部分完成`,
+    completed: '话术完整'
+  };
+  return map[status] || status;
+}
+
 export function useClipData(message: ReturnType<typeof useMessage>) {
   const loading = ref(false);
   const overview = ref<Api.Douyin.ClipSessionOverview | null>(null);
-  const sessionOptions = ref<SelectOption[]>([]);
+  const sessionOptions = ref<SessionSelectOption[]>([]);
   const selectedSessionId = ref<number | null>(null);
   const actionLoading = ref(false);
   const errorMessage = ref('');
@@ -35,13 +52,43 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
   let mountedFlag = false;
   let requestSeq = 0; // 请求序号：切换场次时丢弃过期响应，防止旧数据覆盖新场次
 
-  /** 场次下拉数据：已结束且详情完整的场次 */
+  /** 刷新浏览器媒体 Cookie（30 分钟短时效，播放视频前调用续期） */
+  async function refreshMediaCookie() {
+    try {
+      await fetchGetUserInfo();
+    } catch {
+      // 续期失败不阻断：视频请求失败时页面会给出明确提示
+    }
+  }
+
+  /** 下拉选项富信息渲染：主播、标题、时间、话术转写、成片情况 */
+  function renderSessionOption(option: SessionSelectOption) {
+    const raw = option.raw;
+    const transcript = `${transcriptStatusText(raw?.transcript_status || 'none')}（${raw?.transcript_completed_count || 0}/${raw?.transcript_segment_count || 0}段）`;
+    const clips = raw?.clip_available_count ? `已有${raw.clip_available_count}条成片` : '无成片';
+    const start = raw?.live_start_time ? new Date(raw.live_start_time) : null;
+    const timeText = start
+      ? `${start.getMonth() + 1}/${start.getDate()} ${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`
+      : '-';
+    return h('div', { class: 'clip-page__option' }, [
+      h(
+        'div',
+        { class: 'clip-page__option-main' },
+        `#${raw?.session_id} ${raw?.anchor_name || ''} ${raw?.session_title || ''}`
+      ),
+      h('div', { class: 'clip-page__option-sub' }, `${timeText} · ${transcript} · ${clips}`)
+    ]);
+  }
+
+  /** 场次下拉数据：可剪辑候选场次（含主播、话术、成片情况） */
   async function loadSessionOptions() {
     try {
-      const { data } = await fetchLiveSessionPage({ current: 1, size: 50 });
-      sessionOptions.value = ((data as Api.Common.PaginatingQueryRecord<Api.Douyin.LiveSessionListItem>)?.records || []).map(item => ({
-        label: `#${item.id} ${item.session_title || item.anchor_name || '未知场次'}${item.live_start_time ? `（${item.live_start_time.slice(0, 10)}）` : ''}`,
-        value: item.id
+      const data = unwrapServiceData(await fetchClipCandidateSessions(50), '候选场次加载失败');
+      sessionOptions.value = (data || []).map(item => ({
+        label: `#${item.session_id} ${item.anchor_name || ''} ${item.session_title || ''}`,
+        value: item.session_id,
+        raw: item,
+        render: (option: SelectOption) => renderSessionOption(option as SessionSelectOption)
       }));
     } catch (error) {
       errorMessage.value = getServiceErrorMessage(error, '加载失败');
@@ -201,6 +248,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     regenerateOne,
     approve,
     discard,
-    isTaskRunning
+    isTaskRunning,
+    refreshMediaCookie
   };
 }

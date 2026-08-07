@@ -1,4 +1,5 @@
 """Phase 8: 认证 API — 登录 / 获取用户信息 / 刷新 Token"""
+
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -35,8 +36,15 @@ from app.services.security.rate_limit import (
 router = APIRouter(prefix="/auth", tags=["认证"])
 
 
-def _set_media_access_cookie(response: Response, user_id: int) -> None:
-    """给浏览器原生图片和视频标签签发短时、只读、不可被 JS 读取的凭证。"""
+def _set_media_access_cookie(
+    response: Response, request: Request, user_id: int
+) -> None:
+    """给浏览器原生图片和视频标签签发短时、只读、不可被 JS 读取的凭证。
+
+    secure 跟随实际请求协议：https 生产环境保持安全标记；
+    http 开发环境（如本机 9527 dev server）不标记 secure，
+    否则浏览器会拒绝保存/发送该 Cookie，导致视频无法播放。
+    """
     max_age = settings.MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES * 60
     response.set_cookie(
         key=MEDIA_ACCESS_COOKIE,
@@ -44,14 +52,19 @@ def _set_media_access_cookie(response: Response, user_id: int) -> None:
         max_age=max_age,
         expires=max_age,
         path="/",
-        secure=not settings.DEBUG,
+        secure=request.url.scheme == "https",
         httponly=True,
         samesite="lax",
     )
 
 
 @router.post("/login", response_model=SoybeanResponse[TokenData])
-def login(req: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+def login(
+    req: LoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     """用户登录 → 返回 JWT Token"""
     client_ip = request.client.host if request.client else "unknown"
     try:
@@ -79,7 +92,7 @@ def login(req: LoginRequest, request: Request, response: Response, db: Session =
     clear_rate_limit("login-ip", client_ip)
 
     token_data = {"sub": str(user.id)}
-    _set_media_access_cookie(response, user.id)
+    _set_media_access_cookie(response, request, user.id)
     return ok_response(
         TokenData(
             token=create_access_token(token_data),
@@ -89,7 +102,9 @@ def login(req: LoginRequest, request: Request, response: Response, db: Session =
 
 
 @router.post("/refreshToken", response_model=SoybeanResponse[TokenData])
-def refresh_token(req: dict, response: Response, db: Session = Depends(get_db)):
+def refresh_token(
+    req: dict, request: Request, response: Response, db: Session = Depends(get_db)
+):
     """刷新 Token"""
     refresh_token_str = req.get("refreshToken", "")
     payload = decode_token(refresh_token_str)
@@ -114,7 +129,7 @@ def refresh_token(req: dict, response: Response, db: Session = Depends(get_db)):
         )
 
     token_data = {"sub": str(user.id)}
-    _set_media_access_cookie(response, user.id)
+    _set_media_access_cookie(response, request, user.id)
     return ok_response(
         TokenData(
             token=create_access_token(token_data),
@@ -124,10 +139,12 @@ def refresh_token(req: dict, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/getUserInfo", response_model=SoybeanResponse[UserInfoData])
-def get_user_info(response: Response, current_user: User = Depends(get_current_user)):
+def get_user_info(
+    request: Request, response: Response, current_user: User = Depends(get_current_user)
+):
     """获取当前登录用户信息（Soybean Admin 兼容格式）"""
     # 老登录会话刷新页面时也会经过此接口，因此无需用户退出重登即可补发媒体 Cookie。
-    _set_media_access_cookie(response, current_user.id)
+    _set_media_access_cookie(response, request, current_user.id)
     return ok_response(
         UserInfoData(
             userId=str(current_user.id),
@@ -143,6 +160,7 @@ def send_sms_code_endpoint(req: SendCodeRequest, request: Request):
     """发送短信验证码"""
     try:
         import asyncio
+
         client_ip = request.client.host if request.client else "unknown"
         result = asyncio.run(send_sms_code(req.phone, client_ip))
         return ok_response(result)
@@ -171,6 +189,7 @@ def code_login(
         )
 
     from app.models.user import User
+
     user = db.query(User).filter(User.phone == req.phone).first()
     if not user:
         raise HTTPException(
@@ -188,7 +207,7 @@ def code_login(
     clear_rate_limit("code-login-ip", client_ip)
 
     token_data = {"sub": str(user.id)}
-    _set_media_access_cookie(response, user.id)
+    _set_media_access_cookie(response, request, user.id)
     return ok_response(
         TokenData(
             token=create_access_token(token_data),

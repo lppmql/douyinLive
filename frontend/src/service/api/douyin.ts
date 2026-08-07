@@ -933,3 +933,11 @@ export function fetchClipStats() {
     url: `${API_PREFIX}/clip/stats`
   });
 }
+
+/** 候选场次列表（含主播、话术转写、成片情况，供下拉展示） */
+export function fetchClipCandidateSessions(limit = 50) {
+  return backendRequest<Api.Douyin.ClipCandidateSession[]>({
+    url: `${API_PREFIX}/clip/candidate-sessions`,
+    params: { limit }
+  });
+}

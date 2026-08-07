@@ -1292,5 +1292,19 @@ declare namespace Api {
       storage_root: string;
       storage_available: boolean;
     }
+
+    interface ClipCandidateSession {
+      session_id: number;
+      session_title: string | null;
+      anchor_name: string | null;
+      live_start_time: string | null;
+      live_duration_seconds: number | null;
+      transcript_segment_count: number;
+      transcript_completed_count: number;
+      transcript_status: 'none' | 'processing' | 'partial' | 'completed';
+      clip_count: number;
+      clip_available_count: number;
+      clip_status: 'none' | 'has_clips';
+    }
   }
 }
