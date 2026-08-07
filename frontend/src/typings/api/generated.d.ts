@@ -2393,6 +2393,269 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clip/candidate-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Candidate Sessions
+         * @description 可剪辑的候选场次：已结束、详情完整，按开播时间倒序。
+         *
+         *     每条附带：主播信息、话术段数（转写情况）、已有成片数与最近任务状态，
+         *     供前端下拉展示富信息，不用再单独查场次页。
+         */
+        get: operations["list_candidate_sessions_api_v1_clip_candidate_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Clip Tasks
+         * @description 剪辑任务列表（按创建时间倒序）。
+         */
+        get: operations["list_clip_tasks_api_v1_clip_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clip Task
+         * @description 剪辑任务详情。
+         */
+        get: operations["get_clip_task_api_v1_clip_tasks__task_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Clips
+         * @description 某场直播的剪辑总览：最近任务 + 全部成片。
+         */
+        get: operations["get_session_clips_api_v1_clip_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/sessions/{session_id}/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate Session Clips
+         * @description 手动触发整场 AI 剪辑（重新生成全部成片，覆盖旧 draft）。
+         */
+        post: operations["generate_session_clips_api_v1_clip_sessions__session_id__generate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/sessions/{session_id}/clips/{clip_order}/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Regenerate One Clip
+         * @description 手动重剪单条成片：AI 重新选段（可带 user_hint 指定主题），替换该序号成片。
+         */
+        post: operations["regenerate_one_clip_api_v1_clip_sessions__session_id__clips__clip_order__regenerate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/clips/{clip_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Clip
+         * @description 确认成片（标记为 approved，表示可人工发布）。
+         */
+        post: operations["approve_clip_api_v1_clip_clips__clip_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/clips/{clip_id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard Clip
+         * @description 丢弃成片（保留记录便于回溯，不再展示为可用成片）。
+         */
+        post: operations["discard_clip_api_v1_clip_clips__clip_id__discard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/tasks/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Clip Task
+         * @description 停止排队中或执行中的剪辑任务。
+         */
+        post: operations["cancel_clip_task_api_v1_clip_tasks__task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/clips/{clip_id}/video": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clip Video
+         * @description 成片视频文件（FileResponse 原生支持 Range 断点播放）。
+         */
+        get: operations["get_clip_video_api_v1_clip_clips__clip_id__video_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/clips/{clip_id}/cover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clip Cover
+         * @description 成片封面图。
+         */
+        get: operations["get_clip_cover_api_v1_clip_clips__clip_id__cover_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/clips/{clip_id}/subtitle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clip Subtitle
+         * @description 成片 ASS 字幕原文（前端预览/复查用，同样防路径穿越）。
+         */
+        get: operations["get_clip_subtitle_api_v1_clip_clips__clip_id__subtitle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Clip Stats
+         * @description 剪辑模块统计：待确认成片数、今日生成数、最近失败任务。
+         */
+        get: operations["clip_stats_api_v1_clip_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2990,8 +3253,6 @@ export interface components {
             clear: boolean;
             /** Business Stage */
             business_stage?: ("preparing" | "selecting_location" | "comparing_brand" | "opened_store" | "suspected_paid" | "unknown") | null;
-            /** Follow Up Status */
-            follow_up_status?: ("not_lead" | "confirmed_lead" | "suspected_contacted" | "unknown") | null;
             /** Demand Scope */
             demand_scope?: ("snack_store" | "non_snack_store" | "industry_peer" | "unknown") | null;
             /** Interaction Type */
@@ -3117,6 +3378,116 @@ export interface components {
         ChatResponse: {
             /** Reply */
             reply: string;
+        };
+        /**
+         * ClipActionResponse
+         * @description 任务操作统一响应。
+         */
+        ClipActionResponse: {
+            /** Success */
+            success: boolean;
+            /** Message */
+            message: string;
+            /** Task */
+            task?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * ClipClipResponse
+         * @description 单条成片（短视频成品）。
+         */
+        ClipClipResponse: {
+            /** Id */
+            id: number;
+            /** Session Id */
+            session_id: number;
+            /** Clip Order */
+            clip_order: number;
+            /** Status */
+            status: string;
+            /** Title */
+            title?: string | null;
+            /** Theme */
+            theme?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Topics
+             * @default []
+             */
+            topics: string[];
+            /**
+             * Segments
+             * @default []
+             */
+            segments: {
+                [key: string]: unknown;
+            }[];
+            /** Duration Seconds */
+            duration_seconds?: number | null;
+            /** Video Path */
+            video_path?: string | null;
+            /** Cover Path */
+            cover_path?: string | null;
+            /**
+             * Is Manual
+             * @default 0
+             */
+            is_manual: number;
+            /** Error Message */
+            error_message?: string | null;
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * ClipGenerateRequest
+         * @description 触发生成/重剪的请求体。
+         */
+        ClipGenerateRequest: {
+            /** User Hint */
+            user_hint?: string | null;
+        };
+        /**
+         * ClipSessionOverview
+         * @description 一场直播的剪辑总览（任务 + 成片列表）。
+         */
+        ClipSessionOverview: {
+            /** Session Id */
+            session_id: number;
+            /** Session Title */
+            session_title?: string | null;
+            /** Anchor Name */
+            anchor_name?: string | null;
+            /** Live Start Time */
+            live_start_time?: string | null;
+            /** Live Duration Seconds */
+            live_duration_seconds?: number | null;
+            /** Detail Collection Status */
+            detail_collection_status?: string | null;
+            /** Task */
+            task?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Clips
+             * @default []
+             */
+            clips: components["schemas"]["ClipClipResponse"][];
+        };
+        /**
+         * ClipTaskListResponse
+         * @description 剪辑任务列表（分页）。
+         */
+        ClipTaskListResponse: {
+            /** Total */
+            total: number;
+            /** Items */
+            items: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * CodeLoginRequest
@@ -9807,6 +10178,7 @@ export interface operations {
     list_transcript_segments_api_v1_transcripts__session_id__segments_get: {
         parameters: {
             query?: {
+                offset?: number;
                 limit?: number;
             };
             header?: never;
@@ -11407,6 +11779,412 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_candidate_sessions_api_v1_clip_candidate_sessions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_clip_tasks_api_v1_clip_tasks_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                /** @description 按任务状态过滤: pending/running/completed/failed */
+                status?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipTaskListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clip_task_api_v1_clip_tasks__task_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_clips_api_v1_clip_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipSessionOverview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    generate_session_clips_api_v1_clip_sessions__session_id__generate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ClipGenerateRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    regenerate_one_clip_api_v1_clip_sessions__session_id__clips__clip_order__regenerate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: number;
+                clip_order: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ClipGenerateRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_clip_api_v1_clip_clips__clip_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    discard_clip_api_v1_clip_clips__clip_id__discard_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_clip_task_api_v1_clip_tasks__task_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clip_video_api_v1_clip_clips__clip_id__video_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clip_cover_api_v1_clip_clips__clip_id__cover_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clip_subtitle_api_v1_clip_clips__clip_id__subtitle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clip_stats_api_v1_clip_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
