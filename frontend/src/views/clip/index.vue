@@ -4,8 +4,6 @@ import {
   NAlert,
   NButton,
   NEmpty,
-  NGi,
-  NGrid,
   NInput,
   NModal,
   NProgress,
@@ -158,17 +156,17 @@ function fmtDateTime(val: string | null): string {
           v-if="!loading && (!overview || overview.clips.length === 0)"
           description="该场次还没有成片，点击上方按钮生成；或换一场直播试试"
         />
-        <NGrid v-else cols="1 s:2 m:3 l:5" :x-gap="12" :y-gap="16">
-          <NGi v-for="clip in overview?.clips || []" :key="clip.id">
-            <ClipCard
-              :clip="clip"
-              @preview="openPreview"
-              @approve="clipData.approve(clip.id)"
-              @discard="clipData.discard(clip.id)"
-              @regenerate="openRegenerate"
-            />
-          </NGi>
-        </NGrid>
+        <div v-else class="clip-page__card-grid">
+          <ClipCard
+            v-for="clip in overview?.clips || []"
+            :key="clip.id"
+            :clip="clip"
+            @preview="openPreview"
+            @approve="clipData.approve(clip.id)"
+            @discard="clipData.discard(clip.id)"
+            @regenerate="openRegenerate"
+          />
+        </div>
       </NSpin>
     </div>
 
@@ -318,6 +316,31 @@ function fmtDateTime(val: string | null): string {
 
 .clip-page__grid-area {
   min-height: 200px;
+}
+
+/* 成片卡片：大屏固定一行 5 个竖版卡片，窄屏自动降列 */
+.clip-page__card-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 1280px) {
+  .clip-page__card-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .clip-page__card-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .clip-page__card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .clip-page__preview-body {
