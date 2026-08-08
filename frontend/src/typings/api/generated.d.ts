@@ -2516,6 +2516,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/clip/clips/{clip_id}/subtitle/rerender": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rerender Clip Subtitle
+         * @description 复用无字幕底片重制字幕；可同时提交人工修正文字。
+         */
+        post: operations["rerender_clip_subtitle_api_v1_clip_clips__clip_id__subtitle_rerender_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/clip/clips/{clip_id}/approve": {
         parameters: {
             query?: never;
@@ -2628,6 +2648,26 @@ export interface paths {
          * @description 成片 ASS 字幕原文（前端预览/复查用，同样防路径穿越）。
          */
         get: operations["get_clip_subtitle_api_v1_clip_clips__clip_id__subtitle_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/clip/clips/{clip_id}/subtitle.srt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Clip Subtitle Srt
+         * @description 下载 SRT 字幕，便于人工校对或导入剪映等工具。
+         */
+        get: operations["get_clip_subtitle_srt_api_v1_clip_clips__clip_id__subtitle_srt_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3412,16 +3452,10 @@ export interface components {
             theme?: string | null;
             /** Description */
             description?: string | null;
-            /**
-             * Topics
-             * @default []
-             */
-            topics: string[];
-            /**
-             * Segments
-             * @default []
-             */
-            segments: {
+            /** Topics */
+            topics?: string[];
+            /** Segments */
+            segments?: {
                 [key: string]: unknown;
             }[];
             /** Duration Seconds */
@@ -3430,6 +3464,37 @@ export interface components {
             video_path?: string | null;
             /** Cover Path */
             cover_path?: string | null;
+            /** Subtitle Path */
+            subtitle_path?: string | null;
+            /** Subtitle Srt Path */
+            subtitle_srt_path?: string | null;
+            /**
+             * Subtitle Precision
+             * @default segment_estimated
+             */
+            subtitle_precision: string;
+            /**
+             * Render Version
+             * @default 1
+             */
+            render_version: number;
+            /**
+             * Can Rerender Subtitle
+             * @default false
+             */
+            can_rerender_subtitle: boolean;
+            /** Artifact Versions */
+            artifact_versions?: {
+                [key: string]: unknown;
+            }[];
+            /** Selection Evidence */
+            selection_evidence?: {
+                [key: string]: unknown;
+            };
+            /** Qc */
+            qc?: {
+                [key: string]: unknown;
+            };
             /**
              * Is Manual
              * @default 0
@@ -3461,6 +3526,12 @@ export interface components {
             session_title?: string | null;
             /** Anchor Name */
             anchor_name?: string | null;
+            /** Anchor Nickname */
+            anchor_nickname?: string | null;
+            /** Anchor Avatar Url */
+            anchor_avatar_url?: string | null;
+            /** Douyin Id */
+            douyin_id?: string | null;
             /** Live Start Time */
             live_start_time?: string | null;
             /** Live Duration Seconds */
@@ -3471,11 +3542,28 @@ export interface components {
             task?: {
                 [key: string]: unknown;
             } | null;
-            /**
-             * Clips
-             * @default []
-             */
-            clips: components["schemas"]["ClipClipResponse"][];
+            /** Clips */
+            clips?: components["schemas"]["ClipClipResponse"][];
+        };
+        /**
+         * ClipSubtitleRerenderRequest
+         * @description 仅重制字幕；不传 segments 时按数据库中的精确时间自动重制。
+         */
+        ClipSubtitleRerenderRequest: {
+            /** Segments */
+            segments?: components["schemas"]["ClipSubtitleSegment"][] | null;
+        };
+        /**
+         * ClipSubtitleSegment
+         * @description 人工校正的一段字幕；起止时间必须仍在原选段范围内。
+         */
+        ClipSubtitleSegment: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Text */
+            text: string;
         };
         /**
          * ClipTaskListResponse
@@ -11983,6 +12071,41 @@ export interface operations {
             };
         };
     };
+    rerender_clip_subtitle_api_v1_clip_clips__clip_id__subtitle_rerender_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ClipSubtitleRerenderRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     approve_clip_api_v1_clip_clips__clip_id__approve_post: {
         parameters: {
             query?: never;
@@ -12139,6 +12262,37 @@ export interface operations {
         };
     };
     get_clip_subtitle_api_v1_clip_clips__clip_id__subtitle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clip_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_clip_subtitle_srt_api_v1_clip_clips__clip_id__subtitle_srt_get: {
         parameters: {
             query?: never;
             header?: never;

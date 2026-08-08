@@ -11,6 +11,7 @@ ASR Worker 进程 — 独立运行的话术转写服务
     ASR_WORKER_MODE=true
     ASR_DYNAMIC_MAX_TASKS=2
 """
+
 import asyncio
 import hashlib
 import signal
@@ -47,6 +48,10 @@ from app.services.asr.audio_buffer import (
 )
 from app.services.asr.transcript_quality import elapsed_live_seconds
 from app.services.asr.funasr_client import FunasrClient
+from app.services.asr.timestamp_alignment import (
+    remap_corrected_text,
+    shift_word_timestamps,
+)
 from app.services.asr.lane_scheduler import AsrLaneCoordinator
 from app.services.asr.queue import (
     list_queued_task_ids_for_available_lanes,
@@ -94,7 +99,11 @@ def advance_completeness_repair_round(current_round: int, max_rounds: int) -> in
 
 def is_full_text_too_long_error(exc: DataError) -> bool:
     """识别迁移前 MySQL TEXT 容量不足错误。"""
-    return bool(getattr(exc, "orig", None) and getattr(exc.orig, "args", ()) and exc.orig.args[0] == 1406)
+    return bool(
+        getattr(exc, "orig", None)
+        and getattr(exc.orig, "args", ())
+        and exc.orig.args[0] == 1406
+    )
 
 
 def segment_type_for_task(task_type: str) -> str:
@@ -149,7 +158,9 @@ def build_chunk_failure_message(error: Exception, pipe: object | None = None) ->
     return message[:500]
 
 
-def should_refresh_stream_after_chunk_failure(task_type: str, error_message: str) -> bool:
+def should_refresh_stream_after_chunk_failure(
+    task_type: str, error_message: str
+) -> bool:
     """离线分片遇到取流错误时应刷新地址，而不是继续重试同一个坏 URL。"""
     if task_type != "offline":
         return False
@@ -189,7 +200,9 @@ class AsrWorker:
         self._lane_coordinator = AsrLaneCoordinator(settings.ASR_LIVE_CHUNK_QUOTA)
         self._audio_buffers: dict[int, LiveAudioBuffer] = {}
         self._audio_buffer_lock = asyncio.Lock()
-        self._audio_buffer_dir = Path(__file__).resolve().parents[2] / "data" / "asr-buffer"
+        self._audio_buffer_dir = (
+            Path(__file__).resolve().parents[2] / "data" / "asr-buffer"
+        )
         self._last_resource_message = ""
         self._active_postprocess_tasks: set[asyncio.Task] = set()
         self._active_postprocess_ids: set[int] = set()
@@ -200,7 +213,10 @@ class AsrWorker:
     async def run(self):
         """主循环"""
         self._running = True
-        logger.info("ASR Worker 启动（资源自适应并发，安全上限: %s）", settings.ASR_DYNAMIC_MAX_TASKS)
+        logger.info(
+            "ASR Worker 启动（资源自适应并发，安全上限: %s）",
+            settings.ASR_DYNAMIC_MAX_TASKS,
+        )
         self._recover_stale_tasks(recover_all=True)
 
         while self._running:
@@ -220,7 +236,9 @@ class AsrWorker:
         try:
             query = db.query(AsrTask).filter(AsrTask.status == "processing")
             if not recover_all:
-                cutoff = datetime.utcnow() - timedelta(seconds=max(60, settings.TASK_HEARTBEAT_TIMEOUT_SECONDS))
+                cutoff = datetime.utcnow() - timedelta(
+                    seconds=max(60, settings.TASK_HEARTBEAT_TIMEOUT_SECONDS)
+                )
                 query = query.filter(AsrTask.heartbeat_at < cutoff)
                 if self._active_task_ids:
                     query = query.filter(~AsrTask.id.in_(self._active_task_ids))
@@ -234,34 +252,52 @@ class AsrWorker:
                 task.completed_at = None
                 task.worker_id = None
                 touch_task(task)
-                chunks = db.query(AsrAudioChunk).filter(
-                    AsrAudioChunk.task_id == task.id,
-                    AsrAudioChunk.status == "processing",
-                ).all()
+                chunks = (
+                    db.query(AsrAudioChunk)
+                    .filter(
+                        AsrAudioChunk.task_id == task.id,
+                        AsrAudioChunk.status == "processing",
+                    )
+                    .all()
+                )
                 for chunk in chunks:
                     recover_interrupted_chunk(chunk)
             if stale:
                 db.commit()
                 for task in stale:
-                    publish_task_event("asr", task, "recovered", {"status": task.status})
+                    publish_task_event(
+                        "asr", task, "recovered", {"status": task.status}
+                    )
                 logger.warning("Worker 从断点回收 %s 个遗留 ASR 任务", len(stale))
 
-            postprocess_query = db.query(AsrTask).filter(AsrTask.postprocess_status == "processing")
+            postprocess_query = db.query(AsrTask).filter(
+                AsrTask.postprocess_status == "processing"
+            )
             if not recover_all:
-                cutoff = datetime.utcnow() - timedelta(seconds=max(60, settings.TASK_HEARTBEAT_TIMEOUT_SECONDS))
-                postprocess_query = postprocess_query.filter(AsrTask.postprocess_started_at < cutoff)
+                cutoff = datetime.utcnow() - timedelta(
+                    seconds=max(60, settings.TASK_HEARTBEAT_TIMEOUT_SECONDS)
+                )
+                postprocess_query = postprocess_query.filter(
+                    AsrTask.postprocess_started_at < cutoff
+                )
                 if self._active_postprocess_ids:
-                    postprocess_query = postprocess_query.filter(~AsrTask.id.in_(self._active_postprocess_ids))
+                    postprocess_query = postprocess_query.filter(
+                        ~AsrTask.id.in_(self._active_postprocess_ids)
+                    )
             stale_postprocess = postprocess_query.all()
             for task in stale_postprocess:
                 task.postprocess_status = (
-                    "pending" if (task.postprocess_attempt_count or 0) < (task.max_retries or 3) else "failed"
+                    "pending"
+                    if (task.postprocess_attempt_count or 0) < (task.max_retries or 3)
+                    else "failed"
                 )
                 task.postprocess_error = "Worker 重启，采集后处理将从幂等阶段继续"
                 task.postprocess_started_at = None
             if stale_postprocess:
                 db.commit()
-                logger.warning("Worker 从断点回收 %s 个采集后处理任务", len(stale_postprocess))
+                logger.warning(
+                    "Worker 从断点回收 %s 个采集后处理任务", len(stale_postprocess)
+                )
         finally:
             db.close()
 
@@ -286,15 +322,19 @@ class AsrWorker:
             )
             if available_slots == 0:
                 return
-            occupied_lanes = {
-                str(row[0])
-                for row in (
-                    db.query(AsrTask.task_type)
-                    .filter(AsrTask.id.in_(self._active_task_ids))
-                    .distinct()
-                    .all()
-                )
-            } if self._active_task_ids else set()
+            occupied_lanes = (
+                {
+                    str(row[0])
+                    for row in (
+                        db.query(AsrTask.task_type)
+                        .filter(AsrTask.id.in_(self._active_task_ids))
+                        .distinct()
+                        .all()
+                    )
+                }
+                if self._active_task_ids
+                else set()
+            )
             queued_ids = list_queued_task_ids_for_available_lanes(
                 db,
                 min(plan.queue_capacity, available_slots),
@@ -303,21 +343,25 @@ class AsrWorker:
 
             for task_id in queued_ids:
                 now = datetime.utcnow()
-                claimed = db.query(AsrTask).filter(
-                    AsrTask.id == task_id,
-                    AsrTask.status == "queued",
-                    AsrTask.cancel_requested_at.is_(None),
-                ).update(
-                    {
-                        AsrTask.status: "processing",
-                        AsrTask.started_at: now,
-                        AsrTask.completed_at: None,
-                        AsrTask.error_message: None,
-                        AsrTask.worker_id: self._worker_id,
-                        AsrTask.heartbeat_at: now,
-                        AsrTask.retry_count: AsrTask.retry_count + 1,
-                    },
-                    synchronize_session=False,
+                claimed = (
+                    db.query(AsrTask)
+                    .filter(
+                        AsrTask.id == task_id,
+                        AsrTask.status == "queued",
+                        AsrTask.cancel_requested_at.is_(None),
+                    )
+                    .update(
+                        {
+                            AsrTask.status: "processing",
+                            AsrTask.started_at: now,
+                            AsrTask.completed_at: None,
+                            AsrTask.error_message: None,
+                            AsrTask.worker_id: self._worker_id,
+                            AsrTask.heartbeat_at: now,
+                            AsrTask.retry_count: AsrTask.retry_count + 1,
+                        },
+                        synchronize_session=False,
+                    )
                 )
                 db.commit()
                 if not claimed:
@@ -354,25 +398,32 @@ class AsrWorker:
             if not row:
                 return
             now = datetime.utcnow()
-            claimed = db.query(AsrTask).filter(
-                AsrTask.id == row.id,
-                AsrTask.postprocess_status.in_(["pending", "failed"]),
-            ).update(
-                {
-                    AsrTask.postprocess_status: "processing",
-                    AsrTask.postprocess_started_at: now,
-                    AsrTask.postprocess_completed_at: None,
-                    AsrTask.postprocess_error: None,
-                    AsrTask.postprocess_attempt_count: AsrTask.postprocess_attempt_count + 1,
-                    AsrTask.heartbeat_at: now,
-                    AsrTask.worker_id: self._worker_id,
-                },
-                synchronize_session=False,
+            claimed = (
+                db.query(AsrTask)
+                .filter(
+                    AsrTask.id == row.id,
+                    AsrTask.postprocess_status.in_(["pending", "failed"]),
+                )
+                .update(
+                    {
+                        AsrTask.postprocess_status: "processing",
+                        AsrTask.postprocess_started_at: now,
+                        AsrTask.postprocess_completed_at: None,
+                        AsrTask.postprocess_error: None,
+                        AsrTask.postprocess_attempt_count: AsrTask.postprocess_attempt_count
+                        + 1,
+                        AsrTask.heartbeat_at: now,
+                        AsrTask.worker_id: self._worker_id,
+                    },
+                    synchronize_session=False,
+                )
             )
             db.commit()
             if not claimed:
                 return
-            postprocess_task = asyncio.create_task(self._process_postprocess_task(row.id))
+            postprocess_task = asyncio.create_task(
+                self._process_postprocess_task(row.id)
+            )
             self._active_postprocess_tasks.add(postprocess_task)
             self._active_postprocess_ids.add(row.id)
 
@@ -391,17 +442,27 @@ class AsrWorker:
         db = SessionLocal()
         try:
             task = db.get(AsrTask, task_id)
-            if not task or task.status != "completed" or task.postprocess_status != "processing":
+            if (
+                not task
+                or task.status != "completed"
+                or task.postprocess_status != "processing"
+            ):
                 return
-            publish_task_event("asr", task, "postprocess_started", {"session_id": task.session_id})
+            publish_task_event(
+                "asr", task, "postprocess_started", {"session_id": task.session_id}
+            )
             result = process_session_post_collection(db, task.session_id)
             task = db.get(AsrTask, task_id)
             task.postprocess_result = result
             task.postprocess_completed_at = datetime.utcnow()
             task.postprocess_status = "completed" if result["success"] else "failed"
-            task.postprocess_error = "; ".join(
-                f"{stage}: {error}" for stage, error in result.get("errors", {}).items()
-            )[:2000] or None
+            task.postprocess_error = (
+                "; ".join(
+                    f"{stage}: {error}"
+                    for stage, error in result.get("errors", {}).items()
+                )[:2000]
+                or None
+            )
             touch_task(task, self._worker_id)
             db.add(
                 ScraperLog(
@@ -413,7 +474,9 @@ class AsrWorker:
                     ),
                     raw_json={
                         "stage": "post_collection",
-                        "event": "postprocess_completed" if result["success"] else "postprocess_failed",
+                        "event": "postprocess_completed"
+                        if result["success"]
+                        else "postprocess_failed",
                         "session_id": task.session_id,
                         "details": result,
                     },
@@ -447,7 +510,9 @@ class AsrWorker:
                     )
                 )
                 db.commit()
-                publish_task_event("asr", task, "postprocess_failed", {"error": task.postprocess_error})
+                publish_task_event(
+                    "asr", task, "postprocess_failed", {"error": task.postprocess_error}
+                )
             logger.exception("任务 %s 采集后处理失败: %s", task_id, exc)
         finally:
             db.close()
@@ -570,7 +635,9 @@ class AsrWorker:
             .first()
             is not None
         )
-        task.status = TaskStatus.COMPLETED if completed_chunk_exists else TaskStatus.CANCELLED
+        task.status = (
+            TaskStatus.COMPLETED if completed_chunk_exists else TaskStatus.CANCELLED
+        )
         task.error_message = message[:500]
         task.completed_at = datetime.utcnow()
         task.postprocess_status = "skipped"
@@ -602,12 +669,16 @@ class AsrWorker:
                 task.error_message = None
                 touch_task(task, self._worker_id)
                 db.commit()
-                publish_task_event("asr", task, "started", {"session_id": task.session_id})
+                publish_task_event(
+                    "asr", task, "started", {"session_id": task.session_id}
+                )
 
                 session = db.get(LiveSession, task.session_id)
                 if not session:
                     raise RuntimeError("ASR 任务关联的直播场次不存在")
-                stream = db.get(StreamSource, task.stream_id) if task.stream_id else None
+                stream = (
+                    db.get(StreamSource, task.stream_id) if task.stream_id else None
+                )
                 if not stream or not stream.m3u8_url:
                     raise RuntimeError("ASR 任务缺少真实直播流地址，请先刷新场次流地址")
 
@@ -624,7 +695,9 @@ class AsrWorker:
                     return
 
                 m3u8_url = stream.m3u8_url
-                headers = dict(stream.headers_json) if stream and stream.headers_json else {}
+                headers = (
+                    dict(stream.headers_json) if stream and stream.headers_json else {}
+                )
 
                 # ── 流地址自动刷新：转写前先探测 m3u8 是否有效 ──
                 m3u8_url, stream = await self._auto_refresh_stream_if_expired(
@@ -668,7 +741,8 @@ class AsrWorker:
                         # 下一次尝试改用精确定位，不让其它分片背负这个标志。
                         slow_seek_retried = False
                         while (
-                            chunk.status not in {
+                            chunk.status
+                            not in {
                                 TaskStatus.COMPLETED,
                                 TaskStatus.SKIPPED,
                             }
@@ -685,9 +759,7 @@ class AsrWorker:
                                     headers,
                                     is_live=is_live,
                                     audio_buffer=live_audio_buffer,
-                                    seek_mode=(
-                                        "slow" if slow_seek_retried else "fast"
-                                    ),
+                                    seek_mode=("slow" if slow_seek_retried else "fast"),
                                 )
                             finally:
                                 await self._release_resource_slot(task.id)
@@ -710,9 +782,7 @@ class AsrWorker:
                                     )
                                     if boundary == "skip":
                                         chunk.status = TaskStatus.SKIPPED
-                                        chunk.error_message = (
-                                            "分片起点超出回放真实时长，该区间在回放中不存在，已安全跳过"
-                                        )
+                                        chunk.error_message = "分片起点超出回放真实时长，该区间在回放中不存在，已安全跳过"
                                         chunk.completed_at = datetime.utcnow()
                                         db.commit()
                                         publish_task_event(
@@ -725,7 +795,10 @@ class AsrWorker:
                                             },
                                         )
                                         continue
-                                    if boundary == "slow_retry" and not slow_seek_retried:
+                                    if (
+                                        boundary == "slow_retry"
+                                        and not slow_seek_retried
+                                    ):
                                         slow_seek_retried = True
                                         chunk.status = TaskStatus.PENDING
                                         chunk.error_message = (
@@ -746,28 +819,35 @@ class AsrWorker:
                                     # 第一次失败后立即强制刷新，第二次尝试使用新地址。
                                     # 已完成分片保持不动，因此这里是真正的断点续传。
                                     previous_stream_id = task.stream_id
-                                    refreshed_url, refreshed_source = await self._auto_refresh_stream_if_expired(
+                                    (
+                                        refreshed_url,
+                                        refreshed_source,
+                                    ) = await self._auto_refresh_stream_if_expired(
                                         db,
                                         task,
                                         m3u8_url,
                                         headers,
                                         force_refresh=True,
                                     )
-                                    if (
-                                        refreshed_url != m3u8_url
-                                        or (
-                                            refreshed_source is not None
-                                            and refreshed_source.id != previous_stream_id
-                                        )
+                                    if refreshed_url != m3u8_url or (
+                                        refreshed_source is not None
+                                        and refreshed_source.id != previous_stream_id
                                     ):
                                         m3u8_url = refreshed_url
-                                        if refreshed_source and refreshed_source.headers_json:
-                                            headers = dict(refreshed_source.headers_json)
+                                        if (
+                                            refreshed_source
+                                            and refreshed_source.headers_json
+                                        ):
+                                            headers = dict(
+                                                refreshed_source.headers_json
+                                            )
                                         chunk.source_url_hash = hashlib.sha256(
                                             m3u8_url.encode("utf-8")
                                         ).hexdigest()
                                         chunk.status = TaskStatus.PENDING
-                                        chunk.error_message = "回放地址已自动刷新，正在从当前分片继续"
+                                        chunk.error_message = (
+                                            "回放地址已自动刷新，正在从当前分片继续"
+                                        )
                                         db.commit()
                                         publish_task_event(
                                             "asr",
@@ -775,7 +855,10 @@ class AsrWorker:
                                             "stream_refreshed_for_chunk_retry",
                                             {"chunk_index": chunk.chunk_index},
                                         )
-                        if chunk.status not in {TaskStatus.COMPLETED, TaskStatus.SKIPPED}:
+                        if chunk.status not in {
+                            TaskStatus.COMPLETED,
+                            TaskStatus.SKIPPED,
+                        }:
                             db.refresh(session)
                             if should_handoff_realtime_failure(
                                 task.task_type,
@@ -808,9 +891,13 @@ class AsrWorker:
                             )
                             logger.info("任务 %s 已在分片边界礼让实时直播任务", task.id)
                             return
-                        if not is_live and self._has_newer_queued_offline_task(db, task):
+                        if not is_live and self._has_newer_queued_offline_task(
+                            db, task
+                        ):
                             requeue_offline_task_for_live_priority(task)
-                            task.error_message = "已保存当前断点，先处理最新结束的直播终稿"
+                            task.error_message = (
+                                "已保存当前断点，先处理最新结束的直播终稿"
+                            )
                             db.commit()
                             publish_task_event(
                                 "asr",
@@ -877,7 +964,9 @@ class AsrWorker:
                         chunk_index=index,
                         start_seconds=start_seconds,
                         end_seconds=end_seconds,
-                        source_url_hash=hashlib.sha256(m3u8_url.encode("utf-8")).hexdigest(),
+                        source_url_hash=hashlib.sha256(
+                            m3u8_url.encode("utf-8")
+                        ).hexdigest(),
                         status=TaskStatus.PENDING,
                         max_retries=max(1, settings.ASR_CHUNK_MAX_RETRIES),
                     )
@@ -927,8 +1016,18 @@ class AsrWorker:
                 task.postprocess_result = None
                 touch_task(task, self._worker_id)
                 db.commit()
-                publish_task_event("asr", task, "completed", {"segment_count": segment_count, "chunk_count": len(chunks)})
-                logger.info("任务 %s 完成: %s 个分片，%s 个话术片段", task_id, len(chunks), segment_count)
+                publish_task_event(
+                    "asr",
+                    task,
+                    "completed",
+                    {"segment_count": segment_count, "chunk_count": len(chunks)},
+                )
+                logger.info(
+                    "任务 %s 完成: %s 个分片，%s 个话术片段",
+                    task_id,
+                    len(chunks),
+                    segment_count,
+                )
 
             except _YieldToLiveTask:
                 db.rollback()
@@ -948,7 +1047,9 @@ class AsrWorker:
                     task.postprocess_status = "skipped"
                     touch_task(task, self._worker_id)
                     db.commit()
-                    publish_task_event("asr", task, "cancelled", {"message": task.error_message})
+                    publish_task_event(
+                        "asr", task, "cancelled", {"message": task.error_message}
+                    )
                 logger.info("任务 %s 已按用户要求安全停止", task_id)
             except Exception as exc:
                 logger.error("任务 %s 失败: %s", task_id, exc)
@@ -963,7 +1064,9 @@ class AsrWorker:
                             and not isinstance(exc, _CompletenessRepairLimitExceeded)
                         )
                         task.status = (
-                            TaskStatus.QUEUED if should_auto_repair else TaskStatus.FAILED
+                            TaskStatus.QUEUED
+                            if should_auto_repair
+                            else TaskStatus.FAILED
                         )
                         task.error_message = (
                             f"完整度补齐第 {task.retry_count} 轮未完成，已自动续接：{exc}"
@@ -984,7 +1087,9 @@ class AsrWorker:
                         )
                 except Exception as persist_exc:
                     db.rollback()
-                    logger.exception("任务 %s 失败状态保存异常: %s", task_id, persist_exc)
+                    logger.exception(
+                        "任务 %s 失败状态保存异常: %s", task_id, persist_exc
+                    )
             finally:
                 if live_audio_buffer and live_audio_buffer.is_running:
                     await live_audio_buffer.stop()
@@ -1009,7 +1114,9 @@ class AsrWorker:
                     )
                 except Exception as queue_exc:
                     db.rollback()
-                    logger.warning("任务 %s 完成后补充 ASR 队列失败: %s", task_id, queue_exc)
+                    logger.warning(
+                        "任务 %s 完成后补充 ASR 队列失败: %s", task_id, queue_exc
+                    )
                 db.close()
 
     @staticmethod
@@ -1149,7 +1256,9 @@ class AsrWorker:
 
             if health["alive"]:
                 logger.info("任务 %s: 流地址有效，直接开始转写", task.id)
-                return m3u8_url, db.get(StreamSource, task.stream_id) if task.stream_id else None
+                return m3u8_url, db.get(
+                    StreamSource, task.stream_id
+                ) if task.stream_id else None
 
         logger.warning(
             "任务 %s: 流地址已过期（%s），尝试自动刷新...",
@@ -1158,7 +1267,9 @@ class AsrWorker:
         )
 
         # ── 2. 调后端 API 自动刷新 ──
-        refresh_url = f"{_BACKEND_BASE_URL}/live-sessions/{task.session_id}/refresh-stream"
+        refresh_url = (
+            f"{_BACKEND_BASE_URL}/live-sessions/{task.session_id}/refresh-stream"
+        )
         refresh_error_detail = ""
         try:
             async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
@@ -1179,7 +1290,9 @@ class AsrWorker:
                                 StreamSource.session_id == task.session_id,
                                 StreamSource.status == "active",
                             )
-                            .order_by(StreamSource.fetched_at.desc(), StreamSource.id.desc())
+                            .order_by(
+                                StreamSource.fetched_at.desc(), StreamSource.id.desc()
+                            )
                             .first()
                         )
                         if new_source:
@@ -1189,14 +1302,20 @@ class AsrWorker:
                         # 如果没找到新记录，直接用返回的 URL
                         return new_url, None
                     else:
-                        logger.warning("任务 %s: 刷新 API 返回成功但无 stream_url", task.id)
+                        logger.warning(
+                            "任务 %s: 刷新 API 返回成功但无 stream_url", task.id
+                        )
                 else:
                     error_detail = "未知错误"
                     try:
-                        error_detail = response.json().get("detail", response.text[:200])
+                        error_detail = response.json().get(
+                            "detail", response.text[:200]
+                        )
                     except Exception:
                         error_detail = response.text[:200]
-                    refresh_error_detail = sanitize_ffmpeg_error(str(error_detail or "未知错误"))[:300]
+                    refresh_error_detail = sanitize_ffmpeg_error(
+                        str(error_detail or "未知错误")
+                    )[:300]
                     logger.warning(
                         "任务 %s: 流地址刷新 API 返回 %s: %s",
                         task.id,
@@ -1231,7 +1350,9 @@ class AsrWorker:
             task.id,
             error_msg or "未知原因",
         )
-        return m3u8_url, db.get(StreamSource, task.stream_id) if task.stream_id else None
+        return m3u8_url, db.get(
+            StreamSource, task.stream_id
+        ) if task.stream_id else None
 
     @staticmethod
     def _ensure_task_running(db, task: AsrTask) -> None:
@@ -1329,7 +1450,12 @@ class AsrWorker:
         db.commit()
         for chunk in chunks:
             db.refresh(chunk)
-        publish_task_event("asr", task, "chunks_created", {"chunk_count": len(chunks), "duration_seconds": duration})
+        publish_task_event(
+            "asr",
+            task,
+            "chunks_created",
+            {"chunk_count": len(chunks), "duration_seconds": duration},
+        )
         return chunks
 
     @staticmethod
@@ -1458,7 +1584,11 @@ class AsrWorker:
                     while not connected and monotonic() < deadline:
                         if not is_live and self._has_queued_live_task(db, task.id):
                             raise _YieldToLiveTask
-                        logger.info("任务 %s 分片 %s 等待 FunASR 模型就绪", task.id, chunk.chunk_index)
+                        logger.info(
+                            "任务 %s 分片 %s 等待 FunASR 模型就绪",
+                            task.id,
+                            chunk.chunk_index,
+                        )
                         await asyncio.sleep(3)
                         connected = await client.connect()
                     if not connected and not settings.asr_mock_enabled:
@@ -1468,7 +1598,9 @@ class AsrWorker:
                         )
 
                     expected_timeout = int((duration_seconds or 0) * 2) + 120
-                    timeout = max(60, min(settings.ASR_TASK_TIMEOUT_SECONDS, expected_timeout))
+                    timeout = max(
+                        60, min(settings.ASR_TASK_TIMEOUT_SECONDS, expected_timeout)
+                    )
                     segment_count = await asyncio.wait_for(
                         self._consume_transcription(db, task, chunk, client, pipe),
                         timeout=timeout,
@@ -1577,7 +1709,9 @@ class AsrWorker:
                 heartbeat_db.commit()
             except Exception as exc:
                 heartbeat_db.rollback()
-                logger.warning("任务 %s 分片 %s 心跳更新失败: %s", task_id, chunk_id, exc)
+                logger.warning(
+                    "任务 %s 分片 %s 心跳更新失败: %s", task_id, chunk_id, exc
+                )
             finally:
                 heartbeat_db.close()
 
@@ -1595,9 +1729,11 @@ class AsrWorker:
             for segment in segments
             if segment.text_content
         )
-        existing = db.query(TranscriptFullText).filter(
-            TranscriptFullText.session_id == task.session_id
-        ).first()
+        existing = (
+            db.query(TranscriptFullText)
+            .filter(TranscriptFullText.session_id == task.session_id)
+            .first()
+        )
         if existing:
             existing.full_text = full_text
         else:
@@ -1628,18 +1764,35 @@ class AsrWorker:
         ):
             self._ensure_task_running(db, task)
             absolute_result = dict(result)
-            absolute_result["segment_start"] = offset + float(result.get("segment_start") or 0)
-            absolute_result["segment_end"] = offset + float(result.get("segment_end") or 0)
+            absolute_result["segment_start"] = offset + float(
+                result.get("segment_start") or 0
+            )
+            absolute_result["segment_end"] = offset + float(
+                result.get("segment_end") or 0
+            )
             # 行业知识纠错：对 ASR 输出的原始文本做品牌名和术语校正
             raw_text = absolute_result.get("text", "")
             corrected_text = correct_asr_text(raw_text) if raw_text else ""
             absolute_result["text"] = corrected_text
+            relative_words = result.get("word_timestamps") or []
+            absolute_words = shift_word_timestamps(relative_words, offset)
+            corrected_words, timestamp_source = remap_corrected_text(
+                raw_text,
+                corrected_text,
+                absolute_words,
+                str(result.get("timestamp_source") or "segment_estimated"),
+            )
+            absolute_result["word_timestamps"] = corrected_words
+            absolute_result["timestamp_source"] = timestamp_source
             segment = TranscriptSegment(
                 session_id=task.session_id,
                 asr_chunk_id=chunk.id,
                 segment_start=absolute_result["segment_start"],
                 segment_end=absolute_result["segment_end"],
                 text_content=corrected_text,
+                raw_text_content=raw_text,
+                word_timestamps_json=corrected_words or None,
+                timestamp_source=timestamp_source,
                 asr_status="processing" if task.task_type == "offline" else "completed",
                 segment_type=segment_type_for_task(task.task_type),
             )

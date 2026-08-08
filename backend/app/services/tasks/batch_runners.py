@@ -39,6 +39,7 @@ from app.services.sync.de_sync import (
 from app.services.clips.clip_service import (
     generate_and_render_session,
     pending_clip_session_ids,
+    rerender_clip_subtitles,
 )
 from app.services.tasks.exceptions import TaskBatchFailed, TaskCancellationRequested
 
@@ -525,6 +526,44 @@ def run_clip_batch(
     """
     task = db.get(ScraperTask, task_id)
     options = dict(task.task_options_json or {}) if task else {}
+
+    if options.get("operation") == "subtitle_rerender":
+        clip_id = int(options.get("clip_id") or 0)
+        if clip_id <= 0:
+            raise TaskBatchFailed("字幕重制任务缺少成片 ID", {"clip_id": clip_id})
+        _ensure_running(should_cancel)
+        report(
+            "subtitle_rerender",
+            10,
+            0,
+            1,
+            "正在复用无字幕底片重制字幕",
+            {"clip_id": clip_id},
+        )
+        record = rerender_clip_subtitles(
+            db,
+            clip_id,
+            requested_segments=options.get("segments"),
+            target_render_version=int(options.get("target_render_version") or 0)
+            or None,
+        )
+        result = {
+            "session_id": record.session_id,
+            "clip_id": record.id,
+            "render_version": record.render_version,
+            "subtitle_precision": record.subtitle_precision,
+            "rendered_count": 1,
+            "failed_count": 0,
+        }
+        report(
+            "subtitle_rerender",
+            99,
+            1,
+            1,
+            f"字幕重制完成，当前版本 v{record.render_version}",
+            result,
+        )
+        return result
 
     specified = options.get("session_ids") or (options.get("session_id"),)
     if specified:

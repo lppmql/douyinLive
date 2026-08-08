@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logger import logger
 from app.models.clip_clips import ClipClip
+from app.services.asr.timestamp_alignment import aggregate_timestamp_precision
 from app.services.clips.segment_selector import (
     MAX_CLIP_SECONDS,
     MAX_SEGMENTS_PER_CLIP,
@@ -79,6 +80,7 @@ def normalize_clip(
         return None
 
     segments: list[dict[str, Any]] = []
+    resolved_units: list[TranscriptUnit] = []
     duration = 0.0
     previous_end: float | None = None
     for seg in raw_segments:
@@ -98,7 +100,17 @@ def normalize_clip(
             logger.warning("剪辑方案 #%s 片段与上一段严重重叠，已丢弃", order)
             return None
         previous_end = unit.end
-        segments.append({"start": unit.start, "end": unit.end, "text": unit.text})
+        segments.append(
+            {
+                "start": unit.start,
+                "end": unit.end,
+                "text": unit.text,
+                "transcript_segment_id": unit.segment_id,
+                "words": unit.words or [],
+                "subtitle_precision": unit.timestamp_source,
+            }
+        )
+        resolved_units.append(unit)
         duration += unit.end - unit.start
 
     if not (MIN_CLIP_SECONDS <= duration <= MAX_CLIP_SECONDS):
@@ -112,6 +124,11 @@ def normalize_clip(
         return None
 
     cleaned_topics = [str(t).strip() for t in topics if str(t).strip()][:6]
+    subtitle_sources = {
+        str(segment.get("subtitle_precision") or "segment_estimated")
+        for segment in segments
+    }
+    subtitle_precision = aggregate_timestamp_precision(subtitle_sources)
     return {
         "clip_order": order,
         "title": title[:200],
@@ -120,6 +137,28 @@ def normalize_clip(
         "topics": cleaned_topics,
         "segments": segments,
         "duration_seconds": round(duration),
+        "subtitle_precision": subtitle_precision,
+        "selection_evidence": {
+            "signal_score": round(
+                sum(
+                    float(unit.evidence.get("signal_score") or 0)
+                    for unit in resolved_units
+                    if unit.evidence
+                ),
+                1,
+            ),
+            "segments": [
+                {
+                    "transcript_segment_id": segment.get("transcript_segment_id"),
+                    **(unit.evidence or {}),
+                }
+                for segment, unit in zip(
+                    segments,
+                    resolved_units,
+                    strict=True,
+                )
+            ],
+        },
     }
 
 
@@ -135,8 +174,8 @@ def save_clip_records(
 ) -> list[ClipClip]:
     """把校验通过的方案写入 clip_clips。
 
-    自动模式（is_manual=False）先清掉该场旧的 draft/failed 记录再插入，
-    且按校验通过顺序从 1 重新编号（丢弃的方案不占位）；
+    自动模式（is_manual=False）先把该场旧的 draft/failed 记录标为 discarded，
+    保留其版本文件引用用于追溯，再按校验通过顺序从 1 重新编号；
     手动重剪不删除旧记录（旧成片可能在发布/确认中），新记录渲染成功后
     由 clip_service 把同序号的旧记录标记为 discarded，渲染失败旧记录保留。
     """
@@ -146,7 +185,7 @@ def save_clip_records(
         db.query(ClipClip).filter(
             ClipClip.session_id == session_id,
             ClipClip.status.in_(["draft", "failed"]),
-        ).delete(synchronize_session=False)
+        ).update({"status": "discarded"}, synchronize_session=False)
         db.flush()
 
     records: list[ClipClip] = []
@@ -157,10 +196,14 @@ def save_clip_records(
             clip_order=item["clip_order"],
             status="draft",
             title=item["title"],
+            theme=item.get("theme"),
             description=item["description"],
             topics_json=item["topics"],
             segments_json=item["segments"],
             duration_seconds=item["duration_seconds"],
+            subtitle_precision=item.get("subtitle_precision") or "segment_estimated",
+            selection_evidence_json=item.get("selection_evidence") or {},
+            render_version=1,
             source_text=source_text,
             ai_raw_json=ai_raw,
             is_manual=1 if is_manual else 0,

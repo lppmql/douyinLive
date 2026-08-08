@@ -1,10 +1,10 @@
 """ffmpeg 剪辑执行引擎。
 
-管线（每片段一次重编码完成，最后无损拼接）：
-1. 每个片段独立切割：-ss 前置 input seeking（本地文件精确）+ scale/crop 转竖屏 9:16
-   + subtitles 烧录 ASS 大字幕（该片段自己的 0 起时间轴）→ 一次重编码输出；
-2. concat demuxer 流拷贝拼接各片段（同参数可直接 -c copy）；
-3. 输出首帧截图作为封面。
+管线：
+1. 每个片段精确切割并转竖屏 9:16，生成无字幕中间视频；
+2. concat 无损拼接为 clean.mp4；
+3. 按成片局部时间轴一次性烧录 ASS，同时输出可导入剪辑软件的 SRT；
+4. 字幕修订只重跑第 3 步，不再重新下载回放或切割画面。
 
 字幕烧录依赖带 libass 的 ffmpeg：优先使用项目内 .runtime/ffmpeg/ffmpeg
 （evermeet.cx 静态版，含 libass+fontconfig），找不到时回退系统 ffmpeg
@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import functools
-import os
 import re
 import shutil
 import subprocess
@@ -22,7 +21,7 @@ from pathlib import Path
 
 from app.core.config import PROJECT_ROOT, settings
 from app.core.logger import logger
-from app.services.clips.ass_subtitle import write_ass_file
+from app.services.clips.ass_subtitle import write_ass_file, write_srt_file
 from app.services.clips.replay_downloader import session_video_dir
 
 # macOS 系统字体目录，供 fontconfig 找不到字体时兜底（Linux 部署忽略）
@@ -33,7 +32,7 @@ MACOS_FONT_DIR = "/System/Library/Fonts"
 def resolve_clip_ffmpeg() -> Path | None:
     """定位带字幕能力的 ffmpeg：环境变量 > 项目内静态版 > 系统 ffmpeg。"""
     candidates: list[Path] = []
-    env_bin = os.environ.get("CLIP_FFMPEG_BIN")
+    env_bin = settings.CLIP_FFMPEG_BIN.strip()
     if env_bin:
         candidates.append(Path(env_bin))
     candidates.append(Path(PROJECT_ROOT) / ".runtime" / "ffmpeg" / "ffmpeg")
@@ -115,17 +114,15 @@ def _build_segment_command(
     replay: Path,
     start: float,
     duration: float,
-    ass_file: Path,
     output: Path,
     encoder: str | None,
 ) -> list[str]:
-    """单片段命令：切割 + 竖屏 9:16 居中裁剪 + ASS 字幕烧录，一次重编码。"""
+    """单片段命令：切割并转竖屏，不烧字幕，供后续快速重制字幕复用。"""
     target_w = settings.CLIP_TARGET_WIDTH
     target_h = settings.CLIP_TARGET_HEIGHT
     vf = (
         f"scale={target_w}:{target_h}:force_original_aspect_ratio=increase,"
-        f"crop={target_w}:{target_h},"
-        f"subtitles={_escape_filter_path(ass_file)}:fontsdir={_escape_filter_path(Path(MACOS_FONT_DIR))}"
+        f"crop={target_w}:{target_h}"
     )
     return [
         str(binary),
@@ -154,6 +151,45 @@ def _build_segment_command(
         "44100",
         "-ac",
         "2",
+        "-pix_fmt",
+        "yuv420p",
+        "-tag:v",
+        "avc1",
+        "-movflags",
+        "+faststart",
+        str(output),
+    ]
+
+
+def _build_subtitle_burn_command(
+    binary: Path,
+    clean_video: Path,
+    ass_file: Path,
+    output: Path,
+    encoder: str | None,
+) -> list[str]:
+    """在无字幕成片上烧录字幕；音频直接复制，降低重制成本。"""
+    vf = (
+        f"subtitles={_escape_filter_path(ass_file)}:"
+        f"fontsdir={_escape_filter_path(Path(MACOS_FONT_DIR))}"
+    )
+    return [
+        str(binary),
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(clean_video),
+        "-vf",
+        vf,
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a:0?",
+        *_video_encode_args(binary, encoder),
+        "-c:a",
+        "copy",
         "-pix_fmt",
         "yuv420p",
         "-tag:v",
@@ -231,22 +267,29 @@ def render_clip(
     *,
     clip_order: int,
     session_id: int,
+    clip_id: int | None = None,
+    render_version: int = 1,
     encoder: str | None = None,
 ) -> dict[str, Path]:
-    """渲染一条成片，返回 {video, cover, subtitle} 路径。
+    """渲染一条成片，返回视频、干净底片、封面及 ASS/SRT 路径。
 
     segments: [{start, end, text}]（已由 copywriter 校验，时间戳相对回放）。
     """
     binary = _require_ffmpeg()
     video_dir = session_video_dir(session_id)
-    tmp_dir = video_dir / "tmp" / f"clip_{clip_order}"
+    stable_clip_id = clip_id or clip_order
+    artifact_dir = video_dir / "clips" / str(stable_clip_id) / f"v{render_version}"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    tmp_dir = video_dir / "tmp" / f"clip_{stable_clip_id}_v{render_version}"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    out_video = video_dir / f"clip_{clip_order}.mp4"
-    out_cover = video_dir / f"clip_{clip_order}_cover.jpg"
-    merged_ass = video_dir / f"clip_{clip_order}.ass"
+    clean_video = artifact_dir / "clean.mp4"
+    out_video = artifact_dir / "video.mp4"
+    out_cover = artifact_dir / "cover.jpg"
+    merged_ass = artifact_dir / "subtitle.ass"
+    merged_srt = artifact_dir / "subtitle.srt"
 
     try:
-        # 1) 逐片段切割 + 竖屏 + 字幕烧录
+        # 1) 逐片段切割 + 竖屏，保留无字幕底片
         concat_lines: list[str] = []
         for index, segment in enumerate(segments, start=1):
             start = float(segment["start"])
@@ -254,13 +297,10 @@ def render_clip(
             duration = end - start
             if duration <= 0:
                 raise ValueError(f"片段 {index} 时长非法: {start}-{end}")
-            # 每个片段独立字幕（时间轴从 0 起），保证拼接后字幕节奏正确
-            seg_ass = tmp_dir / f"seg_{index}.ass"
-            write_ass_file([segment], seg_ass)
             seg_out = tmp_dir / f"seg_{index}.mp4"
             _run_ffmpeg(
                 _build_segment_command(
-                    binary, replay, start, duration, seg_ass, seg_out, encoder
+                    binary, replay, start, duration, seg_out, encoder
                 ),
                 f"片段{index}切割({start:.0f}s-{end:.0f}s)",
             )
@@ -269,13 +309,73 @@ def render_clip(
         # 2) concat 拼接（流拷贝）
         concat_file = tmp_dir / "concat.txt"
         concat_file.write_text("\n".join(concat_lines) + "\n", encoding="utf-8")
-        _run_ffmpeg(_build_concat_command(binary, concat_file, out_video), "片段拼接")
+        _run_ffmpeg(_build_concat_command(binary, concat_file, clean_video), "片段拼接")
 
-        # 3) 封面
-        _run_ffmpeg(_build_cover_command(binary, out_video, out_cover), "封面生成")
-
-        # 4) 汇总字幕文件（供前端预览/复查）
+        # 3) 生成精确字幕并一次性烧录，拼接处的时间由字幕模块统一压缩映射
         write_ass_file(segments, merged_ass)
-        return {"video": out_video, "cover": out_cover, "subtitle": merged_ass}
+        write_srt_file(segments, merged_srt)
+        _run_ffmpeg(
+            _build_subtitle_burn_command(
+                binary, clean_video, merged_ass, out_video, encoder
+            ),
+            "字幕烧录",
+        )
+
+        # 4) 封面
+        _run_ffmpeg(_build_cover_command(binary, out_video, out_cover), "封面生成")
+        return {
+            "video": out_video,
+            "clean_video": clean_video,
+            "cover": out_cover,
+            "subtitle": merged_ass,
+            "subtitle_srt": merged_srt,
+        }
+    except Exception:
+        # 数据库尚未拿到这些路径，失败版本没有恢复价值，避免留下无引用的大文件。
+        shutil.rmtree(artifact_dir, ignore_errors=True)
+        raise
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def rerender_subtitles(
+    clean_video: Path,
+    segments: list[dict],
+    *,
+    session_id: int,
+    clip_id: int,
+    render_version: int,
+    encoder: str | None = None,
+) -> dict[str, Path]:
+    """复用无字幕底片生成新版本；旧版本文件保持不动，可随时追溯。"""
+    if not clean_video.exists():
+        raise FileNotFoundError("无字幕底片不存在，请先重新生成整条成片")
+    binary = _require_ffmpeg()
+    artifact_dir = (
+        session_video_dir(session_id) / "clips" / str(clip_id) / f"v{render_version}"
+    )
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    ass_path = artifact_dir / "subtitle.ass"
+    srt_path = artifact_dir / "subtitle.srt"
+    video_path = artifact_dir / "video.mp4"
+    cover_path = artifact_dir / "cover.jpg"
+    try:
+        write_ass_file(segments, ass_path)
+        write_srt_file(segments, srt_path)
+        _run_ffmpeg(
+            _build_subtitle_burn_command(
+                binary, clean_video, ass_path, video_path, encoder
+            ),
+            "仅重制字幕",
+        )
+        _run_ffmpeg(_build_cover_command(binary, video_path, cover_path), "封面生成")
+        return {
+            "video": video_path,
+            "clean_video": clean_video,
+            "cover": cover_path,
+            "subtitle": ass_path,
+            "subtitle_srt": srt_path,
+        }
+    except Exception:
+        shutil.rmtree(artifact_dir, ignore_errors=True)
+        raise

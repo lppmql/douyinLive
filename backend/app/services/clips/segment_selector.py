@@ -16,12 +16,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy.orm import Session
 
 from app.core.logger import logger
 from app.models.transcript_segments import TranscriptSegment
 from app.services.ai.deepseek_client import chat
+from app.services.clips.multisignal import build_multisignal_map
 
 # 输入压缩上限：中文 1 字约 1 token，320 段 * 120 字 ≈ 4 万字符量级，Flash 模型可承受。
 MAX_UNITS = 500
@@ -43,9 +45,14 @@ class TranscriptUnit:
     start: float
     end: float
     text: str
+    segment_id: int | None = None
+    words: list[dict[str, Any]] | None = None
+    timestamp_source: str = "segment_estimated"
     seg_type: str | None = None
     ai_score: float | None = None
     high_value: bool = False
+    signal_score: float = 0
+    evidence: dict[str, Any] | None = None
 
 
 def load_transcript_units(db: Session, session_id: int) -> list[TranscriptUnit]:
@@ -74,6 +81,9 @@ def load_transcript_units(db: Session, session_id: int) -> list[TranscriptUnit]:
             start=float(r.segment_start),
             end=float(r.segment_end),
             text=(r.text_content or "").strip(),
+            segment_id=int(r.id),
+            words=list(r.word_timestamps_json or []),
+            timestamp_source=r.timestamp_source or "segment_estimated",
             seg_type=r.segment_type,
             ai_score=float(r.ai_score) if r.ai_score is not None else None,
             high_value=bool(r.is_high_conversion)
@@ -86,12 +96,24 @@ def load_transcript_units(db: Session, session_id: int) -> list[TranscriptUnit]:
 
 
 def _sample_units(units: list[TranscriptUnit]) -> list[TranscriptUnit]:
-    """超长话术按时间均匀抽样，避免截断丢失后半场内容。"""
+    """超长话术保留高信号候选，同时均匀覆盖全场避免只看局部。"""
     if len(units) <= MAX_UNITS:
         return units
-    step = len(units) / MAX_UNITS
-    picked = [units[int(i * step)] for i in range(MAX_UNITS)]
-    logger.info("话术片段超限，按时间均匀抽样 %s -> %s 条", len(units), len(picked))
+    priority_limit = min(250, MAX_UNITS // 2)
+    priority = sorted(
+        units, key=lambda item: (item.signal_score, item.high_value), reverse=True
+    )[:priority_limit]
+    priority_ids = {id(item) for item in priority}
+    remaining = [item for item in units if id(item) not in priority_ids]
+    coverage_limit = MAX_UNITS - len(priority)
+    step = len(remaining) / max(coverage_limit, 1)
+    coverage = [
+        remaining[min(len(remaining) - 1, int(i * step))] for i in range(coverage_limit)
+    ]
+    picked = sorted([*priority, *coverage], key=lambda item: (item.start, item.end))
+    logger.info(
+        "话术片段超限，多信号优先+全场覆盖抽样 %s -> %s 条", len(units), len(picked)
+    )
     return picked
 
 
@@ -99,7 +121,17 @@ def _unit_text(unit: TranscriptUnit, index: int) -> str:
     text = unit.text[:MAX_UNIT_CHARS]
     prefix = "[高价值] " if unit.high_value else ""
     seg_type = f"|{unit.seg_type}" if unit.seg_type else ""
-    return f"[{index}] {unit.start:.1f}-{unit.end:.1f}{seg_type}| {prefix}{text}"
+    evidence = unit.evidence or {}
+    signal = (
+        f"|信号分{int(unit.signal_score)}"
+        f"/评论{int(evidence.get('comment_count') or 0)}"
+        f"/高意向{int(evidence.get('high_intent_comment_count') or 0)}"
+        f"/钩子{int(evidence.get('hook_count') or 0)}"
+        f"/客资窗{int(evidence.get('related_lead_count') or 0)}"
+    )
+    return (
+        f"[{index}] {unit.start:.1f}-{unit.end:.1f}{seg_type}{signal}| {prefix}{text}"
+    )
 
 
 def build_input_text(
@@ -123,7 +155,8 @@ SYSTEM_PROMPT = """你是抖音「零食店避坑」赛道的资深短视频编�
 3. 片段必须用行号引用输入话术中的某一行（segments 里写 index），
    禁止自编时间戳或把时间戳改小改大，程序会按行号取真实时间。
    每条方案片段总时长（按行的起止时间累计）在 {min_seconds}-{max_seconds} 秒之间。
-4. 优先选择 [高价值] 标注的片段、以及「选址避坑、品牌判断、预算测算、供应链、
+4. “信号分”只来自真实评论、互动指标、钩子和确认客资的可解释计算。优先选择信号强、
+   [高价值] 标注的片段、以及「选址避坑、品牌判断、预算测算、供应链、
    毛利损耗、资料钩子、私信承接」这类干货类型；避免无信息量的寒暄和口误。
 5. 标题要吸睛但不过度夸大（≤25 字）；发布文案 80-150 字，口语化，
    结尾自然引导「评论区扣1/私信领取资料」类行动；话题 3-6 个，围绕零食店避坑、
@@ -150,9 +183,15 @@ def select_clips(
     返回的 clips 是 AI 原始输出（未校验），由 copywriter 统一校验落库。
     解析失败时重试一次（temperature 降低），仍失败抛异常交由任务层记录。
     """
-    units = _sample_units(load_transcript_units(db, session_id))
+    units = load_transcript_units(db, session_id)
     if not units:
         raise ValueError(f"场次 #{session_id} 没有已完成的话术，无法选段")
+    signal_map = build_multisignal_map(db, session_id, units)
+    for unit in units:
+        evidence = signal_map.get(int(unit.segment_id or 0), {})
+        unit.evidence = evidence
+        unit.signal_score = float(evidence.get("signal_score") or 0)
+    units = _sample_units(units)
 
     user_message = build_input_text(session_title, anchor_name, units)
     if user_hint:

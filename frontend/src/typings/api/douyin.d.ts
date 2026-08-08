@@ -1233,6 +1233,9 @@ declare namespace Api {
       start: number;
       end: number;
       text: string;
+      transcript_segment_id?: number | null;
+      words?: Array<{ text: string; start: number; end: number }>;
+      subtitle_precision?: 'funasr_exact' | 'funasr_aligned' | 'funasr_remapped' | 'segment_estimated';
     }
 
     interface ClipClip {
@@ -1241,12 +1244,35 @@ declare namespace Api {
       clip_order: number;
       status: 'draft' | 'approved' | 'discarded' | 'failed';
       title: string | null;
+      theme: string | null;
       description: string | null;
       topics: string[];
       segments: ClipSegment[];
       duration_seconds: number | null;
       video_path: string | null;
       cover_path: string | null;
+      subtitle_path: string | null;
+      subtitle_srt_path: string | null;
+      subtitle_precision: 'funasr_exact' | 'funasr_aligned' | 'funasr_remapped' | 'segment_estimated';
+      render_version: number;
+      can_rerender_subtitle: boolean;
+      artifact_versions: Array<Record<string, unknown>>;
+      selection_evidence: {
+        signal_score?: number;
+        segments?: Array<{
+          transcript_segment_id?: number | null;
+          signal_score?: number;
+          comment_count?: number;
+          high_intent_comment_count?: number;
+          hook_count?: number;
+          hook_strength?: string | null;
+          hook_types?: string[];
+          related_lead_count?: number;
+          lead_after_5m_count?: number;
+          attribution_label?: string;
+        }>;
+      };
+      qc: Record<string, unknown>;
       is_manual: number;
       error_message: string | null;
       created_at: string | null;

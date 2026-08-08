@@ -14,9 +14,10 @@ import {
   NText,
   useMessage
 } from 'naive-ui';
-import { useClipData, clipVideoUrl } from './composables/useClipData';
+import { clipSubtitleSrtUrl, clipVideoUrl, useClipData } from './composables/useClipData';
 import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import ClipCard from './modules/ClipCard.vue';
+import ClipEvidencePanel from './modules/ClipEvidencePanel.vue';
 
 defineOptions({ name: 'Clip' });
 
@@ -28,6 +29,16 @@ const { loading, overview, sessionOptions, actionLoading, errorMessage, selected
 /* ---------- 预览 ---------- */
 const previewClip = ref<Api.Douyin.ClipClip | null>(null);
 const previewVisible = computed(() => Boolean(previewClip.value));
+const subtitleDrafts = ref<Api.Douyin.ClipSegment[]>([]);
+const subtitlePrecisionText = computed(() => {
+  const map = {
+    funasr_exact: '逐字精确：字幕直接使用 FunASR 真实发音时间',
+    funasr_aligned: '时间对齐：模型 token 已按真实发音时间比例映射到字幕文字',
+    funasr_remapped: '纠错映射：行业词已修正并映射回原发音时间',
+    segment_estimated: '片段估算：历史话术没有逐字时间，建议校对后重制'
+  };
+  return previewClip.value ? map[previewClip.value.subtitle_precision] : '';
+});
 
 /* ---------- 生成 / 重剪弹窗 ---------- */
 const regenerateTarget = ref<Api.Douyin.ClipClip | null>(null);
@@ -43,6 +54,7 @@ function openGenerateAll() {
 
 function openPreview(clip: Api.Douyin.ClipClip) {
   previewClip.value = clip;
+  subtitleDrafts.value = clip.segments.map(segment => ({ ...segment }));
   // 浏览器原生 video 依赖短时媒体 Cookie（30 分钟），打开预览前续期，避免播放 401
   void clipData.refreshMediaCookie();
 }
@@ -56,6 +68,12 @@ function onVideoError() {
 function closePreview() {
   previewClip.value = null;
   videoError.value = '';
+}
+
+async function rerenderCurrentSubtitle() {
+  if (!previewClip.value) return;
+  const queued = await clipData.rerenderSubtitle(previewClip.value.id, subtitleDrafts.value);
+  if (queued) closePreview();
 }
 
 function openRegenerate(clip: Api.Douyin.ClipClip) {
@@ -201,6 +219,13 @@ function fmtDateTime(val: string | null): string {
           />
         </div>
         <div class="clip-page__publish">
+          <NAlert
+            :type="previewClip.subtitle_precision === 'segment_estimated' ? 'warning' : 'success'"
+            :bordered="false"
+          >
+            {{ subtitlePrecisionText }} · 当前成片 v{{ previewClip.render_version }}
+          </NAlert>
+          <ClipEvidencePanel :clip="previewClip" />
           <div class="clip-page__publish-row">
             <NText strong>标题</NText>
             <NText>{{ previewClip.title }}</NText>
@@ -223,8 +248,39 @@ function fmtDateTime(val: string | null): string {
               </template>
             </NText>
           </div>
+          <div class="clip-page__subtitle-editor">
+            <NText strong>字幕校对</NText>
+            <NText depth="3" class="clip-page__subtitle-help">
+              这里只改字幕文字，不改变画面时间；需要换画面请使用“重剪”。
+            </NText>
+            <div v-for="segment in subtitleDrafts" :key="`${segment.start}-${segment.end}`" class="clip-page__subtitle-row">
+              <NTag size="small" :bordered="false">
+                {{ segment.start.toFixed(1) }}s-{{ segment.end.toFixed(1) }}s
+              </NTag>
+              <NInput v-model:value="segment.text" type="textarea" autosize maxlength="5000" show-count />
+            </div>
+          </div>
           <NSpace class="clip-page__publish-actions">
             <NButton type="primary" @click="copyPublishContent(previewClip)">复制标题/文案/话题</NButton>
+            <NButton
+              v-if="previewClip.subtitle_srt_path"
+              tag="a"
+              :href="clipSubtitleSrtUrl(previewClip.id)"
+              target="_blank"
+              rel="noopener noreferrer"
+              secondary
+            >
+              下载 SRT
+            </NButton>
+            <NButton
+              :disabled="!previewClip.can_rerender_subtitle"
+              :loading="actionLoading"
+              secondary
+              type="info"
+              @click="rerenderCurrentSubtitle"
+            >
+              仅重制字幕
+            </NButton>
             <NButton
               v-if="previewClip.status === 'draft' && previewClip.video_path"
               ghost
@@ -387,6 +443,30 @@ function fmtDateTime(val: string | null): string {
 
 .clip-page__publish-actions {
   margin-top: 6px;
+}
+
+.clip-page__subtitle-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.clip-page__subtitle-help {
+  font-size: 12px;
+}
+
+.clip-page__subtitle-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+@media (max-width: 560px) {
+  .clip-page__subtitle-row {
+    grid-template-columns: 1fr;
+  }
 }
 
 .clip-page__hint {

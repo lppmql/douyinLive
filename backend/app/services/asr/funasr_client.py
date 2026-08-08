@@ -4,6 +4,7 @@
 重新生成最终稿。这里的“双通道”不是给任务换个名字，而是会向 FunASR
 发送不同的协议配置和不同的音频发送节奏。
 """
+
 import asyncio
 import json
 from typing import AsyncGenerator, Optional
@@ -14,6 +15,7 @@ from websockets.protocol import State
 from app.core.config import settings
 from app.core.logger import logger
 from app.services.asr.hotwords import get_hotwords_cached
+from app.services.asr.timestamp_alignment import normalize_funasr_timestamps
 
 
 # 模拟话术片段（供 mock 模式使用）
@@ -51,7 +53,9 @@ class RealtimeDraftBuffer:
         self._emitted_text = ""
         self._last_emitted_end = 0.0
 
-    def push(self, result: dict, response_mode: str | None, elapsed_seconds: float) -> Optional[dict]:
+    def push(
+        self, result: dict, response_mode: str | None, elapsed_seconds: float
+    ) -> Optional[dict]:
         """加入一次识别响应；准备好完整句子时返回，否则继续等待。"""
         if response_mode not in {"online", "2pass-online"}:
             # 停顿后的修正版比逐字碎片更完整，优先展示它并清空临时缓冲。
@@ -271,27 +275,24 @@ class FunasrClient:
             start = max(0.0, elapsed_seconds - 3.0)
             end = elapsed_seconds
             timestamp = data.get("timestamp")
-            if isinstance(timestamp, str):
-                try:
-                    timestamp = json.loads(timestamp)
-                except json.JSONDecodeError:
-                    timestamp = None
-            if isinstance(timestamp, list) and timestamp:
-                first = timestamp[0]
-                last = timestamp[-1]
-                if isinstance(first, (list, tuple)) and len(first) >= 2:
-                    start = float(first[0]) / 1000
-                    if isinstance(last, (list, tuple)) and len(last) >= 2:
-                        end = float(last[1]) / 1000
+            word_timestamps, timestamp_source = normalize_funasr_timestamps(
+                text, timestamp
+            )
+            if word_timestamps:
+                start = float(word_timestamps[0]["start"])
+                end = float(word_timestamps[-1]["end"])
 
             result = {
                 "text": text,
                 "segment_start": start,
                 "segment_end": max(start, end),
+                "word_timestamps": word_timestamps,
+                "timestamp_source": timestamp_source,
                 "is_final": bool(
                     data.get(
                         "is_final",
-                        protocol_mode == "offline" or mode in {"offline", "2pass-offline"},
+                        protocol_mode == "offline"
+                        or mode in {"offline", "2pass-offline"},
                     )
                 ),
             }
@@ -300,11 +301,15 @@ class FunasrClient:
             return result
 
         try:
-            await self._ws.send(json.dumps({
-                # 直播中发 online，FunASR 会持续返回初稿；下播后发 offline，
-                # 让完整音频经过 VAD、标点和离线模型生成最终稿。
-                **self.build_start_message(task_type),
-            }))
+            await self._ws.send(
+                json.dumps(
+                    {
+                        # 直播中发 online，FunASR 会持续返回初稿；下播后发 offline，
+                        # 让完整音频经过 VAD、标点和离线模型生成最终稿。
+                        **self.build_start_message(task_type),
+                    }
+                )
+            )
             # ⚠️ 延迟：确保 FunASR C++ 服务端处理完 JSON 配置消息，
             # 再开始发送 PCM 二进制帧，避免第一条消息被当作二进制 parse error
             await asyncio.sleep(0.5)
@@ -339,7 +344,9 @@ class FunasrClient:
                         if protocol_mode == "online"
                         else 15
                     )
-                    data = await asyncio.wait_for(result_queue.get(), timeout=result_timeout)
+                    data = await asyncio.wait_for(
+                        result_queue.get(), timeout=result_timeout
+                    )
                 except asyncio.TimeoutError:
                     if receiver_task.done() and not self.connected:
                         raise RuntimeError("FunASR 连接提前结束，本分片将从断点重试")
@@ -393,6 +400,7 @@ class FunasrClient:
         """关闭连接"""
         if self.connected:
             await self._ws.close()
+
     @staticmethod
     def frame_interval_for(protocol_mode: str) -> float:
         """在线初稿略快于实时追赶缓存，离线终稿只做事件循环让步。"""

@@ -48,9 +48,12 @@ class ClipClip(Base, TimestampMixin):
         comment="状态: draft(待确认)/approved(已确认)/discarded(已丢弃)/failed(生成失败)",
     )
     title = Column(String(200), nullable=True, comment="抖音发布标题（AI 生成）")
+    theme = Column(String(200), nullable=True, comment="成片主题摘要")
     description = Column(Text, nullable=True, comment="发布文案（AI 生成）")
     topics_json = Column(JSON, nullable=True, comment="话题标签数组")
-    segments_json = Column(JSON, nullable=False, comment="剪辑片段数组 [{start, end, text}]")
+    segments_json = Column(
+        JSON, nullable=False, comment="剪辑片段数组 [{start, end, text}]"
+    )
     duration_seconds = Column(Integer, nullable=True, comment="成片总时长（秒）")
     video_path = Column(
         String(500), nullable=True, comment="成片文件相对 data/videos 的路径"
@@ -59,6 +62,25 @@ class ClipClip(Base, TimestampMixin):
         String(500), nullable=True, comment="封面图相对 data/videos 的路径"
     )
     subtitle_path = Column(String(500), nullable=True, comment="ASS 字幕文件相对路径")
+    subtitle_srt_path = Column(
+        String(500), nullable=True, comment="SRT 字幕文件相对路径"
+    )
+    clean_video_path = Column(
+        String(500), nullable=True, comment="无字幕底片相对路径，供快速重制字幕"
+    )
+    subtitle_precision = Column(
+        String(30), nullable=False, default="segment_estimated", comment="字幕精度来源"
+    )
+    render_version = Column(
+        Integer, nullable=False, default=1, comment="当前成片渲染版本"
+    )
+    artifact_versions_json = Column(
+        JSON, nullable=True, comment="历史成片版本及文件路径"
+    )
+    selection_evidence_json = Column(
+        JSON, nullable=True, comment="评论、互动、钩子、客资等选段证据"
+    )
+    qc_json = Column(JSON, nullable=True, comment="成片自动质检结果")
     source_text = Column(Text, nullable=True, comment="AI 选段依据的话术摘要")
     ai_raw_json = Column(JSON, nullable=True, comment="AI 原始返回")
     is_manual = Column(

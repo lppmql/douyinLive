@@ -9,14 +9,23 @@
 
 from datetime import datetime
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from app.api.v1.clip import rerender_clip_subtitle
 from app.models.clip_clips import ClipClip
 from app.models.live_sessions import LiveSession
 from app.models.live_rooms import LiveRoom
 from app.models.transcript_segments import TranscriptSegment
-from app.services.clips.ass_subtitle import _format_timestamp, _split_text, build_ass
-from app.services.clips.copywriter import normalize_clip
+from app.services.clips.ass_subtitle import (
+    _format_timestamp,
+    _split_text,
+    build_ass,
+    build_srt,
+    build_subtitle_cues,
+)
+from app.services.clips.copywriter import normalize_clip, save_clip_records
 from app.services.clips.segment_selector import TranscriptUnit, load_transcript_units
 
 
@@ -47,7 +56,14 @@ class TestNormalizeClip:
         result = normalize_clip(raw, UNITS, 1)
         assert result is not None
         assert result["segments"] == [
-            {"start": 200.0, "end": 230.0, "text": "第二段话术内容"}
+            {
+                "start": 200.0,
+                "end": 230.0,
+                "text": "第二段话术内容",
+                "transcript_segment_id": None,
+                "words": [],
+                "subtitle_precision": "segment_estimated",
+            }
         ]
         assert result["duration_seconds"] == 30
 
@@ -133,6 +149,40 @@ class TestNormalizeClip:
         }
         assert normalize_clip(raw, UNITS, 3) is None  # 校验失败的不占位
 
+    def test_full_regeneration_discards_old_rows_instead_of_orphaning_files(self, db):
+        session = _seed_session(db)
+        old = ClipClip(
+            session_id=session.id,
+            clip_order=1,
+            status="draft",
+            title="旧成片",
+            segments_json=[{"start": 1.0, "end": 31.0, "text": "旧话术"}],
+            video_path=f"{session.id}/clips/old/v1/video.mp4",
+        )
+        db.add(old)
+        db.commit()
+
+        records = save_clip_records(
+            db,
+            task_id=1,
+            session_id=session.id,
+            normalized=[
+                {
+                    "clip_order": 1,
+                    "title": "新成片",
+                    "description": "新文案",
+                    "topics": [],
+                    "segments": [{"start": 1.0, "end": 31.0, "text": "新话术"}],
+                    "duration_seconds": 30,
+                }
+            ],
+        )
+
+        db.refresh(old)
+        assert old.status == "discarded"
+        assert old.video_path.endswith("video.mp4")
+        assert records[0].id != old.id
+
 
 class TestAssSubtitle:
     """ASS 字幕生成：无标点 ASR 文本按字符切分，时间轴格式正确。"""
@@ -167,6 +217,61 @@ class TestAssSubtitle:
         assert "PlayResX: 1080" in content
         assert "PlayResY: 1920" in content
         assert content.count("Dialogue:") >= 2
+
+    def test_precise_words_keep_real_silence_and_map_to_clip_local_time(self):
+        segments = [
+            {
+                "start": 100.0,
+                "end": 105.0,
+                "text": "先看预算再选品牌",
+                "subtitle_precision": "funasr_exact",
+                "words": [
+                    {"text": "先看预算", "start": 101.0, "end": 102.0},
+                    {"text": "再选品牌", "start": 103.0, "end": 104.0},
+                ],
+            },
+            {
+                "start": 300.0,
+                "end": 303.0,
+                "text": "不要盲目加盟",
+                "subtitle_precision": "funasr_exact",
+                "words": [
+                    {"text": "不要盲目加盟", "start": 300.5, "end": 302.5},
+                ],
+            },
+        ]
+
+        cues = build_subtitle_cues(segments)
+
+        assert [(cue.start, cue.end, cue.text) for cue in cues] == [
+            (1.0, 2.0, "先看预算"),
+            (3.0, 4.0, "再选品牌"),
+            (5.5, 7.5, "不要盲目加盟"),
+        ]
+
+    def test_estimated_subtitle_never_overruns_segment_duration(self):
+        cues = build_subtitle_cues(
+            [{"start": 10.0, "end": 11.0, "text": "一二三四五六七八九十"}]
+        )
+
+        assert cues
+        assert cues[-1].end == 1.0
+        assert all(cue.precision == "segment_estimated" for cue in cues)
+
+    def test_build_srt_uses_same_precise_timeline(self):
+        content = build_srt(
+            [
+                {
+                    "start": 20.0,
+                    "end": 22.0,
+                    "text": "领取资料",
+                    "words": [{"text": "领取资料", "start": 20.2, "end": 21.4}],
+                }
+            ]
+        )
+
+        assert "00:00:00,200 --> 00:00:01,400" in content
+        assert "领取资料" in content
 
 
 class TestLoadTranscriptUnits:
@@ -336,6 +441,28 @@ class TestClipApi:
             "/api/v1/clip/sessions/999999/generate", headers=auth_headers
         )
         assert resp.status_code == 404
+
+    def test_subtitle_rerender_conflict_does_not_report_success(self, db, monkeypatch):
+        session = _seed_session(db)
+        clip = ClipClip(
+            session_id=session.id,
+            clip_order=1,
+            status="draft",
+            clean_video_path=f"{session.id}/clips/1/v1/clean.mp4",
+            segments_json=[{"start": 1.0, "end": 31.0, "text": "字幕"}],
+        )
+        db.add(clip)
+        db.commit()
+        monkeypatch.setattr(
+            "app.api.v1.clip.collector_task_control.enqueue",
+            lambda *_args, **_kwargs: (object(), False),
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            rerender_clip_subtitle(clip.id, body=None, db=db)
+
+        assert exc_info.value.status_code == 409
+        assert "尚未提交" in str(exc_info.value.detail)
 
     def test_regenerate_validates_order_and_session(
         self, client: TestClient, db, auth_headers

@@ -31,6 +31,16 @@ const durationText = computed(() => {
   if (!seconds) return '-';
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 });
+
+const precisionInfo = computed(() => {
+  const map = {
+    funasr_exact: { type: 'success' as const, label: '逐字精确' },
+    funasr_aligned: { type: 'info' as const, label: '时间对齐' },
+    funasr_remapped: { type: 'info' as const, label: '纠错映射' },
+    segment_estimated: { type: 'warning' as const, label: '片段估算' }
+  };
+  return map[props.clip.subtitle_precision] || map.segment_estimated;
+});
 </script>
 
 <template>
@@ -67,6 +77,8 @@ const durationText = computed(() => {
       <div class="clip-card__footer">
         <NTag size="small" round :bordered="false" :type="statusInfo.type">{{ statusInfo.label }}</NTag>
         <NTag v-if="clip.is_manual" size="small" round :bordered="false" type="default">重剪</NTag>
+        <NTag size="small" round :bordered="false" :type="precisionInfo.type">{{ precisionInfo.label }}</NTag>
+        <NTag size="small" round :bordered="false" type="default">v{{ clip.render_version }}</NTag>
       </div>
       <NText v-if="clip.error_message" depth="3" class="clip-card__error">{{ clip.error_message }}</NText>
 

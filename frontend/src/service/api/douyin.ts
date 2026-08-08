@@ -919,6 +919,23 @@ export function discardClip(clipId: number) {
   });
 }
 
+/** 复用无字幕底片重制字幕；可提交人工修正后的字幕文字 */
+export function rerenderClipSubtitle(clipId: number, segments?: Api.Douyin.ClipSegment[]) {
+  return backendRequest<Api.Douyin.ClipActionResult>({
+    url: `${API_PREFIX}/clip/clips/${clipId}/subtitle/rerender`,
+    method: 'post',
+    data: segments
+      ? {
+          segments: segments.map(segment => ({
+            start: segment.start,
+            end: segment.end,
+            text: segment.text
+          }))
+        }
+      : {}
+  });
+}
+
 /** 剪辑任务列表 */
 export function fetchClipTasks(params: { page?: number; page_size?: number; status?: string }) {
   return backendRequest<Api.Douyin.ClipTaskListResult>({

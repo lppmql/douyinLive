@@ -8,7 +8,12 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 def is_valid_kezi_api_key(value: str) -> bool:
     """外部请求头密钥必须是无空格 ASCII，中文占位词不能冒充真实配置。"""
-    return len(value) >= 32 and value.isascii() and value.isprintable() and not any(char.isspace() for char in value)
+    return (
+        len(value) >= 32
+        and value.isascii()
+        and value.isprintable()
+        and not any(char.isspace() for char in value)
+    )
 
 
 class Settings(BaseSettings):
@@ -106,7 +111,9 @@ class Settings(BaseSettings):
     # 评论用户公开资料补全使用独立 Cookie 与固定浏览器指纹，不复用企业后台采集账号。
     DOUYIN_PROFILE_COOKIE_FILE: str = "data/private/douyin_profile_cookie.txt"
     DOUYIN_PROFILE_USER_AGENT: str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
-    DOUYIN_PROFILE_SEC_CH_UA: str = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
+    DOUYIN_PROFILE_SEC_CH_UA: str = (
+        '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
+    )
     DOUYIN_PROFILE_PLATFORM: str = "macOS"
     DOUYIN_PROFILE_LOCALE: str = "zh-CN"
     DOUYIN_PROFILE_TIMEZONE: str = "Asia/Shanghai"
@@ -165,6 +172,8 @@ class Settings(BaseSettings):
     CLIP_STORAGE_DIR: str = "data/videos"
     # ffmpeg 重编码并发上限：剪辑是 CPU/GPU 重活，默认单并发避免拖垮直播采集。
     CLIP_MAX_CONCURRENT: int = 1
+    # 可选：带 libass 的 ffmpeg 路径；Settings 会直接读取根目录 .env。
+    CLIP_FFMPEG_BIN: str = ""
     # 竖屏成片目标分辨率（抖音主流 9:16）
     CLIP_TARGET_WIDTH: int = 1080
     CLIP_TARGET_HEIGHT: int = 1920
@@ -251,11 +260,20 @@ class Settings(BaseSettings):
         if self.KEZI_API_KEY and not is_valid_kezi_api_key(self.KEZI_API_KEY):
             # 客资接入是可选模块：无效密钥只关闭该模块，不阻断直播、复盘等主功能。
             warnings.append("KEZI_API_KEY_INSECURE")
-        if not 50 <= self.RESOURCE_HIGH_MEMORY_PERCENT < self.RESOURCE_CRITICAL_MEMORY_PERCENT <= 99:
+        if (
+            not 50
+            <= self.RESOURCE_HIGH_MEMORY_PERCENT
+            < self.RESOURCE_CRITICAL_MEMORY_PERCENT
+            <= 99
+        ):
             errors.append("RESOURCE_MEMORY_THRESHOLD_INVALID")
         if not self.DEBUG and (
             len(self.JWT_SECRET_KEY) < 32
-            or self.JWT_SECRET_KEY in {"replace-with-a-long-random-secret", "douyin-live-jwt-secret-change-in-prod"}
+            or self.JWT_SECRET_KEY
+            in {
+                "replace-with-a-long-random-secret",
+                "douyin-live-jwt-secret-change-in-prod",
+            }
         ):
             errors.append("JWT_SECRET_INSECURE")
         if not 1 <= self.MEDIA_ACCESS_TOKEN_EXPIRE_MINUTES <= 120:
@@ -268,8 +286,13 @@ class Settings(BaseSettings):
         parsed_redis = urlparse(self.REDIS_URL)
         if not parsed_redis.password:
             warnings.append("REDIS_AUTH_DISABLED")
-        if self.DATAEASE_READER_PASSWORD in {"", "dataease_reader_change_me", "请修改为仅供DataEase使用的强密码"}:
+        if self.DATAEASE_READER_PASSWORD in {
+            "",
+            "dataease_reader_change_me",
+            "请修改为仅供DataEase使用的强密码",
+        }:
             warnings.append("DATAEASE_READER_PASSWORD_INSECURE")
         return errors, warnings
+
 
 settings = Settings()

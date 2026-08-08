@@ -11,7 +11,8 @@ import {
   fetchClipSessionOverview,
   fetchLiveSessionPage,
   generateClipSession,
-  regenerateClip
+  regenerateClip,
+  rerenderClipSubtitle
 } from '@/service/api/douyin';
 import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
 
@@ -44,6 +45,10 @@ export function clipVideoUrl(clipId: number): string {
 
 export function clipCoverUrl(clipId: number): string {
   return `${mediaApiPrefix}/api/v1/clip/clips/${clipId}/cover`;
+}
+
+export function clipSubtitleSrtUrl(clipId: number): string {
+  return `${mediaApiPrefix}/api/v1/clip/clips/${clipId}/subtitle.srt`;
 }
 
 /** 转写状态可读文案 */
@@ -280,6 +285,23 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     }
   }
 
+  /** 只重制字幕，不重新下载回放或重新选择画面 */
+  async function rerenderSubtitle(clipId: number, segments: Api.Douyin.ClipSegment[]) {
+    actionLoading.value = true;
+    try {
+      const action = unwrapServiceData(await rerenderClipSubtitle(clipId, segments), '字幕重制失败');
+      message.success(action.message);
+      await loadOverview();
+      startPolling();
+      return true;
+    } catch (error) {
+      message.error(getServiceErrorMessage(error, '操作失败'));
+      return false;
+    } finally {
+      actionLoading.value = false;
+    }
+  }
+
   onMounted(() => {
     mountedFlag = true;
     void loadSessionOptions();
@@ -321,6 +343,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     regenerateOne,
     approve,
     discard,
+    rerenderSubtitle,
     isTaskRunning,
     refreshMediaCookie,
     renderSessionLabel

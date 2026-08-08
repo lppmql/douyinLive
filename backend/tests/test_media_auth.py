@@ -7,6 +7,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from app.core.security import (
     MEDIA_ACCESS_COOKIE,
+    _MEDIA_PATH_PATTERN,
     build_internal_worker_token,
     create_media_access_token,
     create_refresh_token,
@@ -64,6 +65,13 @@ def test_media_cookie_cannot_access_business_api(client, test_user):
     assert response.status_code == 401
 
 
+def test_clip_subtitle_download_is_scoped_as_media_path():
+    """ASS/SRT 下载可使用短时媒体 Cookie，但字幕重制业务接口不能。"""
+    assert _MEDIA_PATH_PATTERN.fullmatch("/api/v1/clip/clips/12/subtitle")
+    assert _MEDIA_PATH_PATTERN.fullmatch("/api/v1/clip/clips/12/subtitle.srt")
+    assert not _MEDIA_PATH_PATTERN.fullmatch("/api/v1/clip/clips/12/subtitle/rerender")
+
+
 def test_refresh_token_cannot_be_used_as_access_token(client, test_user):
     """刷新 Token 只负责换取新 Token，不能直接访问业务接口。"""
     user, _password = test_user
@@ -117,7 +125,9 @@ def test_viewer_cannot_refresh_stream(client, db):
 
     response = client.post(
         "/api/v1/live-sessions/1/refresh-stream",
-        headers={"Authorization": f"Bearer {create_access_token({'sub': str(viewer.id)})}"},
+        headers={
+            "Authorization": f"Bearer {create_access_token({'sub': str(viewer.id)})}"
+        },
     )
 
     assert response.status_code == 403

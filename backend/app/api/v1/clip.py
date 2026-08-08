@@ -29,8 +29,10 @@ from app.schemas.clip import (
     ClipClipResponse,
     ClipGenerateRequest,
     ClipSessionOverview,
+    ClipSubtitleRerenderRequest,
     ClipTaskListResponse,
 )
+from app.services.clips.clip_service import prune_discarded_clips
 from app.services.tasks.control import collector_task_control
 from app.services.tasks.views import serialize_scraper_task
 
@@ -50,12 +52,21 @@ def _serialize_clip(clip: ClipClip) -> ClipClipResponse:
         clip_order=clip.clip_order,
         status=clip.status,
         title=clip.title,
+        theme=clip.theme,
         description=clip.description,
         topics=clip.topics_json or [],
         segments=clip.segments_json or [],
         duration_seconds=clip.duration_seconds,
         video_path=clip.video_path,
         cover_path=clip.cover_path,
+        subtitle_path=clip.subtitle_path,
+        subtitle_srt_path=clip.subtitle_srt_path,
+        subtitle_precision=clip.subtitle_precision or "segment_estimated",
+        render_version=clip.render_version or 1,
+        can_rerender_subtitle=bool(clip.clean_video_path),
+        artifact_versions=clip.artifact_versions_json or [],
+        selection_evidence=clip.selection_evidence_json or {},
+        qc=clip.qc_json or {},
         is_manual=clip.is_manual or 0,
         error_message=clip.error_message,
         created_at=clip.created_at,
@@ -314,6 +325,42 @@ def regenerate_one_clip(
 # ── 成片操作 ──
 
 
+@router.post("/clips/{clip_id}/subtitle/rerender", response_model=ClipActionResponse)
+def rerender_clip_subtitle(
+    clip_id: int,
+    body: ClipSubtitleRerenderRequest | None = None,
+    db: Session = Depends(get_db),
+):
+    """复用无字幕底片重制字幕；可同时提交人工修正文字。"""
+    clip = db.get(ClipClip, clip_id)
+    if not clip:
+        raise HTTPException(404, "成片不存在")
+    if not clip.clean_video_path:
+        raise HTTPException(409, "该成片是旧版本，没有无字幕底片，请先重剪一次")
+    options: dict[str, Any] = {
+        "session_id": clip.session_id,
+        "clip_id": clip.id,
+        "operation": "subtitle_rerender",
+        "target_render_version": int(clip.render_version or 1) + 1,
+    }
+    if body and body.segments is not None:
+        options["segments"] = [segment.model_dump() for segment in body.segments]
+    try:
+        task, created = collector_task_control.enqueue("clip", options)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if not created:
+        raise HTTPException(
+            409,
+            "该场次已有剪辑任务在排队或执行中，本次字幕修改尚未提交；请等待后重试",
+        )
+    return ClipActionResponse(
+        success=True,
+        message="字幕已加入重制队列",
+        task=serialize_scraper_task(task),
+    )
+
+
 @router.post("/clips/{clip_id}/approve", response_model=ClipActionResponse)
 def approve_clip(clip_id: int, db: Session = Depends(get_db)):
     """确认成片（标记为 approved，表示可人工发布）。"""
@@ -335,6 +382,7 @@ def discard_clip(clip_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "成片不存在")
     clip.status = "discarded"
     db.commit()
+    prune_discarded_clips(db, clip.session_id)
     return ClipActionResponse(success=True, message="已丢弃成片")
 
 
@@ -403,6 +451,25 @@ def get_clip_subtitle(clip_id: int, db: Session = Depends(get_db)):
     if not path.exists():
         raise HTTPException(404, "字幕文件已不存在")
     return FileResponse(path, media_type="text/plain; charset=utf-8")
+
+
+@router.get("/clips/{clip_id}/subtitle.srt")
+def get_clip_subtitle_srt(clip_id: int, db: Session = Depends(get_db)):
+    """下载 SRT 字幕，便于人工校对或导入剪映等工具。"""
+    clip = db.get(ClipClip, clip_id)
+    if not clip or not clip.subtitle_srt_path:
+        raise HTTPException(404, "成片没有 SRT 字幕文件")
+    storage_root = _storage_root().resolve()
+    path = (storage_root / clip.subtitle_srt_path).resolve()
+    if not path.is_relative_to(storage_root):
+        raise HTTPException(400, "非法文件路径")
+    if not path.exists() or not path.is_file():
+        raise HTTPException(404, "SRT 字幕文件已不存在")
+    return FileResponse(
+        path,
+        media_type="application/x-subrip; charset=utf-8",
+        filename=f"clip-{clip.id}-v{clip.render_version or 1}.srt",
+    )
 
 
 # ── 汇总统计（采集控制中心侧边卡片可复用）──
