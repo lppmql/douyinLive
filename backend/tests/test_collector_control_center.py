@@ -14,6 +14,7 @@ from app.services.collector.log_service import sanitize_log_data
 from app.services.tasks.control import CollectorTaskControlManager
 from app.services.tasks.status import build_control_center
 from app.services.tasks.views import serialize_scraper_task
+from app.services.tasks.error_classification import classify_task_error
 
 
 def test_parse_account_identity_only_uses_verified_user_fields():
@@ -87,6 +88,37 @@ def test_scraper_task_view_exposes_stop_retry_and_real_progress():
     assert payload["collected_anchor_count"] == 9
     assert payload["collected_session_count"] == 20
     assert payload["refreshed_detail_count"] == 7
+
+
+def test_auth_failure_is_structured_and_not_retryable():
+    result = classify_task_error(
+        "Cookie 失效，请重新扫码登录",
+        current_stage="login_check",
+        task_type="collect_all",
+    )
+
+    assert result.code == "collector_auth_expired"
+    assert result.stage == "authentication"
+    assert result.retryable is False
+
+
+def test_non_retryable_task_view_hides_retry_action():
+    now = datetime.utcnow()
+    task = ScraperTask(
+        id=43,
+        task_type="collect_all",
+        status=TaskStatus.FAILED,
+        error_code="collector_auth_expired",
+        failure_stage="authentication",
+        is_retryable=False,
+        created_at=now,
+        updated_at=now,
+    )
+
+    payload = serialize_scraper_task(task)
+
+    assert payload["can_retry"] is False
+    assert payload["error_code"] == "collector_auth_expired"
 
 
 def test_task_manager_safely_stops_pending_task_and_marks_it_retryable(db, monkeypatch):

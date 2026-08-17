@@ -26,6 +26,7 @@
     "url": "https://github.com/soybeanjs/soybean-admin.git"
   },
   "type": "module",
+  "packageManager": "pnpm@10.12.4",
   "scripts": {
     "build": "vite build --mode prod",
     "build:test": "vite build --mode test",

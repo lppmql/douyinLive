@@ -22,6 +22,7 @@ import AnalysisEvidence from './components/AnalysisEvidence.vue';
 import AnalysisReportHistory from './components/AnalysisReportHistory.vue';
 import SessionWorkflowNav from '@/components/business/session-workflow-nav.vue';
 import UnifiedAudienceReview from '@/components/business/unified-audience-review.vue';
+import ReviewPipelineFunnel from './components/ReviewPipelineFunnel.vue';
 
 defineOptions({ name: 'Analysis' });
 
@@ -104,7 +105,6 @@ function updateUnifiedReview(review: Api.Douyin.UnifiedAiReview) {
         :action-stage="actionStage"
         :latest-report="latestReport"
         :analysis-ready="analysisReady"
-        :score-result="scoreResult"
         :workbench="workbench"
         @update:selected-session-id="changeSession"
         @run-full-review="runFullReview"
@@ -130,11 +130,16 @@ function updateUnifiedReview(review: Api.Douyin.UnifiedAiReview) {
         :open-finding-count="openFindingCount"
       />
 
+      <ReviewPipelineFunnel />
+
       <!-- 标签页内容 -->
       <NCard v-if="selectedSessionId" :bordered="false" class="card-wrapper content-card">
         <NTabs v-model:value="activeTab" type="line" animated>
-          <NTabPane name="overview" tab="复盘总览">
+          <NTabPane name="overview" tab="旧版评分（兼容）">
             <NSpin :show="contextLoading">
+              <NAlert class="mb-12px" type="info" :bordered="false" :show-icon="false">
+                此处仅保留历史五维评分兼容查看；新的完整复盘请以“统一 AI 复盘”为准。
+              </NAlert>
               <AnalysisScoreOverview
                 :score-result="scoreResult"
                 :optimize-result="optimizeResult"
@@ -165,7 +170,7 @@ function updateUnifiedReview(review: Api.Douyin.UnifiedAiReview) {
             </NSpin>
           </NTabPane>
 
-          <NTabPane name="audience" tab="用户与转化">
+          <NTabPane name="audience" tab="统一 AI 复盘">
             <UnifiedAudienceReview
               :review="workbench?.unified_ai_review || null"
               :session-id="selectedSessionId || undefined"

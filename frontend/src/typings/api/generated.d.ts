@@ -585,6 +585,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/leads/conversion-pairs/pending": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pending Conversion Pairs */
+        get: operations["list_pending_conversion_pairs_api_v1_leads_conversion_pairs_pending_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/leads/conversion-pairs/{pair_id}/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Attribute Conversion Pair */
+        patch: operations["attribute_conversion_pair_api_v1_leads_conversion_pairs__pair_id__attribution_patch"];
+        trace?: never;
+    };
     "/api/v1/leads/sync": {
         parameters: {
             query?: never;
@@ -2194,6 +2228,26 @@ export interface paths {
          * @description 增量同步缺失/过期场次；force=true 时强制重建最近完整场次。
          */
         post: operations["sync_dataease_api_v1_dataease_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reviews/readiness-funnel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Review Readiness Funnel
+         * @description 返回从场次采集到复盘、剪辑和客资归属的真实数据漏斗。
+         */
+        get: operations["get_review_readiness_funnel_api_v1_reviews_readiness_funnel_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4897,6 +4951,38 @@ export interface components {
              */
             created_at: string;
         };
+        /**
+         * LeadPairAttributionUpdate
+         * @description 人工确认一组“抖音号 + 联系方式”所属场次。
+         */
+        LeadPairAttributionUpdate: {
+            /** Session Id */
+            session_id: number;
+        };
+        /** LeadPairPendingResponse */
+        LeadPairPendingResponse: {
+            /** Id */
+            id: number;
+            /** Anchor Name */
+            anchor_name: string;
+            /** Douyin Id */
+            douyin_id: string;
+            /** Contact Type */
+            contact_type: string;
+            /** Contact Value */
+            contact_value: string;
+            /**
+             * Converted At
+             * Format: date-time
+             */
+            converted_at: string;
+            /** Gap Seconds */
+            gap_seconds: number;
+            /** Candidate Sessions */
+            candidate_sessions?: {
+                [key: string]: unknown;
+            }[];
+        };
         /** LeadResponse */
         LeadResponse: {
             /**
@@ -6502,6 +6588,12 @@ export interface components {
             completed_at?: string | null;
             /** Error Message */
             error_message?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Failure Stage */
+            failure_stage?: string | null;
+            /** Is Retryable */
+            is_retryable?: boolean | null;
             /** Cancel Requested At */
             cancel_requested_at?: string | null;
             /** Retry Of Task Id */
@@ -7257,6 +7349,12 @@ export interface components {
             session_title?: string | null;
             /** Error Message */
             error_message?: string | null;
+            /** Error Code */
+            error_code?: string | null;
+            /** Failure Stage */
+            failure_stage?: string | null;
+            /** Is Retryable */
+            is_retryable?: boolean | null;
             /** Trace Id */
             trace_id?: string | null;
             /** Worker Id */
@@ -8622,6 +8720,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LeadSyncStatusResponse"];
+                };
+            };
+        };
+    };
+    list_pending_conversion_pairs_api_v1_leads_conversion_pairs_pending_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeadPairPendingResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attribute_conversion_pair_api_v1_leads_conversion_pairs__pair_id__attribution_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pair_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LeadPairAttributionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -11502,6 +11668,28 @@ export interface operations {
             };
         };
     };
+    get_review_readiness_funnel_api_v1_reviews_readiness_funnel_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     get_workbench_api_v1_reviews__session_id__workbench_get: {
         parameters: {
             query?: {
@@ -11875,6 +12063,8 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                search?: string | null;
+                include_session_id?: number | null;
             };
             header?: never;
             path?: never;

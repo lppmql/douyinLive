@@ -43,7 +43,6 @@ onMounted(() => {
         :question="chat.question.value"
         :chatting="chat.chatting.value"
         :active-source-msg-id="chat.activeSourceMsgId.value"
-        :active-conv-id="chat.activeConvId.value"
         :loading-history="chat.detailLoading.value"
         @update:question="(v: string) => chat.question.value = v"
         @send="chat.sendQuestion"

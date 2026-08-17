@@ -526,6 +526,9 @@ def run_clip_batch(
     """
     task = db.get(ScraperTask, task_id)
     options = dict(task.task_options_json or {}) if task else {}
+    from app.services.clips.storage_retention import prune_replay_storage
+
+    storage_cleanup = prune_replay_storage(db)
 
     if options.get("operation") == "subtitle_rerender":
         clip_id = int(options.get("clip_id") or 0)
@@ -554,6 +557,7 @@ def run_clip_batch(
             "subtitle_precision": record.subtitle_precision,
             "rendered_count": 1,
             "failed_count": 0,
+            "storage_cleanup": storage_cleanup,
         }
         report(
             "subtitle_rerender",
@@ -656,6 +660,7 @@ def run_clip_batch(
         "failed_count": failed,
         "rendered_count": rendered_total,
         "errors": errors[:20],
+        "storage_cleanup": storage_cleanup,
     }
     if total and completed == 0:
         raise TaskBatchFailed("待处理场次的 AI 剪辑全部失败", result)

@@ -34,11 +34,15 @@ class Settings(BaseSettings):
     # 数据库
     DB_HOST: str = "localhost"
     DB_PORT: int = 3306
-    DB_USER: str = "root"
+    # 管理员密码只供首次建库和创建受限账号使用，业务进程不得使用 root。
+    MYSQL_ROOT_PASSWORD: str = ""
+    DB_USER: str = "douyin_app"
     DB_PASSWORD: str = ""
     DB_NAME: str = "douyin_live"
     DATABASE_URL: str = ""
     DATABASE_ECHO: bool = False
+    DATAEASE_DB_USER: str = "dataease_app"
+    DATAEASE_DB_PASSWORD: str = ""
     DATAEASE_READER_USER: str = "dataease_reader"
     DATAEASE_READER_PASSWORD: str = "dataease_reader_change_me"
 
@@ -179,6 +183,12 @@ class Settings(BaseSettings):
     CLIP_TARGET_HEIGHT: int = 1920
     # 回放下载超时（秒）：2 小时直播流拷贝到本地一般几分钟，30 分钟兜底。
     CLIP_REPLAY_DOWNLOAD_TIMEOUT_SECONDS: int = 1800
+    # 回放源地址可能过期，默认只做容量告警；确认已有可靠归档后才能显式开启自动清理。
+    CLIP_REPLAY_AUTO_DELETE: bool = False
+    CLIP_REPLAY_RETENTION_DAYS: int = 14
+    CLIP_REPLAY_MAX_GB: float = 20.0
+    # 估算时间轴容易出现字幕提前/滞后，默认禁止确认成可发布成片。
+    CLIP_ALLOW_ESTIMATED_SUBTITLE_APPROVAL: bool = False
     # 离线终稿完成后是否自动触发 AI 剪辑（每场消耗 1 次 DeepSeek 调用 + 剪辑资源）。
     CLIP_AUTO_GENERATE: bool = True
 
@@ -253,6 +263,10 @@ class Settings(BaseSettings):
             errors.append("DOUYIN_PROFILE_CACHE_DAYS_INVALID")
         if self.CONTINUOUS_TASK_BATCH_SIZE < 0:
             errors.append("CONTINUOUS_TASK_BATCH_INVALID")
+        if not 1 <= self.CLIP_REPLAY_RETENTION_DAYS <= 365:
+            errors.append("CLIP_REPLAY_RETENTION_INVALID")
+        if not 1 <= self.CLIP_REPLAY_MAX_GB <= 1000:
+            errors.append("CLIP_REPLAY_CAPACITY_INVALID")
         if not 10 <= self.KEZI_SYNC_INTERVAL_SECONDS <= 3600:
             errors.append("KEZI_SYNC_INTERVAL_INVALID")
         if not 1 <= self.KEZI_SYNC_PAGE_SIZE <= 500:
@@ -283,6 +297,8 @@ class Settings(BaseSettings):
 
         if self.DB_USER.lower() == "root":
             warnings.append("DATABASE_ROOT_USER")
+        if self.DATAEASE_DB_USER.lower() == "root":
+            warnings.append("DATAEASE_ROOT_USER")
         parsed_redis = urlparse(self.REDIS_URL)
         if not parsed_redis.password:
             warnings.append("REDIS_AUTH_DISABLED")

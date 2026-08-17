@@ -71,7 +71,7 @@ export function useReviewWorkbench() {
   const loadError = ref('');
   const contextLoading = ref(false);
   const actionStage = ref<ActionStage>('');
-  const activeTab = ref<'overview' | 'evidence' | 'history'>('overview');
+  const activeTab = ref<'overview' | 'evidence' | 'audience' | 'history'>('audience');
 
   /** 防止异步竞态：每次发起新的上下文加载时 +1，回调里检查是否还是最新请求 */
   let contextRequestId = 0;
@@ -207,7 +207,10 @@ export function useReviewWorkbench() {
       );
       const rawSessionId = Array.isArray(route.query.sessionId) ? route.query.sessionId[0] : route.query.sessionId;
       const requestedSessionId = Number(rawSessionId);
-      const initialSession = sessions.value.find(item => item.id === requestedSessionId) || sessions.value[0];
+      const initialSession =
+        sessions.value.find(item => item.id === requestedSessionId) ||
+        sessions.value.find(item => item.live_status !== 'live') ||
+        sessions.value[0];
       selectedSessionId.value = initialSession?.id || null;
       if (initialSession) {
         if (String(route.query.sessionId || '') !== String(initialSession.id)) {
@@ -236,7 +239,7 @@ export function useReviewWorkbench() {
     if (value) await loadSessionContext(value);
   }
 
-  /** 完整复盘流程：证据提取 → 评分 → 优化建议 */
+  /** 完整复盘流程：证据提取与用户转化分析由统一 AI 复盘一次生成。 */
   async function runFullReview() {
     const sessionId = selectedSessionId.value;
     if (!sessionId) return message.warning('请先选择直播场次');
@@ -244,20 +247,12 @@ export function useReviewWorkbench() {
     try {
       actionStage.value = 'evidence';
       const findingsResponse = await generateSessionReview(sessionId);
-      const findings = unwrapServiceData(findingsResponse, '真实证据提取失败');
+      const findings = unwrapServiceData(findingsResponse, '统一 AI 复盘生成失败');
       if (findings.workbench) workbench.value = findings.workbench;
 
-      actionStage.value = 'score';
-      const scoreResponse = await scoreSession(sessionId);
-      scoreResult.value = unwrapServiceData(scoreResponse, '话术评分失败').result;
-
-      actionStage.value = 'optimize';
-      const optimizeResponse = await optimizeSession(sessionId);
-      optimizeResult.value = unwrapServiceData(optimizeResponse, '优化建议生成失败').result;
-
       await loadSessionContext(sessionId, true);
-      activeTab.value = 'overview';
-      message.success('完整复盘已生成，报告已保存');
+      activeTab.value = 'audience';
+      message.success('统一 AI 复盘已生成，已打开最新分析结果');
     } catch (error) {
       message.error((error as { message?: string }).message || '复盘生成中断，已完成的结果仍会保留');
     } finally {

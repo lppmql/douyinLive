@@ -766,11 +766,14 @@ class BrowserManager:
         }
 
     async def check_login_expired(self, context: BrowserContext) -> bool:
-        """连续两次访问都显示登录页时才判过期，过滤平台临时跳转。"""
+        """返回明确的登录状态；探测异常通过异常表达“未知”，绝不等同过期。"""
         test_url = f"{LEADS_BASE}/pc/analysis/live-screen?room_id=check"
+        explicit_expired_count = 0
+        probe_errors: list[str] = []
         for attempt in range(2):
-            page = await context.new_page()
+            page = None
             try:
+                page = await context.new_page()
                 await page.goto(test_url, wait_until="domcontentloaded", timeout=15000)
                 await asyncio.sleep(2)
                 body = await page.evaluate("document.body?.innerText || ''")
@@ -782,16 +785,25 @@ class BrowserManager:
                 )
                 if not expired:
                     return False
+                explicit_expired_count += 1
                 logger.warning("登录态探测疑似过期，正在复核 (attempt=%s)", attempt + 1)
             except Exception as exc:
+                probe_errors.append(str(exc))
                 logger.warning("检查登录状态异常 (attempt=%s): %s", attempt + 1, exc)
             finally:
-                await page.close()
+                if page is not None:
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
 
             if attempt == 0:
                 await asyncio.sleep(1)
 
-        return True
+        if explicit_expired_count == 2:
+            return True
+        detail = probe_errors[-1][:200] if probe_errors else "页面结果不一致"
+        raise RuntimeError(f"登录状态暂时无法检测，请稍后重试：{detail}")
 
     async def close(self):
         """按页面、上下文、浏览器、驱动的顺序关闭，确保异步响应完整收尾。"""

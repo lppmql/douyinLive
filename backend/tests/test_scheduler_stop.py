@@ -200,3 +200,41 @@ def test_account_health_check_queues_behind_monitor_instead_of_requiring_stop():
     assert response.login_status == "logged_in"
     queued.assert_awaited_once()
     browser_check.assert_awaited_once_with(account)
+
+
+def test_transient_account_health_failure_does_not_expire_account():
+    account = SimpleNamespace(id=6, login_status="logged_in")
+
+    class FakeQuery:
+        def filter(self, *_args):
+            return self
+
+        def count(self):
+            return 0
+
+    class FakeDb:
+        def query(self, *_args):
+            return FakeQuery()
+
+        def get(self, _model, _account_id):
+            return account
+
+        def commit(self):
+            return None
+
+    async def run_operation(operation):
+        return await operation()
+
+    with (
+        patch.object(scheduler_manager, "run_serialized_browser_operation", side_effect=run_operation),
+        patch(
+            "app.api.v1.collector.browser_manager.check_account_health",
+            new_callable=AsyncMock,
+            return_value=(False, "账号检查失败，请稍后重试"),
+        ),
+    ):
+        response = asyncio.run(check_account_health(6, FakeDb()))
+
+    assert account.login_status == "logged_in"
+    assert response.valid is False
+    assert response.cookie_status == "unknown"

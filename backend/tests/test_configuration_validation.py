@@ -85,10 +85,10 @@ def test_one_click_start_requires_core_health_and_keeps_optional_services_option
     start_source = (BACKEND_ROOT.parent / "start.sh").read_text(encoding="utf-8")
 
     assert "docker compose up -d mysql redis qdrant" in start_source
-    assert 'if [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then' in start_source
+    assert 'if [ "$RUN_MODE" = "full" ] && [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then' in start_source
     assert "docker compose --profile observability up -d prometheus grafana" in start_source
     assert "if ! wait_for_backend; then" in start_source
-    assert '[ "$MYSQL_READY" = "true" ] && wait_for_dataease' in start_source
+    assert '[ "$DATAEASE_DB_READY" = "true" ] && wait_for_dataease' in start_source
     assert "scripts/check_dataease_crypto.py" in start_source
     assert "local ATTEMPTS=600" in start_source
     assert "douyinLive.dataeaseKeySha256" in start_source
@@ -96,14 +96,14 @@ def test_one_click_start_requires_core_health_and_keeps_optional_services_option
     assert 'wait_for_http "Grafana"' in start_source
     assert 'wait_for_http "Qdrant"' in start_source
     assert "docker compose --profile funasr up -d funasr" in start_source
-    assert 'if [ "$(env_value ASR_AUTO_START)" != "true" ]; then' in start_source
+    assert 'if [ "$RUN_MODE" = "lite" ] || [ "$(env_value ASR_AUTO_START)" != "true" ]; then' in start_source
     assert 'FUNASR_WAIT_SECONDS="$(env_value ASR_ENGINE_READY_TIMEOUT_SECONDS)"' in start_source
     assert "FunASR 容器异常退出，主系统将继续启动" in start_source
-    assert "FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，主系统将继续启动" in start_source
+    assert "FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，将在后台继续加载" in start_source
     assert start_source.index('echo "[2/6] 启动 Prometheus 与 Grafana..."') < start_source.index(
         'echo "[3/6] 启动后端 FastAPI..."'
     )
     assert start_source.index("if ! wait_for_backend; then") < start_source.index('echo "  ✅ 后端: http://localhost:8000"')
-    assert start_source.index('[ "$MYSQL_READY" = "true" ] && wait_for_dataease') < start_source.index(
+    assert start_source.index('[ "$DATAEASE_DB_READY" = "true" ] && wait_for_dataease') < start_source.index(
         'echo "  ✅ DataEase: http://localhost:8100"'
     )

@@ -15,6 +15,7 @@
   - 无障碍 aria-label
 -->
 <script setup lang="ts">
+/* eslint-disable vue/no-v-html -- markdown-it 禁用原始 HTML，异常回退也会先完成实体转义 */
 import { computed, nextTick, ref, watch } from 'vue';
 import { NButton, NInput, NScrollbar, NAlert, NPopconfirm } from 'naive-ui';
 import type { ChatMessage } from '../composables/useKnowledgeChat';
@@ -27,8 +28,6 @@ const props = defineProps<{
   question: string;
   chatting: boolean;
   activeSourceMsgId: number | null;
-  /** 当前对话 ID（保存消息用） */
-  activeConvId: number | null;
   /** 是否正在加载历史消息 */
   loadingHistory: boolean;
 }>();

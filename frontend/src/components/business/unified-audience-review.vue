@@ -32,6 +32,10 @@ const responseLabels: Record<string, string> = {
   excellent: '优秀承接', effective: '有效回应', average: '回应一般', irrelevant: '答非所问', no_response: '未回应', unknown: '待判断'
 };
 
+function isReliableAnalysis(user: Api.Douyin.UnifiedAiUserAnalysis) {
+  return user.manual_confirmed || (user.confidence >= 0.55 && user.host_response_status !== 'unknown');
+}
+
 async function copyValue(label: string, value: string) {
   await navigator.clipboard.writeText(value);
   message.success(`${label}已复制`);
@@ -132,6 +136,9 @@ async function applyOverride(user: Api.Douyin.UnifiedAiUserAnalysis, action: str
             <NButton text type="primary" size="tiny" @click="copyValue(contact.type === 'phone' ? '手机号' : '微信号', contact.value)">复制</NButton>
           </div>
         </div>
+        <NAlert v-if="!isReliableAnalysis(user)" type="warning" :show-icon="false" class="mb-10px">
+          当前证据或置信度不足，以下分类和建议仅作为待人工确认候选，不计入确定性结论。
+        </NAlert>
         <div class="flex flex-wrap gap-6px">
           <NTag :type="user.is_precision_lead ? 'success' : 'default'">{{ precisionLabels[user.precision_status] }}</NTag>
           <NTag type="info">{{ stageLabels[user.business_stage] }}</NTag>
@@ -159,8 +166,8 @@ async function applyOverride(user: Api.Douyin.UnifiedAiUserAnalysis, action: str
         </div>
         <NAlert v-if="user.exclusion_reason" type="warning" :show-icon="false" class="mt-10px">排除原因：{{ user.exclusion_reason }}</NAlert>
         <div class="mt-10px rounded-8px bg-primary-50 p-10px dark:bg-dark">
-          <div class="font-600">改进建议</div><div class="mt-4px">{{ user.recommendation }}</div>
-          <template v-if="user.suggested_reply"><div class="mt-8px font-600">建议话术</div><div class="mt-4px">{{ user.suggested_reply }}</div></template>
+          <div class="font-600">{{ isReliableAnalysis(user) ? 'AI 改进建议' : '候选建议（需人工确认）' }}</div><div class="mt-4px">{{ user.recommendation }}</div>
+          <template v-if="user.suggested_reply"><div class="mt-8px font-600">{{ isReliableAnalysis(user) ? '建议话术' : '候选话术（需人工确认）' }}</div><div class="mt-4px">{{ user.suggested_reply }}</div></template>
         </div>
         <div v-if="user.evidence.length" class="mt-10px text-12px text-gray-500">
           <div v-for="item in user.evidence" :key="`${item.evidence_id}-${item.conclusion}`">

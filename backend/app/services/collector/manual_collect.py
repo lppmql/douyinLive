@@ -28,6 +28,7 @@ from app.models.scraper_logs import ScraperLog
 
 # 拆分后的领域模块
 from app.services.collector.browser import browser_manager
+from app.services.collector.account_repo import mark_account_expired
 from app.services.collector.comments import _save_comments, _scrape_comments
 from app.services.collector.enterprise import _sync_enterprise_anchor_sessions as _do_enterprise_sync
 from app.services.collector.history import (
@@ -407,6 +408,8 @@ async def collect_all(
     report("login_check", 6, 0, 0, "正在验证 Cookie 与浏览器指纹")
     context, is_valid, msg = await browser_manager.get_logged_in_context()
     if not is_valid or context is None:
+        mark_account_expired(db, account.id)
+        db.commit()
         return {
             "total_rooms": 0,
             "collected_rooms": 0,

@@ -25,6 +25,9 @@ const message = useMessage();
 
 const clipData = useClipData(message);
 const { loading, overview, sessionOptions, actionLoading, errorMessage, selectedSessionId } = clipData;
+const generateButtonText = computed(() =>
+  overview.value?.clips.length ? '重新生成本场成片' : '生成本场成片'
+);
 
 /* ---------- 预览 ---------- */
 const previewClip = ref<Api.Douyin.ClipClip | null>(null);
@@ -35,7 +38,7 @@ const subtitlePrecisionText = computed(() => {
     funasr_exact: '逐字精确：字幕直接使用 FunASR 真实发音时间',
     funasr_aligned: '时间对齐：模型 token 已按真实发音时间比例映射到字幕文字',
     funasr_remapped: '纠错映射：行业词已修正并映射回原发音时间',
-    segment_estimated: '片段估算：历史话术没有逐字时间，建议校对后重制'
+    segment_estimated: '片段估算：时间轴可能不同步，请在 FunASR 正常后重剪再确认发布'
   };
   return previewClip.value ? map[previewClip.value.subtitle_precision] : '';
 });
@@ -125,14 +128,16 @@ function fmtDateTime(val: string | null): string {
         class="clip-page__session-select"
         placeholder="搜索主播或场次"
         filterable
+        remote
         clearable
         :options="sessionOptions"
         :render-label="clipData.renderSessionLabel"
         :loading="loading"
+        @search="clipData.searchSessionOptions"
         @update:value="value => clipData.loadOverview(value as number)"
       />
-      <NButton type="primary" :loading="actionLoading" @click="openGenerateAll">
-        生成/重新生成 5 条成片
+      <NButton type="primary" :loading="actionLoading" :disabled="!selectedSessionId" @click="openGenerateAll">
+        {{ generateButtonText }}
       </NButton>
     </div>
 
@@ -283,6 +288,7 @@ function fmtDateTime(val: string | null): string {
             </NButton>
             <NButton
               v-if="previewClip.status === 'draft' && previewClip.video_path"
+              :disabled="previewClip.subtitle_precision === 'segment_estimated'"
               ghost
               type="primary"
               @click="clipData.approve(previewClip.id)"

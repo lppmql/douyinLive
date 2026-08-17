@@ -74,6 +74,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let mountedFlag = false;
   let requestSeq = 0; // 请求序号：切换场次时丢弃过期响应，防止旧数据覆盖新场次
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** 刷新浏览器媒体 Cookie（30 分钟短时效，播放视频前调用续期） */
   async function refreshMediaCookie() {
@@ -149,9 +150,12 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
   }
 
   /** 场次下拉数据：优先候选场次接口（含主播、话术、成片情况），失败回退公共场次列表接口 */
-  async function loadSessionOptions() {
+  async function loadSessionOptions(search?: string, includeSessionId?: number) {
     try {
-      const data = unwrapServiceData(await fetchClipCandidateSessions(50), '候选场次加载失败');
+      const data = unwrapServiceData(
+        await fetchClipCandidateSessions(50, search, includeSessionId),
+        '候选场次加载失败'
+      );
       sessionOptions.value = (data || []).map(item => ({
         label: `#${item.session_id} ${item.anchor_name || ''} ${item.session_title || ''}`,
         value: item.session_id,
@@ -166,6 +170,13 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
       // 新接口不可用（后端未升级）时，回退到项目公共的场次列表接口，保证下拉始终有内容
       await loadSessionOptionsFallback();
     }
+  }
+
+  function searchSessionOptions(pattern: string) {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      void loadSessionOptions(pattern, selectedSessionId.value || undefined);
+    }, 250);
   }
 
   /** 加载选中场次的剪辑总览 */
@@ -302,19 +313,23 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     }
   }
 
-  onMounted(() => {
+  onMounted(async () => {
     mountedFlag = true;
-    void loadSessionOptions();
     // 支持从场次详情页「AI 剪辑」入口直达：/clip?sessionId=N
     const routeSessionId = Number(route.query.sessionId);
     if (Number.isInteger(routeSessionId) && routeSessionId > 0) {
-      void loadOverview(routeSessionId);
+      await loadSessionOptions(undefined, routeSessionId);
+      await loadOverview(routeSessionId);
+    } else {
+      await loadSessionOptions();
+      const initialSessionId = Number(sessionOptions.value[0]?.value || 0);
+      if (initialSessionId > 0) await loadOverview(initialSessionId);
     }
   });
 
   onActivated(() => {
     if (mountedFlag) {
-      void loadSessionOptions();
+      void loadSessionOptions(undefined, selectedSessionId.value || undefined);
       void loadOverview();
       startPolling();
     }
@@ -326,6 +341,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
 
   onUnmounted(() => {
     stopPolling();
+    if (searchTimer) clearTimeout(searchTimer);
   });
 
   return {
@@ -346,6 +362,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     rerenderSubtitle,
     isTaskRunning,
     refreshMediaCookie,
-    renderSessionLabel
+    renderSessionLabel,
+    searchSessionOptions
   };
 }

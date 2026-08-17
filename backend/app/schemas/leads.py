@@ -40,6 +40,23 @@ class LeadAttributionUpdate(BaseModel):
     session_id: int = Field(gt=0, description="要绑定的真实直播场次 ID")
 
 
+class LeadPairAttributionUpdate(BaseModel):
+    """人工确认一组“抖音号 + 联系方式”所属场次。"""
+
+    session_id: int = Field(gt=0)
+
+
+class LeadPairPendingResponse(BaseModel):
+    id: int
+    anchor_name: str
+    douyin_id: str
+    contact_type: str
+    contact_value: str
+    converted_at: datetime
+    gap_seconds: int
+    candidate_sessions: list[dict] = Field(default_factory=list)
+
+
 class LeadDetailResponse(BaseModel):
     """客资详情；接口本身已有登录鉴权，页面仍应按需展示。"""
 

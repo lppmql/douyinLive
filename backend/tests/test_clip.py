@@ -7,7 +7,8 @@
 - 话术单元加载（asr_status 过滤与排序）。
 """
 
-from datetime import datetime
+import os
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -18,6 +19,7 @@ from app.models.clip_clips import ClipClip
 from app.models.live_sessions import LiveSession
 from app.models.live_rooms import LiveRoom
 from app.models.transcript_segments import TranscriptSegment
+from app.models.scraper_tasks import ScraperTask
 from app.services.clips.ass_subtitle import (
     _format_timestamp,
     _split_text,
@@ -361,6 +363,7 @@ class TestClipApi:
             clip_order=1,
             status="draft",
             video_path="2130/clip_1.mp4",
+            subtitle_precision="funasr_exact",
             title="t",
             description="d",
             segments_json=[{"start": 1.0, "end": 5.0, "text": "x"}],
@@ -383,6 +386,29 @@ class TestClipApi:
         assert resp.status_code == 200
         db.expire_all()
         assert db.get(ClipClip, clip.id).status == "discarded"
+
+    def test_estimated_subtitle_cannot_be_approved(self, client: TestClient, db, auth_headers):
+        session = _seed_session(db)
+        clip = ClipClip(
+            session_id=session.id,
+            clip_order=1,
+            status="draft",
+            video_path=f"{session.id}/clip_1.mp4",
+            subtitle_precision="segment_estimated",
+            title="t",
+            description="d",
+            segments_json=[{"start": 1.0, "end": 31.0, "text": "x"}],
+        )
+        db.add(clip)
+        db.commit()
+
+        resp = client.post(
+            f"/api/v1/clip/clips/{clip.id}/approve", headers=auth_headers
+        )
+
+        assert resp.status_code == 409
+        assert "估算时间" in resp.json()["detail"]
+        assert "FunASR" in resp.json()["detail"]
 
     def test_approve_without_video_rejected(self, client: TestClient, db, auth_headers):
         session = _seed_session(db)
@@ -575,6 +601,77 @@ class TestClipApi:
         assert item["clip_count"] == 2
         assert item["clip_available_count"] == 1
         assert item["clip_status"] == "has_clips"
+
+
+def test_replay_retention_only_deletes_unprotected_replay(db, tmp_path, monkeypatch):
+    from app.services.clips import storage_retention
+
+    stale_session = _seed_session(db)
+    live_session = LiveSession(
+        room_id=stale_session.room_id,
+        session_title="直播中",
+        anchor_name="测试主播",
+        live_status="live",
+    )
+    task_session = LiveSession(
+        room_id=stale_session.room_id,
+        session_title="剪辑中",
+        anchor_name="测试主播",
+        live_status="ended",
+    )
+    db.add_all([live_session, task_session])
+    db.flush()
+    db.add(
+        ScraperTask(
+            session_id=task_session.id,
+            task_type="clip_task",
+            status="running",
+        )
+    )
+    db.commit()
+
+    monkeypatch.setattr(storage_retention, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(storage_retention.settings, "CLIP_STORAGE_DIR", "data/videos")
+    monkeypatch.setattr(storage_retention.settings, "CLIP_REPLAY_AUTO_DELETE", True)
+    monkeypatch.setattr(storage_retention.settings, "CLIP_REPLAY_RETENTION_DAYS", 1)
+    monkeypatch.setattr(storage_retention.settings, "CLIP_REPLAY_MAX_GB", 100.0)
+    old_time = (datetime.now() - timedelta(days=3)).timestamp()
+    paths = {}
+    for session in (stale_session, live_session, task_session):
+        path = tmp_path / "data" / "videos" / str(session.id) / "replay.mp4"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"real-replay-placeholder")
+        os.utime(path, (old_time, old_time))
+        paths[session.id] = path
+
+    result = storage_retention.prune_replay_storage(db)
+
+    assert result["deleted_count"] == 1
+    assert not paths[stale_session.id].exists()
+    assert paths[live_session.id].exists()
+    assert paths[task_session.id].exists()
+
+
+def test_replay_retention_is_report_only_by_default(db, tmp_path, monkeypatch):
+    from app.services.clips import storage_retention
+
+    session = _seed_session(db)
+    replay = tmp_path / "data" / "videos" / str(session.id) / "replay.mp4"
+    replay.parent.mkdir(parents=True)
+    replay.write_bytes(b"irreplaceable-replay")
+    old_time = (datetime.now() - timedelta(days=30)).timestamp()
+    os.utime(replay, (old_time, old_time))
+    monkeypatch.setattr(storage_retention, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(storage_retention.settings, "CLIP_STORAGE_DIR", "data/videos")
+    monkeypatch.setattr(storage_retention.settings, "CLIP_REPLAY_AUTO_DELETE", False)
+    monkeypatch.setattr(storage_retention.settings, "CLIP_REPLAY_RETENTION_DAYS", 1)
+    monkeypatch.setattr(storage_retention.settings, "CLIP_REPLAY_MAX_GB", 1.0)
+
+    result = storage_retention.prune_replay_storage(db)
+
+    assert result["cleanup_enabled"] is False
+    assert result["deleted_count"] == 0
+    assert replay.exists()
 
 
 def _seed_session(db) -> LiveSession:

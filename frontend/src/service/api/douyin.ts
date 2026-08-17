@@ -952,9 +952,33 @@ export function fetchClipStats() {
 }
 
 /** 候选场次列表（含主播、话术转写、成片情况，供下拉展示） */
-export function fetchClipCandidateSessions(limit = 50) {
+export function fetchClipCandidateSessions(limit = 50, search?: string, includeSessionId?: number) {
   return backendRequest<Api.Douyin.ClipCandidateSession[]>({
     url: `${API_PREFIX}/clip/candidate-sessions`,
+    params: { limit, search: search || undefined, include_session_id: includeSessionId }
+  });
+}
+
+/** 全项目从采集到复盘、剪辑、客资归属的真实就绪漏斗 */
+export function fetchReviewReadinessFunnel() {
+  return backendRequest<Api.Douyin.ReviewReadinessFunnel>({
+    url: `${API_PREFIX}/reviews/readiness-funnel`
+  });
+}
+
+/** 尚未归属场次的确认客资队列 */
+export function fetchPendingLeadPairs(limit = 20) {
+  return backendRequest<Api.Douyin.PendingLeadPair[]>({
+    url: `${API_PREFIX}/leads/conversion-pairs/pending`,
     params: { limit }
+  });
+}
+
+/** 人工确认一组客资所属场次 */
+export function attributeLeadPair(pairId: number, sessionId: number) {
+  return backendRequest<{ success: boolean; message: string }>({
+    url: `${API_PREFIX}/leads/conversion-pairs/${pairId}/attribution`,
+    method: 'patch',
+    data: { session_id: sessionId }
   });
 }

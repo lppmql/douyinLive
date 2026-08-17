@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -9,6 +10,11 @@ from app.models.live_sessions import LiveSession
 from app.models.review import ComplianceRule, ReviewActionItem, ReviewFinding, ScriptAsset
 from app.models.unified_ai_review import AudienceInteractionAnalysis
 from app.models.transcript_segments import TranscriptSegment
+from app.models.comments import Comment
+from app.models.live_metrics import LiveMetric
+from app.models.clip_clips import ClipClip
+from app.models.lead_conversion_pairs import LeadConversionPair
+from app.models.unified_ai_review import UnifiedAiReviewRun
 from app.schemas.review import (
     FindingStatusUpdate,
     ReviewActionCreate,
@@ -43,6 +49,64 @@ def _row_dict(row) -> dict:
         if key in data and isinstance(data[key], dt):
             data[key] = data[key].isoformat()
     return data
+
+
+@router.get("/readiness-funnel", response_model=dict)
+def get_review_readiness_funnel(db: Session = Depends(get_db)):
+    """返回从场次采集到复盘、剪辑和客资归属的真实数据漏斗。"""
+
+    def distinct_sessions(model, *filters) -> int:
+        return int(
+            db.query(func.count(func.distinct(model.session_id)))
+            .filter(model.session_id.isnot(None), *filters)
+            .scalar()
+            or 0
+        )
+
+    total_sessions = int(db.query(func.count(LiveSession.id)).scalar() or 0)
+    detail_complete = int(
+        db.query(func.count(LiveSession.id))
+        .filter(LiveSession.detail_collection_status == "complete")
+        .scalar()
+        or 0
+    )
+    lead_total = int(db.query(func.count(LeadConversionPair.id)).scalar() or 0)
+    attributed_leads = int(
+        db.query(func.count(LeadConversionPair.id))
+        .filter(LeadConversionPair.session_id.isnot(None))
+        .scalar()
+        or 0
+    )
+    steps = [
+        {"key": "sessions", "label": "直播场次", "count": total_sessions},
+        {"key": "details", "label": "详情完整", "count": detail_complete},
+        {"key": "metrics", "label": "有分钟指标", "count": distinct_sessions(LiveMetric)},
+        {"key": "comments", "label": "有评论", "count": distinct_sessions(Comment)},
+        {
+            "key": "transcripts",
+            "label": "有真实转写",
+            "count": distinct_sessions(TranscriptSegment, TranscriptSegment.asr_status == "completed"),
+        },
+        {
+            "key": "reviews",
+            "label": "AI复盘完成",
+            "count": distinct_sessions(UnifiedAiReviewRun, UnifiedAiReviewRun.status == "completed"),
+        },
+        {
+            "key": "clips",
+            "label": "已有成片",
+            "count": distinct_sessions(ClipClip, ClipClip.video_path.isnot(None)),
+        },
+    ]
+    return {
+        "steps": steps,
+        "lead_attribution": {
+            "total": lead_total,
+            "attributed": attributed_leads,
+            "pending": max(0, lead_total - attributed_leads),
+            "rate": round(attributed_leads / lead_total * 100, 1) if lead_total else 0,
+        },
+    }
 
 
 @router.get("/{session_id}/workbench", response_model=ReviewWorkbenchResponse)

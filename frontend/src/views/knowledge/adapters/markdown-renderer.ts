@@ -25,8 +25,14 @@ export function renderMarkdown(text: string): string {
   try {
     return md.render(text);
   } catch {
-    // 解析失败时回退到纯文本（用 <br> 保留换行）
-    return text.replace(/\n/g, '<br>');
+    // 解析失败时仍先转义纯文本，禁止回退路径把 AI 内容当 HTML 注入。
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;')
+      .replace(/\n/g, '<br>');
   }
 }
 

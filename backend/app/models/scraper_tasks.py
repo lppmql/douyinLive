@@ -1,5 +1,5 @@
 """采集任务表"""
-from sqlalchemy import JSON, Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
+from sqlalchemy import JSON, Boolean, Column, Integer, BigInteger, String, DateTime, Text, ForeignKey, Index
 from app.models.base import Base, TimestampMixin
 
 
@@ -24,6 +24,9 @@ class ScraperTask(Base, TimestampMixin):
     started_at = Column(DateTime, nullable=True, comment="开始时间")
     completed_at = Column(DateTime, nullable=True, comment="完成时间")
     error_message = Column(Text, nullable=True, comment="错误信息")
+    error_code = Column(String(50), nullable=True, comment="结构化错误码")
+    failure_stage = Column(String(50), nullable=True, comment="失败发生阶段")
+    is_retryable = Column(Boolean, nullable=True, comment="失败是否适合自动或人工重试")
     cancel_requested_at = Column(DateTime, nullable=True, comment="用户请求安全停止任务的时间")
     retry_of_task_id = Column(BigInteger, nullable=True, comment="本次任务重试自哪个历史任务")
     task_options_json = Column(JSON, nullable=True, comment="任务启动参数快照")

@@ -37,7 +37,6 @@ defineProps<{
   actionStage: string;
   latestReport: Api.Douyin.AnalysisReport | null;
   analysisReady: boolean;
-  scoreResult: Api.Douyin.AiScoreResult | null;
   workbench: Api.Douyin.ReviewWorkbench | null;
 }>();
 
@@ -129,7 +128,7 @@ function renderSessionLabel(option: SelectOption) {
           </div>
           <div>
             <div class="text-14px font-700">生成完整复盘</div>
-            <div class="mt-3px text-12px leading-19px text-gray-500">依次提取证据、更新评分、生成下一场动作</div>
+            <div class="mt-3px text-12px leading-19px text-gray-500">一次生成用户意图、主播回应、钩子转化与下一场建议</div>
           </div>
         </div>
         <NTooltip :disabled="analysisReady || !selectedSessionId">
@@ -143,7 +142,7 @@ function renderSessionLabel(option: SelectOption) {
                 :disabled="!selectedSessionId || !analysisReady || actionBusy"
                 @click="$emit('runFullReview')"
               >
-                {{ scoreResult ? '重新生成完整复盘' : '开始完整复盘' }}
+                {{ workbench?.unified_ai_review ? '重新生成完整复盘' : '开始完整复盘' }}
               </NButton>
             </span>
           </template>

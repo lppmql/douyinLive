@@ -31,6 +31,7 @@ from app.services.tasks.batch_runners import (
     run_knowledge_sync_batch,
 )
 from app.services.tasks.exceptions import TaskBatchFailed, TaskCancellationRequested
+from app.services.tasks.error_classification import classify_task_error
 from app.services.tasks.runtime import (
     current_worker_id,
     ensure_task_identity,
@@ -290,6 +291,7 @@ class CollectorTaskControlManager:
 
             task = ScraperTask(
                 account_id=account_id,
+                session_id=int(session_id) if session_id is not None else None,
                 task_type=task_type,
                 status=TaskStatus.PENDING,
                 task_options_json=options or {},
@@ -363,6 +365,8 @@ class CollectorTaskControlManager:
                 raise ValueError("任务不存在或不支持重试")
             if original.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED):
                 raise ValueError("只有失败或已停止的任务可以重试")
+            if original.is_retryable is False:
+                raise ValueError("该失败需要先修复登录或配置问题，不能直接重试")
             active = (
                 db.query(ScraperTask)
                 .filter(
@@ -443,6 +447,9 @@ class CollectorTaskControlManager:
             task.started_at = datetime.utcnow()
             task.completed_at = None
             task.error_message = None
+            task.error_code = None
+            task.failure_stage = None
+            task.is_retryable = None
             task.cancel_requested_at = None
             task.progress_stage = "starting"
             task.progress_message = "任务开始执行"
@@ -566,6 +573,26 @@ class CollectorTaskControlManager:
             task.completed_at = datetime.utcnow()
             task.result_json = result or task.result_json
             task.error_message = error_message[:1000] if error_message else None
+            failure_stage = task.progress_stage
+            if status == TaskStatus.FAILED:
+                failure = classify_task_error(
+                    error_message,
+                    current_stage=failure_stage,
+                    task_type=task.task_type,
+                )
+                task.error_code = failure.code
+                task.failure_stage = failure.stage
+                task.is_retryable = failure.retryable
+                task.result_json = {
+                    **(result or task.result_json or {}),
+                    "error_code": failure.code,
+                    "failure_stage": failure.stage,
+                    "is_retryable": failure.retryable,
+                }
+            else:
+                task.error_code = None
+                task.failure_stage = None
+                task.is_retryable = None
             task.progress_stage = status
             task.progress_message = (
                 "任务已完成"

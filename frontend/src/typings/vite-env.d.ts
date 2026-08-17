@@ -108,6 +108,10 @@ declare namespace Env {
     readonly VITE_STORAGE_PREFIX?: string;
     /** Whether to automatically detect updates after configuring application packaging */
     readonly VITE_AUTOMATICALLY_DETECT_UPDATE?: CommonType.YesOrNo;
+    /** Vite dev server host; defaults to localhost-only */
+    readonly VITE_DEV_HOST?: string;
+    /** Whether Vite should open the browser after startup */
+    readonly VITE_OPEN_BROWSER?: CommonType.YesOrNo;
     /** show proxy url log in terminal */
     readonly VITE_PROXY_LOG?: CommonType.YesOrNo;
     /** The launch editor */

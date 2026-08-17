@@ -54,6 +54,18 @@ def find_latest_logged_in_account(db: Session) -> Optional[ScraperAccount]:
     )
 
 
+def mark_account_expired(db: Session, account_id: Optional[int]) -> bool:
+    """认证失败后熔断该账号；重新扫码成功会由 save_account_to_db 恢复。"""
+    account = find_account_by_id(db, account_id)
+    if not account or account.login_status == "expired":
+        return False
+    account.login_status = "expired"
+    account.cookie_checked_at = datetime.utcnow()
+    account.updated_at = datetime.utcnow()
+    db.flush()
+    return True
+
+
 def load_account_fingerprint(account: Optional[ScraperAccount]) -> dict[str, Any]:
     """从账号记录中解析浏览器指纹（纯函数，不访问数据库）。
 

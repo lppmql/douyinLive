@@ -16,6 +16,11 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.logger import logger
 from app.models.scraper_tasks import ScraperTask
+from app.services.collector.account_repo import (
+    find_latest_logged_in_account,
+    mark_account_expired,
+)
+from app.services.tasks.error_classification import classify_task_error
 from app.services.collector.browser import browser_manager
 from app.services.tasks.runtime import (
     current_worker_id,
@@ -242,6 +247,11 @@ class SchedulerManager:
                 self._paused_for_collection = True
                 self._last_error = None
                 return
+            if not settings.monitor_mock_enabled:
+                account = find_latest_logged_in_account(db)
+                if not account or not account.cookie_saved:
+                    self._last_error = "采集账号未登录或已过期，请重新扫码后恢复实时监控"
+                    return
             self._paused_for_collection = False
             self._active_browser_jobs += 1
             monitor_browser_started = True
@@ -287,8 +297,12 @@ class SchedulerManager:
         from app.models.live_sessions import LiveSession
         from app.services.collector.enterprise import discover_enterprise_live_sessions
 
+        account = find_latest_logged_in_account(db)
         context, is_valid, message = await browser_manager.get_logged_in_context()
         if not is_valid or not context:
+            if account:
+                mark_account_expired(db, account.id)
+                db.commit()
             raise RuntimeError(message or "采集账号登录状态不可用")
 
         live_items = await discover_enterprise_live_sessions(context, room)
@@ -384,9 +398,15 @@ class SchedulerManager:
                     logger.info("刷新数据采集已接管实时数据，本轮 %s 任务自动跳过", job_type)
                 self._paused_for_collection = True
                 return
+            account = find_latest_logged_in_account(db)
+            if not account or not account.cookie_saved:
+                self._last_error = "采集账号登录已过期，请重新扫码登录后恢复实时采集"
+                logger.warning("实时采集熔断 [%s/%s]: %s", job_type, session_id, self._last_error)
+                return
             self._active_browser_jobs += 1
             browser_job_started = True
             task = ScraperTask(
+                account_id=account.id,
                 session_id=session_id,
                 task_type=job_type,
                 status=TaskStatus.RUNNING,
@@ -394,6 +414,8 @@ class SchedulerManager:
             )
             ensure_task_identity(task, f"scraper-{job_type}")
             task.retry_count = 1
+            task.progress_stage = "starting"
+            task.progress_message = "实时采集任务开始执行"
             touch_task(task, current_worker_id("monitor"))
             db.add(task)
             db.commit()
@@ -453,6 +475,9 @@ class SchedulerManager:
 
             task.status = "completed"
             task.completed_at = datetime.utcnow()
+            task.error_code = None
+            task.failure_stage = None
+            task.is_retryable = None
             touch_task(task)
             db.commit()
             publish_task_event("scraper", task, "completed", {"session_id": session_id, "task_type": job_type})
@@ -473,16 +498,36 @@ class SchedulerManager:
         except Exception as e:
             logger.error(f"采集失败 [{job_type}/{session_id}]: {e}")
             if task:
+                failure = classify_task_error(
+                    e,
+                    current_stage=task.progress_stage,
+                    task_type=job_type,
+                )
                 task.status = TaskStatus.FAILED
                 task.error_message = str(e)[:200]
+                task.error_code = failure.code
+                task.failure_stage = failure.stage
+                task.is_retryable = failure.retryable
+                task.progress_stage = TaskStatus.FAILED
+                task.progress_message = task.error_message
                 task.completed_at = datetime.utcnow()
+                if failure.code == "collector_auth_expired":
+                    mark_account_expired(db, task.account_id)
+                    self._last_error = "采集账号登录已过期，实时任务已暂停；重新扫码后自动恢复"
                 touch_task(task)
                 db.commit()
                 publish_task_event(
                     "scraper",
                     task,
                     TaskStatus.FAILED,
-                    {"session_id": session_id, "task_type": job_type, "error": task.error_message},
+                    {
+                        "session_id": session_id,
+                        "task_type": job_type,
+                        "error": task.error_message,
+                        "error_code": task.error_code,
+                        "failure_stage": task.failure_stage,
+                        "is_retryable": task.is_retryable,
+                    },
                 )
         finally:
             if browser_job_started:
@@ -493,6 +538,7 @@ class SchedulerManager:
         """清理过期 session"""
         db = SessionLocal()
         try:
+            from app.services.clips.storage_retention import prune_replay_storage
             from app.models.live_sessions import LiveSession
             expired = db.query(LiveSession).filter(
                 LiveSession.live_status == "live",
@@ -504,6 +550,13 @@ class SchedulerManager:
                     from app.services.collector.end_live import process_live_end
                     await process_live_end(db, s.id)
                     self.remove_session_jobs(s.id)
+            cleanup = prune_replay_storage(db)
+            if cleanup["deleted_count"]:
+                logger.info(
+                    "定时清理直播回放完成: deleted=%s freed_bytes=%s",
+                    cleanup["deleted_count"],
+                    cleanup["deleted_bytes"],
+                )
         finally:
             db.close()
 

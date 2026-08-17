@@ -132,7 +132,6 @@ def _comment_session_index(db: Session) -> dict[str, list[LiveSession]]:
     rows = (
         db.query(Comment, LiveSession)
         .join(LiveSession, LiveSession.id == Comment.session_id)
-        .filter(Comment.user_sec_uid.isnot(None))
         .all()
     )
     for comment, session in rows:
@@ -144,6 +143,14 @@ def _comment_session_index(db: Session) -> dict[str, list[LiveSession]]:
             if all(existing.id != session.id for existing in result[douyin_id]):
                 result[douyin_id].append(session)
     return result
+
+
+def comment_session_ids_for_douyin(db: Session, douyin_id: str | None) -> set[int]:
+    """返回该公开抖音号在评论中真实出现过的场次 ID。"""
+    normalized = normalize_douyin_id(douyin_id)
+    if not normalized:
+        return set()
+    return {int(session.id) for session in _comment_session_index(db).get(normalized, [])}
 
 
 def _pair_session(candidate: PairCandidate, index: dict[str, list[LiveSession]]) -> tuple[int | None, str]:
@@ -189,9 +196,28 @@ def rebuild_lead_conversion_pairs(db: Session) -> dict[str, int]:
         .order_by(Lead.create_time.asc(), Lead.id.asc())
         .all()
     )
-    candidates = _build_candidates(leads)
-    comment_session_index = _comment_session_index(db)
     existing_pairs = db.query(LeadConversionPair).all()
+    lead_by_id = {int(lead.id): lead for lead in leads}
+    manual_pairs = [
+        pair
+        for pair in existing_pairs
+        if pair.attribution_method == "manual" and pair.session_id
+    ]
+    locked_douyin_ids = {int(pair.douyin_lead_id) for pair in manual_pairs}
+    locked_contact_ids = {int(pair.contact_lead_id) for pair in manual_pairs}
+    candidates = [
+        candidate
+        for candidate in _build_candidates(leads)
+        if int(candidate.douyin_lead.id) not in locked_douyin_ids
+        and int(candidate.contact_lead.id) not in locked_contact_ids
+    ]
+    # 人工确认同时锁定原始记录的一对一关系，增量数据不能把其中一边重新配走。
+    for pair in manual_pairs:
+        douyin_lead = lead_by_id.get(int(pair.douyin_lead_id))
+        contact_lead = lead_by_id.get(int(pair.contact_lead_id))
+        if douyin_lead and contact_lead:
+            candidates.append(PairCandidate(douyin_lead, contact_lead, pair.gap_seconds))
+    comment_session_index = _comment_session_index(db)
     existing_by_source = {
         (int(pair.douyin_lead_id), int(pair.contact_lead_id)): pair for pair in existing_pairs
     }
@@ -215,7 +241,13 @@ def rebuild_lead_conversion_pairs(db: Session) -> dict[str, int]:
         kind = contact_type(contact_value)
         if not douyin_value or not contact_value or not kind:
             continue
+        source_key = (int(candidate.douyin_lead.id), int(candidate.contact_lead.id))
+        pair = existing_by_source.get(source_key)
         session_id, attribution_method = _pair_session(candidate, comment_session_index)
+        # 人工确认是最高优先级事实；后续增量同步和重建不能覆盖或清空。
+        if pair and pair.attribution_method == "manual" and pair.session_id:
+            session_id = int(pair.session_id)
+            attribution_method = "manual"
         if session_id:
             new_session_ids.add(session_id)
             attributed_count += 1
@@ -223,8 +255,6 @@ def rebuild_lead_conversion_pairs(db: Session) -> dict[str, int]:
             phone_count += 1
         else:
             wechat_count += 1
-        source_key = (int(candidate.douyin_lead.id), int(candidate.contact_lead.id))
-        pair = existing_by_source.get(source_key)
         if pair is None:
             pair = LeadConversionPair(
                 douyin_lead_id=candidate.douyin_lead.id,

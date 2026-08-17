@@ -17,12 +17,16 @@ def configure_reader() -> None:
     if len(password) < 12:
         raise ValueError("DATAEASE_READER_PASSWORD 至少需要 12 个字符")
 
+    root_password = settings.MYSQL_ROOT_PASSWORD or (
+        settings.DB_PASSWORD if settings.DB_USER.lower() == "root" else ""
+    )
+    if not root_password:
+        raise ValueError("缺少 MYSQL_ROOT_PASSWORD，无法创建 DataEase 只读账号")
     connection = pymysql.connect(
         host=settings.DB_HOST,
         port=settings.DB_PORT,
-        user=settings.DB_USER,
-        password=settings.DB_PASSWORD,
-        database=settings.DB_NAME,
+        user="root",
+        password=root_password,
         charset="utf8mb4",
         autocommit=True,
     )

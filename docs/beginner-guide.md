@@ -22,12 +22,14 @@ GRAFANA_ADMIN_PASSWORD  Grafana 管理员密码
 
 接口密钥的大白话解释：它像一把只给服务器用的钥匙。谁拿着这把钥匙，谁就能调用对应服务，所以不要放进前端，也不要提交到 Git。
 
-## 2. 启动项目
+## 2. 首次安装与日常启动
 
 从项目根目录执行：
 
 ```bash
-./start.sh
+./setup.sh
+# 按脚本提示填写 .env 后：
+./start.sh standard
 ```
 
 启动后打开：
@@ -45,6 +47,9 @@ make doctor
 ```
 
 `doctor` 的意思是“环境体检”，会检查 Docker、Python、Node、ffmpeg、数据库和常见弱配置。
+
+`setup.sh` 只在新电脑首次部署或依赖版本升级时运行；`start.sh` 不再临时下载大体积依赖。
+日常模式分为 `lite`、`standard`（推荐）和 `full`，只有 `full` 会启动 DataEase、Prometheus 和 Grafana。
 
 ## 3. 首次登录和采集账号
 

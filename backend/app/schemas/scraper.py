@@ -60,6 +60,9 @@ class ScraperTaskResponse(ScraperTaskBase):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     error_message: Optional[str] = None
+    error_code: Optional[str] = None
+    failure_stage: Optional[str] = None
+    is_retryable: Optional[bool] = None
     cancel_requested_at: Optional[datetime] = None
     retry_of_task_id: Optional[int] = None
     task_options_json: Optional[dict[str, Any]] = None
@@ -287,6 +290,9 @@ class UnifiedTaskResponse(BaseModel):
     anchor_name: Optional[str] = None
     session_title: Optional[str] = None
     error_message: Optional[str] = None
+    error_code: Optional[str] = None
+    failure_stage: Optional[str] = None
+    is_retryable: Optional[bool] = None
     trace_id: Optional[str] = None
     worker_id: Optional[str] = None
     heartbeat_at: Optional[datetime] = None

@@ -1320,6 +1320,18 @@ declare namespace Api {
       failed_task_count: number;
       storage_root: string;
       storage_available: boolean;
+      subtitle_precision_counts: Record<string, number>;
+      precise_clip_count: number;
+      estimated_clip_count: number;
+      publish_ready_count: number;
+      subtitle_health: 'healthy' | 'degraded';
+      estimated_approval_enabled: boolean;
+      replay_count: number;
+      replay_bytes: number;
+      replay_cleanup_enabled: boolean;
+      replay_capacity_exceeded: boolean;
+      replay_retention_days: number;
+      replay_max_gb: number;
     }
 
     interface ClipCandidateSession {
@@ -1337,6 +1349,31 @@ declare namespace Api {
       clip_count: number;
       clip_available_count: number;
       clip_status: 'none' | 'has_clips';
+    }
+
+    interface ReviewReadinessFunnel {
+      steps: Array<{ key: string; label: string; count: number }>;
+      lead_attribution: { total: number; attributed: number; pending: number; rate: number };
+    }
+
+    interface PendingLeadPairCandidate {
+      session_id: number;
+      session_title: string | null;
+      anchor_name: string | null;
+      live_start_time: string | null;
+      live_end_time: string | null;
+      distance_seconds: number;
+    }
+
+    interface PendingLeadPair {
+      id: number;
+      anchor_name: string;
+      douyin_id: string;
+      contact_type: 'phone' | 'wechat';
+      contact_value: string;
+      converted_at: string;
+      gap_seconds: number;
+      candidate_sessions: PendingLeadPairCandidate[];
     }
   }
 }

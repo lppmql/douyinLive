@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal, get_db
 from app.core.config import settings
 from app.models.live_sessions import LiveSession
+from app.models.base import utc_now_naive
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_tasks import ScraperTask
 from app.models.scraper_logs import ScraperLog
@@ -355,14 +356,23 @@ async def check_account_health(account_id: int, db: Session = Depends(get_db)):
     valid, message = await scheduler_manager.run_serialized_browser_operation(
         lambda: browser_manager.check_account_health(account)
     )
-    account.login_status = "logged_in" if valid else "expired"
-    account.cookie_checked_at = datetime.utcnow()
+    # 只有浏览器明确识别到登录页时才标记过期；网络/页面探测异常保持原状态。
+    explicitly_expired = not valid and message.startswith("Cookie 已失效")
+    if valid:
+        account.login_status = "logged_in"
+    elif explicitly_expired:
+        account.login_status = "expired"
+    account.cookie_checked_at = utc_now_naive()
     db.commit()
     return AccountHealthResponse(
         account_id=account.id,
         valid=valid,
         login_status=account.login_status,
-        cookie_status=getattr(account, "cookie_status", "valid" if valid else "expired"),
+        cookie_status=(
+            getattr(account, "cookie_status", "valid" if valid else "expired")
+            if valid or explicitly_expired
+            else "unknown"
+        ),
         douyin_nickname=getattr(account, "douyin_nickname", None),
         douyin_id=getattr(account, "douyin_id", None),
         checked_at=account.cookie_checked_at,
@@ -648,11 +658,21 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         )
 
     try:
+        from app.services.tasks.error_classification import classify_task_error
+
         await scheduler_manager.wait_for_collection_slot()
         result = await collect_all(db, task_id=task.id, progress_callback=update_progress)
         task.status = TaskStatus.COMPLETED if _collection_succeeded(result) else TaskStatus.FAILED
         if task.status == TaskStatus.FAILED:
             task.error_message = result.get("message") or "未采集到房间数据"
+            failure = classify_task_error(
+                task.error_message,
+                current_stage=task.progress_stage,
+                task_type=task.task_type,
+            )
+            task.error_code = failure.code
+            task.failure_stage = failure.stage
+            task.is_retryable = failure.retryable
             task.progress_message = task.error_message
         return result
     except Exception as exc:
@@ -661,6 +681,14 @@ async def manual_collect_all(db: Session = Depends(get_db)):
         compact_error = _sanitize_collector_error(exc)
         task.status = TaskStatus.FAILED
         task.error_message = compact_error
+        failure = classify_task_error(
+            compact_error,
+            current_stage=task.progress_stage,
+            task_type=task.task_type,
+        )
+        task.error_code = failure.code
+        task.failure_stage = failure.stage
+        task.is_retryable = failure.retryable
         task.progress_stage = TaskStatus.FAILED
         task.progress_message = "采集任务执行失败"
         db.add(

@@ -14,7 +14,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from sqlalchemy import func
+from sqlalchemy import String, and_, cast, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import PROJECT_ROOT, settings
@@ -114,6 +114,8 @@ def _session_overview(db: Session, session_id: int) -> ClipSessionOverview:
 @router.get("/candidate-sessions")
 def list_candidate_sessions(
     limit: int = Query(50, ge=1, le=200),
+    search: str | None = Query(None, max_length=100),
+    include_session_id: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ):
     """可剪辑的候选场次：已结束、详情完整，按开播时间倒序。
@@ -152,7 +154,7 @@ def list_candidate_sessions(
         .group_by(ClipClip.session_id)
         .subquery()
     )
-    rows = (
+    query = (
         db.query(
             LiveSession,
             transcript_stats.c.segment_count,
@@ -162,10 +164,30 @@ def list_candidate_sessions(
         )
         .outerjoin(transcript_stats, transcript_stats.c.sid == LiveSession.id)
         .outerjoin(clip_stats, clip_stats.c.sid == LiveSession.id)
-        .filter(
-            LiveSession.live_status != "live",
-            LiveSession.detail_collection_status == "complete",
+    )
+    eligibility = and_(
+        LiveSession.live_status != "live",
+        LiveSession.detail_collection_status == "complete",
+    )
+    searched = eligibility
+    if search and search.strip():
+        pattern = f"%{search.strip()}%"
+        searched = and_(
+            eligibility,
+            or_(
+                cast(LiveSession.id, String).like(pattern),
+                LiveSession.session_title.like(pattern),
+                LiveSession.anchor_name.like(pattern),
+                LiveSession.anchor_nickname.like(pattern),
+                LiveSession.douyin_id.like(pattern),
+            ),
         )
+    if include_session_id:
+        query = query.filter(or_(LiveSession.id == include_session_id, searched))
+    else:
+        query = query.filter(searched)
+    rows = (
+        query
         .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
         .limit(limit)
         .all()
@@ -369,6 +391,14 @@ def approve_clip(clip_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "成片不存在")
     if not clip.video_path:
         raise HTTPException(409, "成片尚未生成视频文件，无法确认")
+    if (
+        (clip.subtitle_precision or "segment_estimated") == "segment_estimated"
+        and not settings.CLIP_ALLOW_ESTIMATED_SUBTITLE_APPROVAL
+    ):
+        raise HTTPException(
+            409,
+            "当前字幕只有段落估算时间，可能与画面不同步；请在 FunASR 正常后重剪，生成精确时间轴再确认",
+        )
     clip.status = "approved"
     db.commit()
     return ClipActionResponse(success=True, message="已确认成片，可复制文案发布")
@@ -493,9 +523,41 @@ def clip_stats(db: Session = Depends(get_db)):
         .scalar()
         or 0
     )
+    precision_rows = (
+        db.query(ClipClip.subtitle_precision, func.count(ClipClip.id))
+        .filter(ClipClip.video_path.isnot(None), ClipClip.status.in_(["draft", "approved"]))
+        .group_by(ClipClip.subtitle_precision)
+        .all()
+    )
+    subtitle_precision_counts = {
+        str(precision or "segment_estimated"): int(count or 0)
+        for precision, count in precision_rows
+    }
+    precise_sources = {"funasr_exact", "funasr_aligned", "funasr_remapped"}
+    precise_clip_count = sum(
+        count
+        for precision, count in subtitle_precision_counts.items()
+        if precision in precise_sources
+    )
+    estimated_clip_count = subtitle_precision_counts.get("segment_estimated", 0)
+    from app.services.clips.storage_retention import replay_storage_stats
+
+    storage = replay_storage_stats()
     return {
         "pending_confirm_count": pending_count,
         "failed_task_count": failed_task_count,
         "storage_root": str(_storage_root()),
         "storage_available": True,
+        "subtitle_precision_counts": subtitle_precision_counts,
+        "precise_clip_count": precise_clip_count,
+        "estimated_clip_count": estimated_clip_count,
+        "publish_ready_count": precise_clip_count,
+        "subtitle_health": "degraded" if estimated_clip_count and not precise_clip_count else "healthy",
+        "estimated_approval_enabled": settings.CLIP_ALLOW_ESTIMATED_SUBTITLE_APPROVAL,
+        "replay_count": storage["replay_count"],
+        "replay_bytes": storage["replay_bytes"],
+        "replay_cleanup_enabled": storage["cleanup_enabled"],
+        "replay_capacity_exceeded": storage["capacity_exceeded"],
+        "replay_retention_days": settings.CLIP_REPLAY_RETENTION_DAYS,
+        "replay_max_gb": settings.CLIP_REPLAY_MAX_GB,
     }

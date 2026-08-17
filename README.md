@@ -19,8 +19,8 @@
 
 - macOS 或 Linux
 - Docker Desktop
-- Python 3.10+
-- Node.js 20+ 与 pnpm
+- Python 3.12（项目通过 `.python-version` 固定）
+- Node.js 22 与 pnpm 10.12.4（项目通过 `.nvmrc` 和 `packageManager` 固定）
 - ffmpeg（AI 自动剪辑字幕烧录需带 libass 的版本，见 `docs/开发.md`）
 
 ```bash
@@ -30,21 +30,15 @@ docker --version && python3 --version && node --version && pnpm --version && ffm
 ## 快速开始
 
 ```bash
-# 1. 创建配置（填写 DEEPSEEK_API_KEY）
-cp .env.example .env
+# 1. 首次部署：安装固定版本依赖并创建 .env
+./setup.sh
 
-# 2. 安装后端依赖 + Playwright 浏览器
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
-cd ..
+# 2. 填写 .env 后，日常启动（推荐模式）
+./start.sh standard
 
-# 3. 安装前端依赖
-cd frontend && pnpm install && cd ..
-
-# 4. 一键启动
-./start.sh
+# 也可以按电脑资源选择：
+# ./start.sh lite      # 核心业务，不启动 FunASR/DataEase/监控面板
+# ./start.sh full      # 全部服务
 ```
 
 启动后访问：
@@ -89,6 +83,7 @@ douyinLive/
 ├── .github/               CI/CD 工作流
 ├── Makefile               统一命令入口（make doctor/test/lint/build）
 ├── docker-compose.yml
+├── setup.sh               首次安装/依赖升级
 └── start.sh               一键启动脚本
 ```
 

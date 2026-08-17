@@ -11,8 +11,11 @@ services:
     ports:
       - "127.0.0.1:3306:3306"
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
-      MYSQL_DATABASE: douyin_live
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-${DB_PASSWORD:?请在 .env 设置 MYSQL_ROOT_PASSWORD}}
+      MYSQL_DATABASE: ${DB_NAME:-douyin_live}
+      # 全新数据卷由镜像创建；已有数据卷由启动脚本的幂等账号初始化补齐权限。
+      MYSQL_USER: ${DB_USER:-douyin_app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
       MYSQL_CHARACTER_SET_SERVER: utf8mb4
       MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
     volumes:
@@ -85,8 +88,9 @@ services:
       DE_MYSQL_HOST: mysql
       DE_MYSQL_PORT: "3306"
       DE_MYSQL_DB: dataease
-      DE_MYSQL_USER: ${DB_USER:-root}
-      DE_MYSQL_PASSWORD: ${DB_PASSWORD:?请在 .env 设置 DB_PASSWORD}
+      DE_MYSQL_USER: ${DATAEASE_DB_USER:-dataease_app}
+      # 非 full 模式允许留空；full 启动脚本会在启动容器前严格校验真实密码。
+      DE_MYSQL_PASSWORD: ${DATAEASE_DB_PASSWORD:-dataease-disabled}
       DE_MYSQL_PARAMS: autoReconnect=false&useUnicode=true&characterEncoding=UTF-8&characterSetResults=UTF-8&zeroDateTimeBehavior=convertToNull&useSSL=false&allowPublicKeyRetrieval=true
       DE_EXPORT_VIEWS_LIMIT: "100000"
       DE_EXPORT_DATASET_LIMIT: "100000"

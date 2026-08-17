@@ -87,6 +87,7 @@ const precisionInfo = computed(() => {
         <NSpace>
           <NButton
             v-if="clip.status === 'draft' && clip.video_path"
+            :disabled="clip.subtitle_precision === 'segment_estimated'"
             size="small"
             type="primary"
             ghost

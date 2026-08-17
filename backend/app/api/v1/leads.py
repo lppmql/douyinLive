@@ -15,6 +15,8 @@ from app.schemas import LeadCreate, LeadResponse, MessageResponse
 from app.schemas.leads import (
     LeadAttributionUpdate,
     LeadDetailResponse,
+    LeadPairAttributionUpdate,
+    LeadPairPendingResponse,
     LeadSyncResponse,
     LeadSyncStatusResponse,
 )
@@ -80,6 +82,119 @@ def get_lead_sync_status(db: Session = Depends(get_db)):
         ),
         interval_seconds=settings.KEZI_SYNC_INTERVAL_SECONDS,
     )
+
+
+def _pair_session_candidates(db: Session, pair: LeadConversionPair) -> list[dict]:
+    """只返回抖音号真实评论过、同主播且位于承接窗口内的场次。"""
+    from datetime import timedelta
+    from app.services.leads.lead_pairing import (
+        comment_session_ids_for_douyin,
+        normalize_anchor,
+    )
+
+    comment_session_ids = comment_session_ids_for_douyin(db, pair.douyin_id)
+    if not comment_session_ids:
+        return []
+    start = pair.converted_at - timedelta(hours=13)
+    end = pair.converted_at + timedelta(hours=12)
+    sessions = (
+        db.query(LiveSession)
+        .filter(
+            LiveSession.id.in_(comment_session_ids),
+            LiveSession.live_start_time.isnot(None),
+            LiveSession.live_start_time >= start,
+            LiveSession.live_start_time <= end,
+        )
+        .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .limit(200)
+        .all()
+    )
+    pair_anchor = normalize_anchor(pair.anchor_name)
+    candidates: list[tuple[int, LiveSession]] = []
+    for session in sessions:
+        if pair_anchor not in {
+            normalize_anchor(session.anchor_name),
+            normalize_anchor(session.anchor_nickname),
+        }:
+            continue
+        session_end = session.live_end_time or session.live_start_time
+        if session.live_start_time <= pair.converted_at <= session_end:
+            distance = 0
+        elif pair.converted_at > session_end:
+            distance = int((pair.converted_at - session_end).total_seconds())
+            if distance > 3600:
+                continue
+        else:
+            distance = int((session.live_start_time - pair.converted_at).total_seconds())
+            if distance > 1800:
+                continue
+        candidates.append((distance, session))
+    candidates.sort(key=lambda item: (item[0], -item[1].id))
+    return [
+        {
+            "session_id": session.id,
+            "session_title": session.session_title,
+            "anchor_name": session.anchor_name or session.anchor_nickname,
+            "live_start_time": session.live_start_time,
+            "live_end_time": session.live_end_time,
+            "distance_seconds": distance,
+        }
+        for distance, session in candidates[:5]
+    ]
+
+
+@router.get("/conversion-pairs/pending", response_model=list[LeadPairPendingResponse])
+def list_pending_conversion_pairs(
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    pairs = (
+        db.query(LeadConversionPair)
+        .filter(LeadConversionPair.session_id.is_(None))
+        .order_by(LeadConversionPair.converted_at.desc(), LeadConversionPair.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        LeadPairPendingResponse(
+            id=pair.id,
+            anchor_name=pair.anchor_name,
+            douyin_id=pair.douyin_id,
+            contact_type=pair.contact_type,
+            contact_value=pair.contact_value,
+            converted_at=pair.converted_at,
+            gap_seconds=pair.gap_seconds,
+            candidate_sessions=_pair_session_candidates(db, pair),
+        )
+        for pair in pairs
+    ]
+
+
+@router.patch("/conversion-pairs/{pair_id}/attribution", response_model=dict)
+def attribute_conversion_pair(
+    pair_id: int,
+    data: LeadPairAttributionUpdate,
+    db: Session = Depends(get_db),
+):
+    pair = db.get(LeadConversionPair, pair_id)
+    if not pair:
+        raise HTTPException(404, "确认客资不存在")
+    candidates = _pair_session_candidates(db, pair)
+    if data.session_id not in {item["session_id"] for item in candidates}:
+        raise HTTPException(409, "只能选择该抖音号真实评论过、同主播且位于留资承接窗口内的场次")
+    old_session_id = pair.session_id
+    pair.session_id = data.session_id
+    pair.attribution_status = "attributed"
+    pair.attribution_method = "manual"
+    _refresh_session_lead_count(db, old_session_id)
+    _refresh_session_lead_count(db, data.session_id)
+    db.commit()
+    return {
+        "success": True,
+        "message": "客资场次已人工确认",
+        "pair_id": pair.id,
+        "session_id": pair.session_id,
+    }
 
 
 @router.post("/sync", response_model=LeadSyncResponse)

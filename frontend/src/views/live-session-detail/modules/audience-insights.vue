@@ -30,6 +30,12 @@ async function copyValue(label: string, value: string | null) {
   await navigator.clipboard.writeText(value);
   message.success(`${label}已复制`);
 }
+function isReliableAnalysis(analysis: Api.Douyin.UnifiedAiUserAnalysis | null) {
+  return Boolean(
+    analysis &&
+      (analysis.manual_confirmed || (analysis.confidence >= 0.55 && analysis.host_response_status !== 'unknown'))
+  );
+}
 </script>
 
 <template>
@@ -86,9 +92,10 @@ async function copyValue(label: string, value: string | null) {
               </div>
             </div>
             <div class="flex flex-wrap gap-6px">
-              <NTag v-if="user.ai_analysis" :type="user.ai_analysis.is_precision_lead ? 'success' : 'default'" size="small" :bordered="false">
+              <NTag v-if="user.ai_analysis && isReliableAnalysis(user.ai_analysis)" :type="user.ai_analysis.is_precision_lead ? 'success' : 'default'" size="small" :bordered="false">
                 {{ user.ai_analysis.is_precision_lead ? '精准新客' : user.ai_analysis.precision_status === 'existing_store' ? '已开店' : user.ai_analysis.precision_status === 'non_target' ? '非目标需求' : '非精准新客' }}
               </NTag>
+              <NTag v-else-if="user.ai_analysis" type="warning" size="small" :bordered="false">AI 结论待人工确认</NTag>
               <NTag v-if="user.ai_analysis?.interaction_type === 'rational_question'" type="warning" size="small" :bordered="false">理性质疑</NTag>
               <NTag v-if="user.ai_analysis?.interaction_type === 'malicious'" type="error" size="small" :bordered="false">恶意用户</NTag>
               <NTag v-if="user.ai_analysis?.missed_opportunity" type="error" size="small" :bordered="false">错失转化</NTag>
@@ -115,19 +122,19 @@ async function copyValue(label: string, value: string | null) {
               主播同主题原话：{{ user.host_evidence }}
             </NAlert>
             <template v-if="user.ai_analysis">
-              <NAlert :type="user.ai_analysis.missed_opportunity ? 'warning' : 'info'" :show-icon="false">
-                AI回应判断：{{ user.ai_analysis.host_response_status }}
+              <NAlert :type="isReliableAnalysis(user.ai_analysis) && user.ai_analysis.missed_opportunity ? 'warning' : 'info'" :show-icon="false">
+                {{ isReliableAnalysis(user.ai_analysis) ? 'AI回应判断' : 'AI候选判断（需人工确认）' }}：{{ user.ai_analysis.host_response_status }}
                 <span v-if="user.ai_analysis.host_response_score !== null"> · {{ user.ai_analysis.host_response_score }}分</span>
                 · 置信度 {{ Math.round(user.ai_analysis.confidence * 100) }}%
                 <div v-if="user.ai_analysis.exclusion_reason" class="mt-4px">排除原因：{{ user.ai_analysis.exclusion_reason }}</div>
               </NAlert>
               <div v-if="user.ai_analysis.suggested_reply" class="rounded-8px bg-warning-50 p-10px text-13px leading-21px dark:bg-dark">
-                <div class="mb-3px font-600">建议主播这样回答</div>
+                <div class="mb-3px font-600">{{ isReliableAnalysis(user.ai_analysis) ? '建议主播这样回答' : '候选话术（需人工确认）' }}</div>
                 {{ user.ai_analysis.suggested_reply }}
               </div>
             </template>
             <div class="rounded-8px bg-primary-50 p-10px text-13px leading-21px dark:bg-dark">
-              <div class="mb-3px font-600">{{ user.ai_analysis ? 'AI转化建议' : '规则转化建议' }}</div>
+              <div class="mb-3px font-600">{{ user.ai_analysis ? (isReliableAnalysis(user.ai_analysis) ? 'AI转化建议' : '候选建议（需人工确认）') : '规则转化建议' }}</div>
               {{ user.ai_analysis?.recommendation || user.recommendation }}
             </div>
             <div v-if="user.has_lead" class="text-11px text-gray-400">

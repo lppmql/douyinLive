@@ -18,6 +18,7 @@ from app.models.live_sessions import LiveSession
 from app.models.review import ComplianceRule, ReviewActionItem, ReviewFinding, ScriptAsset
 from app.models.stream_sources import StreamSource
 from app.models.transcript_segments import TranscriptSegment
+from app.models.unified_ai_review import UnifiedAiReviewRun
 
 
 INTENT_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -82,7 +83,16 @@ def calculate_completeness(db: Session, session: LiveSession) -> dict[str, Any]:
         .filter(TranscriptSegment.session_id == session.id, TranscriptSegment.asr_status == "completed")
         .all()
     )
-    report_count = db.query(AnalysisReport).filter(AnalysisReport.session_id == session.id).count()
+    legacy_report_count = db.query(AnalysisReport).filter(AnalysisReport.session_id == session.id).count()
+    unified_report_count = (
+        db.query(UnifiedAiReviewRun)
+        .filter(
+            UnifiedAiReviewRun.session_id == session.id,
+            UnifiedAiReviewRun.status == "completed",
+        )
+        .count()
+    )
+    report_count = legacy_report_count + unified_report_count
 
     basic_fields = [session.anchor_name, session.live_start_time, session.session_title, session.detail_collection_status]
     basic_ratio = sum(bool(value) for value in basic_fields) / len(basic_fields)
@@ -103,7 +113,7 @@ def calculate_completeness(db: Session, session: LiveSession) -> dict[str, Any]:
         ("话术转写", 25, transcript_ratio, int(max_segment_end), duration),
         ("直播回放", 10, stream_ratio, int(bool(stream_ratio)), 1),
         ("观众画像", 10, profile_ratio, profile_count, 1),
-        ("AI报告", 5, report_ratio, report_count, 1),
+        ("AI复盘", 5, report_ratio, report_count, 1),
     ]
     score = round(sum(weight * ratio for _, weight, ratio, _, _ in components), 1)
     return {

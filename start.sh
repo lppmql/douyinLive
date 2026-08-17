@@ -1,6 +1,6 @@
 #!/bin/bash
 # 抖音留资直播分析系统 — 一键启动
-# 用法: ./start.sh
+# 用法: ./start.sh [lite|standard|full]
 
 set -e
 
@@ -8,6 +8,11 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 START_LOCK_DIR="$ROOT_DIR/.runtime/start.lock"
+RUN_MODE="${1:-standard}"
+case "$RUN_MODE" in
+  lite|standard|full) ;;
+  *) echo "启动模式只能是 lite、standard 或 full"; exit 1 ;;
+esac
 
 env_value() {
   local KEY="$1"
@@ -60,49 +65,41 @@ trap release_start_lock EXIT
 
 echo "========================================"
 echo "  抖音留资直播分析系统 — 启动"
+echo "  模式: $RUN_MODE"
 echo "========================================"
 
-# 0. 环境自检 + 自动安装（macOS）
+# 0. 快速环境自检。首次安装与大体积下载统一由 setup.sh 负责。
 echo ""
-echo "  🔍 环境自检与自动安装..."
-
-# brew 是 macOS 包管理器，后续自动安装都靠它
-if ! command -v brew >/dev/null 2>&1; then
-  echo "  ❌ 未找到 Homebrew（macOS 包管理器）"
-  echo "  请先安装：/bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-  echo "  安装完成后重新运行 ./start.sh"
-  exit 1
-fi
-echo "  ✅ Homebrew"
-
-# 逐个检查必要工具，缺了就自动装
-auto_install() {
-  local NAME="$1"
-  local BIN="$2"
-  local BREW_PKG="$3"
-  if command -v "$BIN" >/dev/null 2>&1; then
-    echo "  ✅ ${NAME}（$(command -v "$BIN")）"
-    return 0
-  fi
-  echo "  ⏳ ${NAME} 未安装，正在用 Homebrew 自动安装..."
-  if brew install "$BREW_PKG" 2>&1 | tail -1; then
-    echo "  ✅ ${NAME} 安装完成"
-  else
-    echo "  ❌ ${NAME} 自动安装失败，请手动执行：brew install $BREW_PKG"
+echo "  🔍 环境快速自检..."
+for REQUIRED in node ffmpeg docker; do
+  if ! command -v "$REQUIRED" >/dev/null 2>&1; then
+    echo "  ❌ 缺少 $REQUIRED，请先运行 ./setup.sh"
     exit 1
   fi
-}
-
-auto_install "Python 3" python3 python@3.12
-auto_install "Node.js" node node@22
-auto_install "FFmpeg" ffmpeg ffmpeg
-
-# pnpm 通过 npm 安装（node 此时一定可用了）
-if ! command -v pnpm >/dev/null 2>&1; then
-  echo "  ⏳ pnpm 未安装，正在通过 npm 全局安装..."
-  npm install -g pnpm 2>&1 | tail -1 && echo "  ✅ pnpm 安装完成" || { echo "  ❌ pnpm 安装失败"; exit 1; }
-else
-  echo "  ✅ pnpm（$(command -v pnpm)）"
+done
+if [ ! -x "$BACKEND_DIR/.venv/bin/python" ] || [ ! -x "$FRONTEND_DIR/node_modules/.bin/vite" ]; then
+  echo "  ❌ 项目依赖尚未安装完整，请先运行 ./setup.sh"
+  exit 1
+fi
+if ! "$BACKEND_DIR/.venv/bin/python" -c 'import sys; raise SystemExit(sys.version_info[:2] != (3, 12))'; then
+  echo "  ❌ 后端虚拟环境不是 Python 3.12，请重新运行 ./setup.sh"
+  exit 1
+fi
+if [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || true)" != "22" ]; then
+  echo "  ❌ Node.js 必须是 22.x，请重新运行 ./setup.sh"
+  exit 1
+fi
+if [ ! -f "$ROOT_DIR/.env" ]; then
+  echo "  ❌ 未找到 .env，请先运行 ./setup.sh 并填写配置"
+  exit 1
+fi
+if [ "$(env_value DB_USER)" = "root" ]; then
+  echo "  ❌ 旧配置仍使用 DB_USER=root，请按 .env.example 改为 douyin_app，并设置 MYSQL_ROOT_PASSWORD"
+  exit 1
+fi
+if [ "$(env_value DATAEASE_DB_USER)" = "root" ]; then
+  echo "  ❌ DATAEASE_DB_USER 不能使用 root，请按 .env.example 改为 dataease_app"
+  exit 1
 fi
 
 # Docker Desktop 是 GUI 应用，不能自动装，只能提示
@@ -163,7 +160,7 @@ wait_for_backend() {
       return 1
     fi
     HEALTH_RESPONSE=$(curl -fsS --max-time 2 http://127.0.0.1:8000/health 2>/dev/null || true)
-    if [ -n "$HEALTH_RESPONSE" ] && python -c 'import json, sys; sys.exit(json.load(sys.stdin).get("status") != "ok")' <<< "$HEALTH_RESPONSE"; then
+    if [ -n "$HEALTH_RESPONSE" ] && "$BACKEND_DIR/.venv/bin/python" -c 'import json, sys; sys.exit(json.load(sys.stdin).get("status") != "ok")' <<< "$HEALTH_RESPONSE"; then
       return 0
     fi
     sleep 1
@@ -226,42 +223,65 @@ cd "$ROOT_DIR"
 docker compose up -d mysql redis qdrant
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
+# 已有 MySQL 数据卷不会再次执行镜像的 MYSQL_USER 初始化，因此每次启动都用
+# 管理凭据幂等校准一次受限账号。后续 FastAPI 与 DataEase 均不再使用 root。
+MYSQL_ROOT_PASSWORD_VALUE="$(env_value MYSQL_ROOT_PASSWORD)"
+MYSQL_ROOT_PASSWORD_VALUE="${MYSQL_ROOT_PASSWORD_VALUE:-$(env_value DB_PASSWORD)}"
+MYSQL_READY=false
+for ((i = 1; i <= 60; i++)); do
+  if docker exec -e MYSQL_PWD="$MYSQL_ROOT_PASSWORD_VALUE" douyin_live_mysql \
+    mysqladmin ping -h 127.0.0.1 -uroot --silent >/dev/null 2>&1; then
+    MYSQL_READY=true
+    break
+  fi
+  sleep 1
+done
+if [ "$MYSQL_READY" != "true" ]; then
+  echo "  ❌ MySQL 60 秒内未就绪或 MYSQL_ROOT_PASSWORD 不正确"
+  exit 1
+fi
+cd "$BACKEND_DIR"
+if [ "$RUN_MODE" = "full" ] \
+  && [ -f "$ROOT_DIR/dataease/conf/application.yml" ] \
+  && [ -n "$(env_value DATAEASE_DB_PASSWORD)" ]; then
+  "$BACKEND_DIR/.venv/bin/python" -m scripts.configure_database_users --include-dataease
+  echo "  ✅ MySQL 业务账号与 DataEase 账号权限已校准"
+else
+  "$BACKEND_DIR/.venv/bin/python" -m scripts.configure_database_users
+  echo "  ✅ MySQL 业务账号权限已校准（DataEase 未启用或配置不完整，已跳过其账号）"
+fi
 if ! wait_for_http "Qdrant" "http://127.0.0.1:6333/healthz" "douyin_live_qdrant" 60; then
   exit 1
 fi
 echo "  ✅ Qdrant: http://localhost:6333"
 echo "  ℹ️  FunASR 将在第 5 步启动；ASR Worker 由后端按页面开关管理"
 DATAEASE_STARTED=false
-if [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then
+if [ "$RUN_MODE" = "full" ] && [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then
   echo "  ⏳ 正在准备 DataEase 独立数据库..."
-  DATAEASE_DB_USER="$(env_value DB_USER)"
-  DATAEASE_DB_PASSWORD="$(env_value DB_PASSWORD)"
-  DATAEASE_DB_USER="${DATAEASE_DB_USER:-root}"
-  MYSQL_READY=false
-  if [ -z "$DATAEASE_DB_PASSWORD" ]; then
-    echo "  ⚠️  .env 中 DB_PASSWORD 为空，DataEase 暂不启动"
+  DATAEASE_DB_USER_VALUE="$(env_value DATAEASE_DB_USER)"
+  DATAEASE_DB_PASSWORD_VALUE="$(env_value DATAEASE_DB_PASSWORD)"
+  DATAEASE_DB_USER_VALUE="${DATAEASE_DB_USER_VALUE:-dataease_app}"
+  DATAEASE_DB_READY=false
+  if [ -z "$DATAEASE_DB_PASSWORD_VALUE" ]; then
+    echo "  ⚠️  .env 中 DATAEASE_DB_PASSWORD 为空，DataEase 暂不启动"
   else
     for ((i = 1; i <= 60; i++)); do
-      if docker exec -e MYSQL_PWD="$DATAEASE_DB_PASSWORD" douyin_live_mysql \
-        mysqladmin ping -h 127.0.0.1 -u"$DATAEASE_DB_USER" --silent >/dev/null 2>&1; then
-        MYSQL_READY=true
+      if docker exec -e MYSQL_PWD="$DATAEASE_DB_PASSWORD_VALUE" douyin_live_mysql \
+        mysqladmin ping -h 127.0.0.1 -u"$DATAEASE_DB_USER_VALUE" --silent >/dev/null 2>&1; then
+        DATAEASE_DB_READY=true
         break
       fi
       sleep 1
     done
   fi
-  if [ "$MYSQL_READY" = "true" ]; then
-    docker exec -e MYSQL_PWD="$DATAEASE_DB_PASSWORD" douyin_live_mysql \
-      mysql -h 127.0.0.1 -u"$DATAEASE_DB_USER" \
-      -e "CREATE DATABASE IF NOT EXISTS dataease CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-  else
-    echo "  ⚠️  MySQL 未就绪，DataEase 暂不启动"
+  if [ "$DATAEASE_DB_READY" != "true" ]; then
+    echo "  ⚠️  DataEase 数据库账号不可用，DataEase 暂不启动"
   fi
   echo "  ⏳ DataEase 正在启动，首次初始化可能需要 3-10 分钟"
-  if [ "$MYSQL_READY" = "true" ]; then
+  if [ "$DATAEASE_DB_READY" = "true" ]; then
     docker compose --profile dataease up -d dataease
   fi
-  if [ "$MYSQL_READY" = "true" ] && wait_for_dataease \
+  if [ "$DATAEASE_DB_READY" = "true" ] && wait_for_dataease \
     && "$BACKEND_DIR/.venv/bin/python" "$BACKEND_DIR/scripts/check_dataease_crypto.py" --timeout 60 \
     && curl -fsS --max-time 60 http://127.0.0.1:8100/ | grep -q "douyinLive.dataeaseKeySha256"; then
     DATAEASE_STARTED=true
@@ -269,23 +289,24 @@ if [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then
   else
     echo "  ⚠️  DataEase 启动失败，主系统继续启动；可稍后单独排查"
   fi
-else
+elif [ "$RUN_MODE" = "full" ]; then
   echo "  ⚠️  未找到有效的 dataease/conf/application.yml，已跳过可选的 DataEase"
+else
+  echo "  ℹ️  当前为 $RUN_MODE 模式，已跳过 DataEase"
 fi
 
 # 2. ASR 尚未启动时先准备监控组件，避免首次拉镜像与模型争抢内存。
 echo ""
 echo "[2/6] 启动 Prometheus 与 Grafana..."
 cd "$ROOT_DIR"
-docker compose --profile observability up -d prometheus grafana
-if ! wait_for_http "Prometheus" "http://127.0.0.1:9090/-/ready" "douyin_live_prometheus" 90; then
-  exit 1
+if [ "$RUN_MODE" = "full" ]; then
+  docker compose --profile observability up -d prometheus grafana
+  wait_for_http "Prometheus" "http://127.0.0.1:9090/-/ready" "douyin_live_prometheus" 90 || true
+  wait_for_http "Grafana" "http://127.0.0.1:3000/api/health" "douyin_live_grafana" 90 || true
+  echo "  ✅ 可观测性服务已请求启动（失败不会阻断主系统）"
+else
+  echo "  ℹ️  当前为 $RUN_MODE 模式，已跳过 Prometheus 与 Grafana"
 fi
-if ! wait_for_http "Grafana" "http://127.0.0.1:3000/api/health" "douyin_live_grafana" 90; then
-  exit 1
-fi
-echo "  ✅ Prometheus: http://localhost:9090"
-echo "  ✅ Grafana: http://localhost:3000"
 
 # 3. 启动后端（先清理 8000 端口）
 echo ""
@@ -326,7 +347,7 @@ echo "     设置 MONITOR_ENABLED=true 启用自动采集"
 echo ""
 echo "[5/6] 启动 FunASR 语音转写服务..."
 cd "$ROOT_DIR"
-if [ "$(env_value ASR_AUTO_START)" != "true" ]; then
+if [ "$RUN_MODE" = "lite" ] || [ "$(env_value ASR_AUTO_START)" != "true" ]; then
   echo "  ℹ️  ASR_AUTO_START=false，已跳过可选的 FunASR"
   FUNASR_READY=false
   ASR_PID=""
@@ -338,8 +359,10 @@ echo "  ⏳ FunASR 容器启动中，首次下载或崩溃恢复可能需要 5-1
 FUNASR_READY=false
 FUNASR_WAIT_SECONDS="$(env_value ASR_ENGINE_READY_TIMEOUT_SECONDS)"
 if ! [[ "$FUNASR_WAIT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
-  echo "  ⚠️  ASR_ENGINE_READY_TIMEOUT_SECONDS 无效，使用默认值 900 秒"
-  FUNASR_WAIT_SECONDS=900
+  FUNASR_WAIT_SECONDS=30
+fi
+if [ "$FUNASR_WAIT_SECONDS" -gt 30 ]; then
+  FUNASR_WAIT_SECONDS=30
 fi
 for ((i = 1; i <= FUNASR_WAIT_SECONDS; i++)); do
   # 先确认容器在运行
@@ -367,7 +390,7 @@ except Exception:
 done
 
 if [ "$FUNASR_READY" != "true" ]; then
-  echo "  ⚠️  FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，主系统将继续启动；最近日志如下："
+  echo "  ⚠️  FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，将在后台继续加载；最近日志如下："
   docker logs --tail 30 douyin_live_funasr 2>&1 || true
   echo "  ℹ️  语音转写暂不可用；可稍后重启 FunASR 或设置 ASR_AUTO_START=false"
 else
@@ -392,9 +415,9 @@ echo "========================================"
 echo "  启动完成！"
 echo "  前端: http://localhost:9527"
 echo "  后端: http://localhost:8000"
-echo "  DataEase: http://localhost:8100"
-echo "  Prometheus: http://localhost:9090"
-echo "  Grafana: http://localhost:3000"
+[ "$DATAEASE_STARTED" = "true" ] && echo "  DataEase: http://localhost:8100"
+[ "$RUN_MODE" = "full" ] && echo "  Prometheus: http://localhost:9090"
+[ "$RUN_MODE" = "full" ] && echo "  Grafana: http://localhost:3000"
 echo "  Swagger: http://localhost:8000/docs"
 echo "========================================"
 echo ""

@@ -99,6 +99,11 @@ class LoginCheckContext:
         return self.pages.pop(0)
 
 
+class BrokenLoginCheckContext:
+    async def new_page(self):
+        raise RuntimeError("net::ERR_CONNECTION_RESET")
+
+
 class FakeBrowserManager:
     def __init__(self):
         self.contexts = [ClosedContext(), HealthyContext()]
@@ -156,6 +161,15 @@ class MonitorContextRecoveryTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(expired)
         self.assertTrue(all(page.closed for page in pages))
+
+    async def test_login_probe_errors_are_unknown_not_expired(self):
+        manager = BrowserManager()
+
+        with (
+            patch("app.services.collector.browser.asyncio.sleep", return_value=None),
+            self.assertRaisesRegex(RuntimeError, "暂时无法检测"),
+        ):
+            await manager.check_login_expired(BrokenLoginCheckContext())
 
     async def test_recreates_closed_context_and_retries_once(self):
         manager = FakeBrowserManager()

@@ -108,6 +108,18 @@ class TestReviewWorkbenchContract:
         resp = client.get("/api/v1/reviews/99999/workbench", headers=auth_headers)
         assert resp.status_code == 404
 
+    def test_readiness_funnel_static_route_is_reachable(self, client, auth_headers, db):
+        _seed_session(db)
+
+        resp = client.get("/api/v1/reviews/readiness-funnel", headers=auth_headers)
+
+        assert resp.status_code == 200
+        assert resp.json()["steps"][0] == {
+            "key": "sessions",
+            "label": "直播场次",
+            "count": 1,
+        }
+
 
 class TestUpdateFindingContract:
     """PATCH /reviews/{session_id}/findings/{finding_id} 响应契约测试"""
