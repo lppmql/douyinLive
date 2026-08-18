@@ -51,21 +51,27 @@ const props = defineProps<{
   livePreview: string;
   /** WebSocket 是否已连接 */
   wsConnected: boolean;
+  /** 自动任务排序及当前人工独占状态 */
+  dispatchPolicy: Api.Douyin.TranscriptDispatchPolicy | null;
+  dispatchPolicyLoading: boolean;
 }>();
 
 const taskBusy = computed(() => ['queued', 'processing'].includes(props.selectedTask?.status || ''));
 const failureInfo = computed(() => getTranscriptFailureInfo(props.selectedTask?.error_message));
 const canStartTranscription = computed(() => {
-  if (!props.selectedSessionId || taskBusy.value) return false;
+  if (!props.selectedSessionId) return false;
+  if (taskBusy.value) return props.selectedTask?.queue_source !== 'manual';
   if (!props.selectedTask) return true;
   if (['failed', 'cancelled'].includes(props.selectedTask.status)) return true;
   return props.selectedTask.task_type === 'realtime' && props.selectedSession?.live_status !== 'live';
 });
 const transcriptionActionLabel = computed(() => {
+  if (taskBusy.value && props.selectedTask?.queue_source === 'manual') return '人工优先中';
+  if (taskBusy.value) return '优先转写本场';
   if (props.selectedTask?.status === 'failed') return failureInfo.value.actionLabel;
-  if (taskBusy.value) return props.selectedTask?.status === 'queued' ? '等待转写' : '正在转写';
   if (props.selectedTask?.task_type === 'offline' && props.selectedTask.status === 'completed') return '终稿已完成';
-  if (props.selectedTask?.task_type === 'realtime' && props.selectedSession?.live_status !== 'live') return '生成离线终稿';
+  if (props.selectedTask?.task_type === 'realtime' && props.selectedSession?.live_status !== 'live')
+    return '生成离线终稿';
   return props.selectedTask ? '重新转写' : '开始转写';
 });
 const versionTone = computed<'success' | 'warning' | 'default'>(() => {
@@ -82,7 +88,14 @@ defineEmits<{
   queueAnchorBatch: [];
   openTaskDrawer: [status?: string];
   openSessionDetail: [sessionId: number];
+  changeDispatchOrder: [value: Api.Douyin.TranscriptDispatchPolicy['order_mode']];
 }>();
+
+const dispatchOrderOptions = [
+  { label: '智能排序（推荐）', value: 'smart' },
+  { label: '最新场次优先', value: 'latest' },
+  { label: '最早排队优先', value: 'fifo' }
+];
 
 /** 渲染场次下拉选项（带主播头像） */
 function renderSessionLabel(option: SelectOption) {
@@ -130,7 +143,10 @@ function renderSessionLabel(option: SelectOption) {
           placeholder="搜索主播、日期或场次"
           @update:value="(val: number) => $emit('update:selectedSessionId', val)"
         />
-        <div v-if="selectedSession" class="mt-12px flex flex-wrap items-center gap-x-12px gap-y-8px text-12px text-gray-500">
+        <div
+          v-if="selectedSession"
+          class="mt-12px flex flex-wrap items-center gap-x-12px gap-y-8px text-12px text-gray-500"
+        >
           <AnchorIdentity
             class="max-w-240px"
             :session-id="selectedSession.id"
@@ -186,7 +202,7 @@ function renderSessionLabel(option: SelectOption) {
         <NDropdown
           trigger="click"
           :options="[
-            { label: '各主播增量转写', key: 'batch' },
+            { label: '补排今日自动任务', key: 'batch' },
             { label: '查看全部任务', key: 'tasks' },
             { label: '打开场次详情', key: 'detail', disabled: !selectedSessionId }
           ]"
@@ -204,6 +220,29 @@ function renderSessionLabel(option: SelectOption) {
           </NButton>
         </NDropdown>
       </div>
+    </div>
+
+    <div
+      class="mt-16px grid items-center gap-12px rounded-10px bg-gray-50 px-14px py-12px dark:bg-white/4 md:grid-cols-[minmax(0,1fr)_250px]"
+    >
+      <div class="min-w-0">
+        <div class="flex flex-wrap items-center gap-8px text-13px font-600">
+          <span>自动转写：全部直播中场次 + 当天已下播场次</span>
+          <NTag v-if="dispatchPolicy?.manual_active" size="tiny" type="warning" :bordered="false">
+            人工场次 #{{ dispatchPolicy.manual_session_id }} 独占中
+          </NTag>
+        </div>
+        <div class="mt-4px text-11px leading-18px text-gray-400">
+          手动点击“优先转写本场”后，其他任务会在当前约 2 分钟分片结束时保存断点并暂停，人工任务结束后自动恢复。
+        </div>
+      </div>
+      <NSelect
+        :value="dispatchPolicy?.order_mode || 'smart'"
+        :options="dispatchOrderOptions"
+        :loading="dispatchPolicyLoading"
+        aria-label="自动转写排序"
+        @update:value="value => $emit('changeDispatchOrder', value)"
+      />
     </div>
 
     <div v-if="selectedTask && taskBusy && selectedTask.total_chunks > 0" class="mt-16px" aria-live="polite">
@@ -248,8 +287,7 @@ function renderSessionLabel(option: SelectOption) {
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--primary-color) 14%, transparent);
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 5%, transparent), transparent 38%),
-    var(--n-color);
+    linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 5%, transparent), transparent 38%), var(--n-color);
 }
 
 @media (max-width: 767px) {

@@ -14,6 +14,7 @@ import ReviewVideoPlayer from './review-video-player.vue';
 import ReviewTimeline from './review-timeline.vue';
 import SessionComparison from './session-comparison.vue';
 import UnifiedAudienceReview from '@/components/business/unified-audience-review.vue';
+import { useTranscriptRealtime } from '@/hooks/business/transcript-realtime';
 
 defineOptions({ name: 'LiveReviewWorkbench' });
 const props = defineProps<{ sessionId: number; detail: Api.Douyin.LiveSessionDetail }>();
@@ -25,6 +26,33 @@ const generating = ref(false);
 const workbench = ref<Api.Douyin.ReviewWorkbench | null>(null);
 const sessions = ref<Api.Douyin.LiveSessionListItem[]>([]);
 let pollTimer: ReturnType<typeof setInterval> | null = null;
+const realtimeSessionId = computed<number | null>(() => props.sessionId);
+const {
+  livePreview,
+  wsConnected,
+  onPageActivated: activateTranscriptRealtime,
+  onPageDeactivated: deactivateTranscriptRealtime
+} = useTranscriptRealtime({
+  selectedSessionId: realtimeSessionId,
+  onSegment: segment => {
+    if (!workbench.value) return;
+    const rows = workbench.value.transcript_segments;
+    const reviewSegment: Api.Douyin.ReviewTranscriptSegment = {
+      id: segment.id,
+      segment_start: segment.segment_start,
+      segment_end: segment.segment_end,
+      text_content: segment.text_content,
+      segment_type: segment.segment_type,
+      ai_score: segment.ai_score,
+      asr_status: segment.asr_status,
+      compliance_hits: segment.compliance_hits || []
+    };
+    const index = rows.findIndex(item => item.id === reviewSegment.id);
+    if (index >= 0) rows[index] = reviewSegment;
+    else rows.push(reviewSegment);
+    rows.sort((left, right) => left.segment_start - right.segment_start || left.id - right.id);
+  }
+});
 
 const openFindingCount = computed(() => workbench.value?.findings.filter(item => item.status === 'open').length || 0);
 const criticalCount = computed(
@@ -83,15 +111,19 @@ onMounted(async () => {
   reviewStore.initialize(props.sessionId);
   await loadWorkbench(false);
   // 后台静默加载场次列表（供跨场对比使用）
-  fetchLiveSessionPage({ current: 1, size: 100 }).then(res => {
-    sessions.value = res.data?.records || [];
-  }).catch(() => {});
+  fetchLiveSessionPage({ current: 1, size: 100 })
+    .then(res => {
+      sessions.value = res.data?.records || [];
+    })
+    .catch(() => {});
   if (props.detail.session.live_status === 'live') {
+    activateTranscriptRealtime();
     pollTimer = setInterval(() => loadWorkbench(false), 15_000);
   }
 });
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer);
+  deactivateTranscriptRealtime();
 });
 </script>
 
@@ -120,7 +152,7 @@ onBeforeUnmount(() => {
             />
           </div>
           <div class="grid grid-cols-3 gap-8px sm:grid-cols-4 lg:grid-cols-7">
-            <NTooltip v-for="item in (workbench.completeness.components || [])" :key="item.name">
+            <NTooltip v-for="item in workbench.completeness.components || []" :key="item.name">
               <template #trigger>
                 <div
                   class="rounded-8px px-8px py-7px text-center"
@@ -168,6 +200,15 @@ onBeforeUnmount(() => {
           </template>
           <NTabs type="line" animated default-value="timeline">
             <NTabPane name="timeline" tab="统一时间轴" display-directive="if">
+              <NAlert
+                v-if="detail.session.live_status === 'live'"
+                :type="wsConnected ? 'info' : 'warning'"
+                :bordered="false"
+                class="mb-12px"
+              >
+                <template #header>{{ wsConnected ? '直播话术实时同步中' : '直播话术实时通道正在连接' }}</template>
+                {{ livePreview || '新话术片段会直接加入下方统一时间轴。' }}
+              </NAlert>
               <NAlert v-if="workbench.live_alerts?.length" type="warning" :bordered="false" class="mb-12px">
                 当前有 {{ workbench.live_alerts?.length || 0 }} 条实时告警，已按发生时间合并到时间轴中。
               </NAlert>
@@ -181,6 +222,7 @@ onBeforeUnmount(() => {
                 :alerts="workbench.live_alerts || []"
                 :hooks="detail.hook_events || []"
                 :audience-users="detail.audience_users || []"
+                :live-mode="detail.session.live_status === 'live'"
                 @update-finding="updateFinding"
               />
             </NTabPane>

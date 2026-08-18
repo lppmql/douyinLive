@@ -23,9 +23,7 @@ defineOptions({ name: 'TranscriptTaskDrawer' });
 type TaskStatus = Api.Douyin.TranscriptTask['status'];
 const authStore = useAuthStore();
 /** 删除会清理技术任务数据，因此只给超级管理员显示。 */
-const canDeleteTasks = computed(() =>
-  authStore.userInfo.roles.some(role => role === 'R_SUPER' || role === 'R_ADMIN')
-);
+const canDeleteTasks = computed(() => authStore.userInfo.roles.some(role => role === 'R_SUPER' || role === 'R_ADMIN'));
 /** 转写是业务写操作，只读查看者不显示重试入口。 */
 const canRetryTasks = computed(() =>
   authStore.userInfo.roles.some(role => ['R_SUPER', 'R_ADMIN', 'R_USER'].includes(role))
@@ -68,7 +66,11 @@ defineEmits<{
     <NDrawerContent title="话术转写任务" closable>
       <!-- 状态筛选 -->
       <div class="mb-14px flex flex-wrap items-center justify-between gap-10px">
-        <NRadioGroup :value="taskFilter" size="small" @update:value="(val: string) => $emit('update:taskFilter', val as TaskStatus | 'all')">
+        <NRadioGroup
+          :value="taskFilter"
+          size="small"
+          @update:value="(val: string) => $emit('update:taskFilter', val as TaskStatus | 'all')"
+        >
           <NRadioButton value="all">全部</NRadioButton>
           <NRadioButton value="queued">等待</NRadioButton>
           <NRadioButton value="processing">处理中</NRadioButton>
@@ -80,12 +82,7 @@ defineEmits<{
 
       <!-- 清空全部失败任务（仅筛选到「失败」tab 时显示） -->
       <div v-if="canDeleteTasks && taskFilter === 'failed' && filteredTasks.length > 0" class="mb-12px">
-        <NButton
-          type="error"
-          size="small"
-          :loading="clearFailedLoading"
-          @click="$emit('clearFailedTasks')"
-        >
+        <NButton type="error" size="small" :loading="clearFailedLoading" @click="$emit('clearFailedTasks')">
           清空全部失败任务（{{ filteredTasks.length }} 条）
         </NButton>
       </div>
@@ -107,6 +104,7 @@ defineEmits<{
                 <NTag size="tiny" type="info" :bordered="false">
                   {{ task.task_type === 'realtime' ? '实时滚动转写' : '结束后转写' }}
                 </NTag>
+                <NTag v-if="task.queue_source === 'manual'" size="tiny" type="warning" :bordered="false">人工独占</NTag>
                 <NTag
                   v-if="task.status === 'completed'"
                   size="tiny"
@@ -130,9 +128,7 @@ defineEmits<{
               <div v-if="task.status === 'processing' && task.total_chunks > 0" class="mt-8px">
                 <div class="mb-3px flex items-center justify-between text-11px text-gray-500">
                   <span>{{ task.task_type === 'realtime' ? '实时窗口' : '转写进度' }}</span>
-                  <span v-if="task.task_type === 'realtime'">
-                    已处理 {{ task.completed_chunks }} 个两分钟窗口
-                  </span>
+                  <span v-if="task.task_type === 'realtime'">已处理 {{ task.completed_chunks }} 个两分钟窗口</span>
                   <span v-else>
                     {{ task.completed_chunks }} / {{ task.total_chunks }} 分片（{{ task.progress_percent }}%）
                   </span>
@@ -171,9 +167,22 @@ defineEmits<{
             </NButton>
           </div>
           <!-- 转写错误 -->
-          <NAlert v-if="task.error_message" type="error" :bordered="false" class="mt-10px">
-            <template #header>{{ getTranscriptFailureInfo(task.error_message).title }}</template>
-            <div>{{ getTranscriptFailureInfo(task.error_message).hint }}</div>
+          <NAlert
+            v-if="task.error_message"
+            :type="['failed', 'cancelled'].includes(task.status) ? 'error' : 'info'"
+            :bordered="false"
+            class="mt-10px"
+          >
+            <template #header>
+              {{
+                ['failed', 'cancelled'].includes(task.status)
+                  ? getTranscriptFailureInfo(task.error_message).title
+                  : '调度说明'
+              }}
+            </template>
+            <div v-if="['failed', 'cancelled'].includes(task.status)">
+              {{ getTranscriptFailureInfo(task.error_message).hint }}
+            </div>
             <div class="mt-8px flex flex-wrap items-center gap-10px">
               <details class="min-w-0 flex-1 text-11px text-gray-500">
                 <summary class="cursor-pointer">技术详情</summary>

@@ -15,15 +15,34 @@ from app.models.high_intent_users import HighIntentUser
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.live_metrics import LiveMetric
 from app.models.live_sessions import LiveSession
-from app.models.review import ComplianceRule, ReviewActionItem, ReviewFinding, ScriptAsset
+from app.models.review import (
+    ComplianceRule,
+    ReviewActionItem,
+    ReviewFinding,
+    ScriptAsset,
+)
 from app.models.stream_sources import StreamSource
 from app.models.transcript_segments import TranscriptSegment
 from app.models.unified_ai_review import UnifiedAiReviewRun
+from app.services.transcript_compliance import (
+    load_enabled_compliance_rules,
+    match_compliance_text,
+)
 
 
 INTENT_KEYWORDS: dict[str, tuple[str, ...]] = {
     "选址": ("选址", "位置", "商圈", "小区", "学校", "超市", "人流", "商业街"),
-    "预算": ("预算", "租金", "房租", "转让费", "多少钱", "多少万", "面积", "平米", "平方"),
+    "预算": (
+        "预算",
+        "租金",
+        "房租",
+        "转让费",
+        "多少钱",
+        "多少万",
+        "面积",
+        "平米",
+        "平方",
+    ),
     "品牌": ("加盟", "品牌", "赵一鸣", "零食很忙", "好想来", "老婆大人"),
     "供应链": ("货源", "供应链", "进货", "厂家", "配送", "选品"),
     "经营测算": ("毛利", "回本", "营业额", "销量", "损耗", "临期", "利润"),
@@ -66,7 +85,11 @@ def _latest_stream(db: Session, session: LiveSession) -> str | None:
     source = (
         db.query(StreamSource)
         .filter(StreamSource.session_id == session.id)
-        .order_by((StreamSource.status == "active").desc(), StreamSource.fetched_at.desc(), StreamSource.id.desc())
+        .order_by(
+            (StreamSource.status == "active").desc(),
+            StreamSource.fetched_at.desc(),
+            StreamSource.id.desc(),
+        )
         .first()
     )
     return (source.m3u8_url if source else None) or session.stream_url
@@ -75,15 +98,26 @@ def _latest_stream(db: Session, session: LiveSession) -> str | None:
 def calculate_completeness(db: Session, session: LiveSession) -> dict[str, Any]:
     """按真实覆盖率计算可分析程度，区分真实零值和缺失数据。"""
     duration = _duration_seconds(session)
-    metric_count = db.query(LiveMetric).filter(LiveMetric.session_id == session.id).count()
+    metric_count = (
+        db.query(LiveMetric).filter(LiveMetric.session_id == session.id).count()
+    )
     comment_count = db.query(Comment).filter(Comment.session_id == session.id).count()
-    profile_count = db.query(LiveAudienceProfile).filter(LiveAudienceProfile.session_id == session.id).count()
+    profile_count = (
+        db.query(LiveAudienceProfile)
+        .filter(LiveAudienceProfile.session_id == session.id)
+        .count()
+    )
     segments = (
         db.query(TranscriptSegment)
-        .filter(TranscriptSegment.session_id == session.id, TranscriptSegment.asr_status == "completed")
+        .filter(
+            TranscriptSegment.session_id == session.id,
+            TranscriptSegment.asr_status == "completed",
+        )
         .all()
     )
-    legacy_report_count = db.query(AnalysisReport).filter(AnalysisReport.session_id == session.id).count()
+    legacy_report_count = (
+        db.query(AnalysisReport).filter(AnalysisReport.session_id == session.id).count()
+    )
     unified_report_count = (
         db.query(UnifiedAiReviewRun)
         .filter(
@@ -94,20 +128,39 @@ def calculate_completeness(db: Session, session: LiveSession) -> dict[str, Any]:
     )
     report_count = legacy_report_count + unified_report_count
 
-    basic_fields = [session.anchor_name, session.live_start_time, session.session_title, session.detail_collection_status]
+    basic_fields = [
+        session.anchor_name,
+        session.live_start_time,
+        session.session_title,
+        session.detail_collection_status,
+    ]
     basic_ratio = sum(bool(value) for value in basic_fields) / len(basic_fields)
     expected_metrics = max(1, duration // 60) if duration else max(1, metric_count)
     metric_ratio = min(1.0, metric_count / expected_metrics)
-    platform_comment_count = max(int(session.comments_count or 0), int(session.comment_users or 0))
-    comment_ratio = min(1.0, comment_count / platform_comment_count) if platform_comment_count else 1.0
+    platform_comment_count = max(
+        int(session.comments_count or 0), int(session.comment_users or 0)
+    )
+    comment_ratio = (
+        min(1.0, comment_count / platform_comment_count)
+        if platform_comment_count
+        else 1.0
+    )
     max_segment_end = max((_as_float(item.segment_end) for item in segments), default=0)
-    transcript_ratio = min(1.0, max_segment_end / duration) if duration else (1.0 if segments else 0.0)
+    transcript_ratio = (
+        min(1.0, max_segment_end / duration) if duration else (1.0 if segments else 0.0)
+    )
     stream_ratio = 1.0 if _latest_stream(db, session) else 0.0
     profile_ratio = 1.0 if profile_count else 0.0
     report_ratio = 1.0 if report_count else 0.0
 
     components = [
-        ("基础信息", 10, basic_ratio, sum(bool(value) for value in basic_fields), len(basic_fields)),
+        (
+            "基础信息",
+            10,
+            basic_ratio,
+            sum(bool(value) for value in basic_fields),
+            len(basic_fields),
+        ),
         ("分钟指标", 25, metric_ratio, metric_count, expected_metrics),
         ("评论映射", 15, comment_ratio, comment_count, platform_comment_count),
         ("话术转写", 25, transcript_ratio, int(max_segment_end), duration),
@@ -118,8 +171,14 @@ def calculate_completeness(db: Session, session: LiveSession) -> dict[str, Any]:
     score = round(sum(weight * ratio for _, weight, ratio, _, _ in components), 1)
     return {
         "score": score,
-        "level": "complete" if score >= 85 else "usable" if score >= 60 else "insufficient",
-        "analysis_ready": score >= 60 and metric_count > 0 and (comment_count > 0 or len(segments) > 0),
+        "level": "complete"
+        if score >= 85
+        else "usable"
+        if score >= 60
+        else "insufficient",
+        "analysis_ready": score >= 60
+        and metric_count > 0
+        and (comment_count > 0 or len(segments) > 0),
         "duration_seconds": duration,
         "components": [
             {
@@ -128,18 +187,28 @@ def calculate_completeness(db: Session, session: LiveSession) -> dict[str, Any]:
                 "score": round(ratio * 100, 1),
                 "captured": captured,
                 "expected": expected,
-                "status": "complete" if ratio >= 0.95 else "partial" if ratio > 0 else "missing",
+                "status": "complete"
+                if ratio >= 0.95
+                else "partial"
+                if ratio > 0
+                else "missing",
             }
             for name, weight, ratio, captured, expected in components
         ],
     }
 
 
-def _upsert_finding(db: Session, session_id: int, payload: dict[str, Any]) -> ReviewFinding:
-    finding = db.query(ReviewFinding).filter(
-        ReviewFinding.session_id == session_id,
-        ReviewFinding.evidence_key == payload["evidence_key"],
-    ).first()
+def _upsert_finding(
+    db: Session, session_id: int, payload: dict[str, Any]
+) -> ReviewFinding:
+    finding = (
+        db.query(ReviewFinding)
+        .filter(
+            ReviewFinding.session_id == session_id,
+            ReviewFinding.evidence_key == payload["evidence_key"],
+        )
+        .first()
+    )
     if finding:
         preserved_status = finding.status
         for key, value in payload.items():
@@ -152,7 +221,11 @@ def _upsert_finding(db: Session, session_id: int, payload: dict[str, Any]) -> Re
 
 
 def _keyword_categories(text: str, mapping: dict[str, tuple[str, ...]]) -> list[str]:
-    return [category for category, words in mapping.items() if any(word.lower() in text.lower() for word in words)]
+    return [
+        category
+        for category, words in mapping.items()
+        if any(word.lower() in text.lower() for word in words)
+    ]
 
 
 def generate_findings(db: Session, session_id: int) -> list[ReviewFinding]:
@@ -176,7 +249,10 @@ def generate_findings(db: Session, session_id: int) -> list[ReviewFinding]:
     )
     segments = (
         db.query(TranscriptSegment)
-        .filter(TranscriptSegment.session_id == session_id, TranscriptSegment.asr_status == "completed")
+        .filter(
+            TranscriptSegment.session_id == session_id,
+            TranscriptSegment.asr_status == "completed",
+        )
         .order_by(TranscriptSegment.segment_start.asc(), TranscriptSegment.id.asc())
         .limit(2000)
         .all()
@@ -207,7 +283,9 @@ def generate_findings(db: Session, session_id: int) -> list[ReviewFinding]:
         after = int(current.online_count or 0)
         if before >= 3 and after <= before * 0.6:
             drops.append(((before - after) / before, previous, current))
-    for ratio, previous, current in sorted(drops, key=lambda item: item[0], reverse=True)[:5]:
+    for ratio, previous, current in sorted(
+        drops, key=lambda item: item[0], reverse=True
+    )[:5]:
         seconds = _seconds_from_start(session, current.metric_time)
         _upsert_finding(
             db,
@@ -234,7 +312,9 @@ def generate_findings(db: Session, session_id: int) -> list[ReviewFinding]:
     intent_found = 0
     existing_intent_comment_ids = {
         item.comment_id
-        for item in db.query(HighIntentUser).filter(HighIntentUser.session_id == session_id).all()
+        for item in db.query(HighIntentUser)
+        .filter(HighIntentUser.session_id == session_id)
+        .all()
         if item.comment_id
     }
     for comment in comments:
@@ -284,7 +364,12 @@ def generate_findings(db: Session, session_id: int) -> list[ReviewFinding]:
     for segment in segments:
         text = (segment.text_content or "").strip()
         categories = _keyword_categories(text, CONTENT_CATEGORIES)
-        if categories and segment.segment_type in (None, "", "asr_offline", "asr_realtime"):
+        if categories and segment.segment_type in (
+            None,
+            "",
+            "asr_offline",
+            "asr_realtime",
+        ):
             segment.segment_type = categories[0]
         if any(category in categories for category in ("资料钩子", "私信承接")):
             hook_segments.append((segment, categories))
@@ -310,11 +395,15 @@ def generate_findings(db: Session, session_id: int) -> list[ReviewFinding]:
 
     rules = db.query(ComplianceRule).filter(ComplianceRule.enabled == 1).all()
     for rule in rules:
-        words = [word.strip() for word in (rule.pattern or "").split("|") if word.strip()]
+        words = [
+            word.strip() for word in (rule.pattern or "").split("|") if word.strip()
+        ]
         hits = 0
         for segment in segments:
             text = segment.text_content or ""
-            matched = next((word for word in words if word.lower() in text.lower()), None)
+            matched = next(
+                (word for word in words if word.lower() in text.lower()), None
+            )
             if not matched:
                 continue
             _upsert_finding(
@@ -339,7 +428,10 @@ def generate_findings(db: Session, session_id: int) -> list[ReviewFinding]:
             if hits >= 10:
                 break
 
-    if int(session.total_viewers or 0) >= 100 and int(session.private_message_count or 0) == 0:
+    if (
+        int(session.total_viewers or 0) >= 100
+        and int(session.private_message_count or 0) == 0
+    ):
         _upsert_finding(
             db,
             session_id,
@@ -364,7 +456,11 @@ def generate_findings(db: Session, session_id: int) -> list[ReviewFinding]:
     return (
         db.query(ReviewFinding)
         .filter(ReviewFinding.session_id == session_id)
-        .order_by(ReviewFinding.start_seconds.asc(), ReviewFinding.severity.desc(), ReviewFinding.id.asc())
+        .order_by(
+            ReviewFinding.start_seconds.asc(),
+            ReviewFinding.severity.desc(),
+            ReviewFinding.id.asc(),
+        )
         .all()
     )
 
@@ -380,7 +476,9 @@ def build_domain_coverage(segments: list[TranscriptSegment]) -> list[dict[str, A
             "category": category,
             "covered": bool(category_segments.get(category)),
             "segment_count": len(category_segments.get(category, [])),
-            "first_seconds": _as_float(category_segments[category][0].segment_start) if category_segments.get(category) else None,
+            "first_seconds": _as_float(category_segments[category][0].segment_start)
+            if category_segments.get(category)
+            else None,
         }
         for category in CONTENT_CATEGORIES
     ]
@@ -396,7 +494,15 @@ def build_live_alerts(db: Session, session: LiveSession) -> list[dict[str, Any]]
     )
     alerts: list[dict[str, Any]] = []
     if not metrics:
-        return [{"key": "no-metrics", "severity": "critical", "title": "尚未收到实时指标", "description": "请检查实时监控与采集账号状态。", "start_seconds": None}]
+        return [
+            {
+                "key": "no-metrics",
+                "severity": "critical",
+                "title": "尚未收到实时指标",
+                "description": "请检查实时监控与采集账号状态。",
+                "start_seconds": None,
+            }
+        ]
     latest = metrics[0]
     freshness = (datetime.now() - latest.metric_time).total_seconds()
     if session.live_status == "live" and freshness > 180:
@@ -423,11 +529,19 @@ def build_live_alerts(db: Session, session: LiveSession) -> list[dict[str, Any]]
                     "start_seconds": _seconds_from_start(session, current.metric_time),
                 }
             )
-    recent_comments = db.query(Comment).filter(
-        Comment.session_id == session.id,
-        Comment.comment_time >= latest.metric_time.replace(second=0, microsecond=0),
-    ).count()
-    if session.live_status == "live" and int(latest.online_count or 0) > 0 and recent_comments == 0:
+    recent_comments = (
+        db.query(Comment)
+        .filter(
+            Comment.session_id == session.id,
+            Comment.comment_time >= latest.metric_time.replace(second=0, microsecond=0),
+        )
+        .count()
+    )
+    if (
+        session.live_status == "live"
+        and int(latest.online_count or 0) > 0
+        and recent_comments == 0
+    ):
         alerts.append(
             {
                 "key": "no-recent-comment",
@@ -450,13 +564,21 @@ def _serialize_finding(item: ReviewFinding) -> dict[str, Any]:
         "title": item.title,
         "description": item.description,
         "severity": item.severity,
-        "start_seconds": _as_float(item.start_seconds) if item.start_seconds is not None else None,
-        "end_seconds": _as_float(item.end_seconds) if item.end_seconds is not None else None,
+        "start_seconds": _as_float(item.start_seconds)
+        if item.start_seconds is not None
+        else None,
+        "end_seconds": _as_float(item.end_seconds)
+        if item.end_seconds is not None
+        else None,
         "evidence_type": item.evidence_type,
         "evidence_text": item.evidence_text,
         "metric_name": item.metric_name,
-        "metric_before": _as_float(item.metric_before) if item.metric_before is not None else None,
-        "metric_after": _as_float(item.metric_after) if item.metric_after is not None else None,
+        "metric_before": _as_float(item.metric_before)
+        if item.metric_before is not None
+        else None,
+        "metric_after": _as_float(item.metric_after)
+        if item.metric_after is not None
+        else None,
         "confidence": _as_float(item.confidence),
         "source": item.source,
         "status": item.status,
@@ -465,30 +587,43 @@ def _serialize_finding(item: ReviewFinding) -> dict[str, Any]:
 
 
 def _serialize_action(item: ReviewActionItem) -> dict[str, Any]:
-    return {column.name: getattr(item, column.name) for column in item.__table__.columns}
+    return {
+        column.name: getattr(item, column.name) for column in item.__table__.columns
+    }
 
 
 def _serialize_asset(item: ScriptAsset) -> dict[str, Any]:
-    data = {column.name: getattr(item, column.name) for column in item.__table__.columns}
+    data = {
+        column.name: getattr(item, column.name) for column in item.__table__.columns
+    }
     for key in ("start_seconds", "end_seconds"):
         data[key] = _as_float(data[key]) if data[key] is not None else None
     return data
 
 
-def build_workbench(db: Session, session_id: int, refresh_findings: bool = False) -> dict[str, Any]:
+def build_workbench(
+    db: Session, session_id: int, refresh_findings: bool = False
+) -> dict[str, Any]:
     from app.services.ai.unified_review import get_unified_review
+
     session = db.get(LiveSession, session_id)
     if not session:
         raise ValueError("直播场次不存在")
     if refresh_findings:
         findings = generate_findings(db, session_id)
     else:
-        findings = db.query(ReviewFinding).filter(ReviewFinding.session_id == session_id).order_by(
-            ReviewFinding.start_seconds.asc(), ReviewFinding.id.asc()
-        ).all()
+        findings = (
+            db.query(ReviewFinding)
+            .filter(ReviewFinding.session_id == session_id)
+            .order_by(ReviewFinding.start_seconds.asc(), ReviewFinding.id.asc())
+            .all()
+        )
     segments = (
         db.query(TranscriptSegment)
-        .filter(TranscriptSegment.session_id == session_id, TranscriptSegment.asr_status == "completed")
+        .filter(
+            TranscriptSegment.session_id == session_id,
+            TranscriptSegment.asr_status == "completed",
+        )
         .order_by(TranscriptSegment.segment_start.asc(), TranscriptSegment.id.asc())
         .limit(2000)
         .all()
@@ -513,10 +648,19 @@ def build_workbench(db: Session, session_id: int, refresh_findings: bool = False
                 "created_at": report.created_at,
             },
         )
-    actions = db.query(ReviewActionItem).filter(ReviewActionItem.session_id == session_id).order_by(
-        ReviewActionItem.status.asc(), ReviewActionItem.id.desc()
-    ).all()
-    assets = db.query(ScriptAsset).filter(ScriptAsset.session_id == session_id).order_by(ScriptAsset.id.desc()).all()
+    actions = (
+        db.query(ReviewActionItem)
+        .filter(ReviewActionItem.session_id == session_id)
+        .order_by(ReviewActionItem.status.asc(), ReviewActionItem.id.desc())
+        .all()
+    )
+    assets = (
+        db.query(ScriptAsset)
+        .filter(ScriptAsset.session_id == session_id)
+        .order_by(ScriptAsset.id.desc())
+        .all()
+    )
+    compliance_rules = load_enabled_compliance_rules(db)
     return {
         "session_id": session_id,
         "business_context": "零食店避坑知识科普，通过真实问题解答和资料钩子引导用户主动站内私信留资",
@@ -528,7 +672,13 @@ def build_workbench(db: Session, session_id: int, refresh_findings: bool = False
                 "segment_end": _as_float(item.segment_end),
                 "text_content": item.text_content,
                 "segment_type": item.segment_type,
-                "ai_score": _as_float(item.ai_score) if item.ai_score is not None else None,
+                "ai_score": _as_float(item.ai_score)
+                if item.ai_score is not None
+                else None,
+                "asr_status": item.asr_status,
+                "compliance_hits": match_compliance_text(
+                    item.text_content or "", compliance_rules
+                ),
             }
             for item in segments
         ],
@@ -554,7 +704,9 @@ COMPARISON_FIELDS = (
 )
 
 
-def _comparison_session(db: Session, current: LiveSession, other_session_id: int | None) -> LiveSession | None:
+def _comparison_session(
+    db: Session, current: LiveSession, other_session_id: int | None
+) -> LiveSession | None:
     if other_session_id:
         return db.get(LiveSession, other_session_id)
     query = db.query(LiveSession).filter(LiveSession.id != current.id)
@@ -564,11 +716,18 @@ def _comparison_session(db: Session, current: LiveSession, other_session_id: int
         query = query.filter(LiveSession.anchor_name == current.anchor_name)
     if current.live_start_time:
         query = query.filter(LiveSession.live_start_time < current.live_start_time)
-    return query.order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc()).first()
+    return query.order_by(
+        LiveSession.live_start_time.desc(), LiveSession.id.desc()
+    ).first()
 
 
 def _minute_series(db: Session, session: LiveSession) -> list[dict[str, Any]]:
-    rows = db.query(LiveMetric).filter(LiveMetric.session_id == session.id).order_by(LiveMetric.metric_time.asc()).all()
+    rows = (
+        db.query(LiveMetric)
+        .filter(LiveMetric.session_id == session.id)
+        .order_by(LiveMetric.metric_time.asc())
+        .all()
+    )
     by_minute: dict[int, dict[str, Any]] = {}
     for row in rows:
         seconds = _seconds_from_start(session, row.metric_time)
@@ -585,7 +744,9 @@ def _minute_series(db: Session, session: LiveSession) -> list[dict[str, Any]]:
     return list(by_minute.values())[:360]
 
 
-def compare_sessions(db: Session, session_id: int, other_session_id: int | None = None) -> dict[str, Any]:
+def compare_sessions(
+    db: Session, session_id: int, other_session_id: int | None = None
+) -> dict[str, Any]:
     current = db.get(LiveSession, session_id)
     if not current:
         raise ValueError("直播场次不存在")

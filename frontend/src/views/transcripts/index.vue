@@ -37,6 +37,8 @@ const {
   aiLoading,
   livePreview,
   wsConnected,
+  dispatchPolicy,
+  dispatchPolicyLoading,
   // 统计卡片
   readableSegments,
   totalCharacters,
@@ -78,7 +80,8 @@ const {
   openTaskDrawer,
   selectTask,
   retryTask,
-  openSessionDetail
+  openSessionDetail,
+  changeDispatchOrder
 } = wb;
 </script>
 
@@ -108,6 +111,8 @@ const {
       :content-version-label="contentVersionLabel"
       :live-preview="livePreview"
       :ws-connected="wsConnected"
+      :dispatch-policy="dispatchPolicy"
+      :dispatch-policy-loading="dispatchPolicyLoading"
       @update:selected-session-id="(val: number) => loadTranscript(val)"
       @start-transcription="startTranscription"
       @run-ai-pipeline="runAiPipeline"
@@ -115,6 +120,7 @@ const {
       @queue-anchor-batch="queueAnchorBatch"
       @open-task-drawer="(status: any) => openTaskDrawer(status)"
       @open-session-detail="openSessionDetail"
+      @change-dispatch-order="changeDispatchOrder"
     />
 
     <!-- 2. 当前场次数据质量 -->

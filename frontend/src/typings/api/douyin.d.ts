@@ -393,11 +393,32 @@ declare namespace Api {
       id: number;
       identity_key: string;
       user_nickname: string | null;
-      business_stage: 'preparing' | 'selecting_location' | 'comparing_brand' | 'opened_store' | 'suspected_paid' | 'unknown';
+      business_stage:
+        | 'preparing'
+        | 'selecting_location'
+        | 'comparing_brand'
+        | 'opened_store'
+        | 'suspected_paid'
+        | 'unknown';
       follow_up_status: 'not_lead' | 'confirmed_lead' | 'suspected_contacted' | 'unknown';
       demand_scope: 'snack_store' | 'non_snack_store' | 'industry_peer' | 'unknown';
-      interaction_type: 'normal_inquiry' | 'high_intent' | 'rational_question' | 'malicious' | 'casual' | 'information_insufficient';
-      precision_status: 'precision_new_lead' | 'nurture' | 'existing_store' | 'in_follow_up' | 'existing_customer' | 'non_target' | 'industry_peer' | 'malicious' | 'information_insufficient';
+      interaction_type:
+        | 'normal_inquiry'
+        | 'high_intent'
+        | 'rational_question'
+        | 'malicious'
+        | 'casual'
+        | 'information_insufficient';
+      precision_status:
+        | 'precision_new_lead'
+        | 'nurture'
+        | 'existing_store'
+        | 'in_follow_up'
+        | 'existing_customer'
+        | 'non_target'
+        | 'industry_peer'
+        | 'malicious'
+        | 'information_insufficient';
       is_precision_lead: boolean;
       exclusion_reason: string | null;
       host_response_status: 'excellent' | 'effective' | 'average' | 'irrelevant' | 'no_response' | 'unknown';
@@ -797,6 +818,17 @@ declare namespace Api {
       segment_type: string;
       asr_status: 'pending' | 'processing' | 'completed' | 'failed';
       ai_score: number | null;
+      compliance_hits: TranscriptComplianceHit[];
+    }
+
+    interface TranscriptComplianceHit {
+      rule_code: string;
+      name: string;
+      category: string;
+      matched_keyword: string;
+      severity: 'warning' | 'critical' | string;
+      guidance: string;
+      review_status: 'suspected';
     }
 
     interface TranscriptFullText {
@@ -810,6 +842,8 @@ declare namespace Api {
       session_id: number;
       status: 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled';
       task_type: 'realtime' | 'offline';
+      queue_source: 'auto' | 'manual';
+      priority: number;
       anchor_name: string;
       session_title: string;
       live_start_time: string | null;
@@ -834,6 +868,15 @@ declare namespace Api {
       completed_chunks: number;
       /** 转写进度百分比 0-100 */
       progress_percent: number;
+    }
+
+    interface TranscriptDispatchPolicy {
+      order_mode: 'smart' | 'latest' | 'fifo';
+      manual_active: boolean;
+      manual_task_id: number | null;
+      manual_session_id: number | null;
+      auto_scope_timezone: string;
+      auto_scope_description: string;
     }
 
     interface AnalysisReport {
@@ -870,6 +913,8 @@ declare namespace Api {
       text_content: string | null;
       segment_type: string | null;
       ai_score: number | null;
+      asr_status: 'pending' | 'processing' | 'completed' | 'failed';
+      compliance_hits: TranscriptComplianceHit[];
     }
 
     interface ReviewFinding {

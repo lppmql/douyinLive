@@ -54,10 +54,13 @@ from app.services.asr.timestamp_alignment import (
 )
 from app.services.asr.lane_scheduler import AsrLaneCoordinator
 from app.services.asr.queue import (
+    get_active_manual_task,
+    get_dispatch_policy,
     list_queued_task_ids_for_available_lanes,
     queue_auto_transcriptions,
     queue_session_transcription,
     recover_interrupted_chunk,
+    requeue_task_for_dispatch,
     requeue_offline_task_for_live_priority,
 )
 from app.services.asr.websocket_manager import ws_manager
@@ -73,6 +76,10 @@ from app.services.tasks.runtime import (
     touch_task,
 )
 from app.services.tasks.exceptions import TaskCancellationRequested
+from app.services.transcript_compliance import (
+    load_enabled_compliance_rules,
+    match_compliance_text,
+)
 
 # ASR Worker 调用后端 API 的基地址（同机部署）
 _BACKEND_BASE_URL = "http://localhost:8000/api/v1"
@@ -80,6 +87,10 @@ _BACKEND_BASE_URL = "http://localhost:8000/api/v1"
 
 class _YieldToLiveTask(Exception):
     """离线任务在安全点主动礼让实时直播，不属于失败或人工取消。"""
+
+
+class _YieldToManualTask(Exception):
+    """自动任务在安全点礼让人工独占任务，不属于失败或取消。"""
 
 
 class _CompletenessRepairLimitExceeded(RuntimeError):
@@ -642,7 +653,11 @@ class AsrWorker:
         task.completed_at = datetime.utcnow()
         task.postprocess_status = "skipped"
         touch_task(task, self._worker_id)
-        offline_task, _created = queue_session_transcription(db, session)
+        offline_task, _created = queue_session_transcription(
+            db,
+            session,
+            queue_source=task.queue_source or "auto",
+        )
         db.commit()
         publish_task_event(
             "asr",
@@ -880,7 +895,24 @@ class AsrWorker:
                             )
                         # 单 Worker 机器上，长离线回放不能把刚开播的实时任务堵几十分钟。
                         # 每完成一个 2 分钟分片就检查一次；有实时任务时保存当前断点并礼让。
-                        if not is_live and self._has_queued_live_task(db, task.id):
+                        if self._should_yield_to_manual(db, task):
+                            requeue_task_for_dispatch(
+                                task, "人工选择了优先场次，已保存断点并暂停"
+                            )
+                            db.commit()
+                            publish_task_event(
+                                "asr",
+                                task,
+                                "yielded_to_manual",
+                                {"completed_chunk_index": chunk.chunk_index},
+                            )
+                            logger.info("任务 %s 已在分片边界礼让人工独占任务", task.id)
+                            return
+                        if (
+                            task.queue_source != "manual"
+                            and not is_live
+                            and self._has_queued_live_task(db, task.id)
+                        ):
                             requeue_offline_task_for_live_priority(task)
                             db.commit()
                             publish_task_event(
@@ -891,8 +923,10 @@ class AsrWorker:
                             )
                             logger.info("任务 %s 已在分片边界礼让实时直播任务", task.id)
                             return
-                        if not is_live and self._has_newer_queued_offline_task(
-                            db, task
+                        if (
+                            task.queue_source != "manual"
+                            and not is_live
+                            and self._has_newer_queued_offline_task(db, task)
                         ):
                             requeue_offline_task_for_live_priority(task)
                             task.error_message = (
@@ -1037,6 +1071,16 @@ class AsrWorker:
                     db.commit()
                     publish_task_event("asr", task, "yielded_to_live", {})
                 logger.info("任务 %s 已在模型等待安全点礼让实时直播任务", task_id)
+            except _YieldToManualTask:
+                db.rollback()
+                task = db.get(AsrTask, task_id)
+                if task and task.status == TaskStatus.PROCESSING:
+                    requeue_task_for_dispatch(
+                        task, "人工选择了优先场次，已保存断点并暂停"
+                    )
+                    db.commit()
+                    publish_task_event("asr", task, "yielded_to_manual", {})
+                logger.info("任务 %s 已在模型等待安全点礼让人工独占任务", task_id)
             except TaskCancellationRequested as exc:
                 db.rollback()
                 task = db.get(AsrTask, task_id)
@@ -1141,8 +1185,22 @@ class AsrWorker:
         )
 
     @staticmethod
+    def _has_manual_task(db, current_task_id: int) -> bool:
+        """判断是否有另一条人工排队或处理中任务。"""
+        return get_active_manual_task(db, exclude_task_id=current_task_id) is not None
+
+    @staticmethod
+    def _should_yield_to_manual(db, current_task: AsrTask) -> bool:
+        """自动任务在分片或模型等待边界礼让人工任务，人工任务自身不礼让。"""
+        return current_task.queue_source != "manual" and AsrWorker._has_manual_task(
+            db, current_task.id
+        )
+
+    @staticmethod
     def _has_newer_queued_offline_task(db, current_task: AsrTask) -> bool:
         """旧终稿每完成一片就礼让更新的下播场次，避免最新复盘等几十分钟。"""
+        if get_dispatch_policy(db).order_mode == "fifo":
+            return False
         current_session = db.get(LiveSession, current_task.session_id)
         if not current_session:
             return False
@@ -1359,7 +1417,9 @@ class AsrWorker:
         """每个安全检查点都读取停止标记，避免把用户停止误记成失败。"""
         db.refresh(task)
         if task.cancel_requested_at or task.status == TaskStatus.CANCELLED:
-            raise TaskCancellationRequested("用户已停止 ASR 转写，已完成分片会保留")
+            raise TaskCancellationRequested(
+                task.error_message or "用户已停止 ASR 转写，已完成分片会保留"
+            )
 
     def _prepare_chunks(
         self,
@@ -1572,7 +1632,13 @@ class AsrWorker:
                 self._heartbeat_active_chunk(task.id, chunk.id)
             )
 
-            if not is_live and self._has_queued_live_task(db, task.id):
+            if self._should_yield_to_manual(db, task):
+                raise _YieldToManualTask
+            if (
+                task.queue_source != "manual"
+                and not is_live
+                and self._has_queued_live_task(db, task.id)
+            ):
                 raise _YieldToLiveTask
 
             async with self._lane_coordinator.slot(task.task_type):
@@ -1582,7 +1648,13 @@ class AsrWorker:
                     deadline = monotonic() + self._FUNASR_CONNECT_TIMEOUT
                     connected = await client.connect()
                     while not connected and monotonic() < deadline:
-                        if not is_live and self._has_queued_live_task(db, task.id):
+                        if self._should_yield_to_manual(db, task):
+                            raise _YieldToManualTask
+                        if (
+                            task.queue_source != "manual"
+                            and not is_live
+                            and self._has_queued_live_task(db, task.id)
+                        ):
                             raise _YieldToLiveTask
                         logger.info(
                             "任务 %s 分片 %s 等待 FunASR 模型就绪",
@@ -1623,6 +1695,14 @@ class AsrWorker:
         except _YieldToLiveTask:
             # 当前分片还没有完成，恢复为 pending 并退还刚领取的分片重试次数。
             # 任务本身由上层统一重新排队，避免被误记为取消或失败。
+            db.rollback()
+            chunk = db.get(AsrAudioChunk, chunk.id)
+            if chunk:
+                recover_interrupted_chunk(chunk)
+                db.commit()
+            raise
+        except _YieldToManualTask:
+            # 人工任务到来时同样保留当前分片断点，不消耗一次重试。
             db.rollback()
             chunk = db.get(AsrAudioChunk, chunk.id)
             if chunk:
@@ -1757,6 +1837,7 @@ class AsrWorker:
         """消费一个分片的 ASR 结果，并换算为整场绝对时间。"""
         segment_count = 0
         offset = float(chunk.start_seconds or 0)
+        compliance_rules = load_enabled_compliance_rules(db)
         async for result in client.transcribe(
             task.session_id,
             pipe.read_frames(),
@@ -1804,6 +1885,19 @@ class AsrWorker:
             segment_count += 1
             if task.task_type == "realtime":
                 # 离线终稿在完整成功以前必须保持隐藏，不能通过 WebSocket 偷跑半成品。
+                absolute_result.update(
+                    {
+                        "id": segment.id,
+                        "session_id": task.session_id,
+                        "text_content": corrected_text,
+                        "segment_type": segment.segment_type,
+                        "asr_status": segment.asr_status,
+                        "ai_score": None,
+                        "compliance_hits": match_compliance_text(
+                            corrected_text, compliance_rules
+                        ),
+                    }
+                )
                 await ws_manager.publish_asr_result(task.session_id, absolute_result)
 
         return segment_count

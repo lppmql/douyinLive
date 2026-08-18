@@ -17,6 +17,7 @@ const props = defineProps<{
   alerts: Api.Douyin.ReviewLiveAlert[];
   hooks: Api.Douyin.HookEvent[];
   audienceUsers: Api.Douyin.AudienceUserInsight[];
+  liveMode: boolean;
 }>();
 const emit = defineEmits<{
   updateFinding: [finding: Api.Douyin.ReviewFinding, status: Api.Douyin.ReviewFinding['status']];
@@ -37,13 +38,16 @@ interface TimelineEvent {
   hook?: Api.Douyin.HookEvent;
   audienceUser?: Api.Douyin.AudienceUserInsight;
   commentId?: number;
+  complianceHits?: Api.Douyin.TranscriptComplianceHit[];
 }
 
 const reviewStore = useReviewStore();
 const message = useMessage();
 const { currentSecond, selectedEvidenceId } = storeToRefs(reviewStore);
 // 默认突出可执行的告警、钩子、发现与评论；完整主播话术按需打开，避免数百个 ASR 节点淹没转化动作。
-const enabledKinds = ref<EventKind[]>(['alert', 'hook', 'finding', 'comment']);
+const enabledKinds = ref<EventKind[]>(
+  props.liveMode ? ['alert', 'hook', 'finding', 'comment', 'transcript'] : ['alert', 'hook', 'finding', 'comment']
+);
 const kindOptions: Array<{ label: string; value: EventKind }> = [
   { label: '实时告警', value: 'alert' },
   { label: '转化钩子', value: 'hook' },
@@ -124,14 +128,27 @@ const events = computed<TimelineEvent[]>(() => {
     });
   });
   props.segments.forEach(item => {
+    const complianceHits = item.compliance_hits || [];
     items.push({
       key: `transcript-${item.id}`,
       kind: 'transcript',
       second: item.segment_start,
       endSecond: item.segment_end,
-      title: transcriptLabel(item.segment_type),
+      title: complianceHits.length
+        ? `${transcriptLabel(item.segment_type)} · 涉嫌违规`
+        : transcriptLabel(item.segment_type),
       content: item.text_content || '-',
-      category: transcriptLabel(item.segment_type) === '主播话术' ? undefined : transcriptLabel(item.segment_type)
+      category: complianceHits.length
+        ? complianceHits.map(hit => hit.matched_keyword).join(' / ')
+        : transcriptLabel(item.segment_type) === '主播话术'
+          ? undefined
+          : transcriptLabel(item.segment_type),
+      severity: complianceHits.some(hit => hit.severity === 'critical')
+        ? 'critical'
+        : complianceHits.length
+          ? 'warning'
+          : undefined,
+      complianceHits
     });
   });
   props.metrics.forEach((item, index) => {
@@ -220,18 +237,34 @@ async function copyValue(label: string, value: string | null | undefined) {
                 v-if="item.kind === 'comment' && item.audienceUser"
                 :size="28"
                 :name="item.audienceUser.user_nickname || '匿名用户'"
-                :src="item.audienceUser.user_avatar_comment_id ? getCommentUserAvatarUrl(sessionId, item.audienceUser.user_avatar_comment_id) : ''"
+                :src="
+                  item.audienceUser.user_avatar_comment_id
+                    ? getCommentUserAvatarUrl(sessionId, item.audienceUser.user_avatar_comment_id)
+                    : ''
+                "
               />
               <span class="text-13px font-700">{{ item.title }}</span>
               <NTag v-if="item.audienceUser?.has_lead" size="tiny" type="success" :bordered="false">已留资</NTag>
               <NTag v-if="item.category" size="tiny" round :bordered="false">{{ item.category }}</NTag>
               <NTag v-if="item.severity === 'critical'" size="tiny" type="error">重点复核</NTag>
-              <NTag v-else-if="item.severity === 'warning'" size="tiny" type="warning">机会/风险</NTag>
+              <NTag v-else-if="item.severity === 'warning'" size="tiny" type="warning">
+                {{ item.complianceHits?.length ? '涉嫌违规 · 待人工复核' : '机会/风险' }}
+              </NTag>
               <NTag v-if="item.finding" size="tiny" :bordered="false">
                 {{ findingStatusLabel(item.finding.status) }}
               </NTag>
             </div>
             <div class="mt-4px line-clamp-2 text-12px leading-19px text-gray-500">{{ item.content }}</div>
+            <div v-if="item.complianceHits?.length" class="mt-5px flex flex-wrap gap-6px">
+              <NTooltip v-for="hit in item.complianceHits" :key="hit.rule_code">
+                <template #trigger>
+                  <NTag size="tiny" :type="hit.severity === 'critical' ? 'error' : 'warning'">
+                    命中“{{ hit.matched_keyword }}”
+                  </NTag>
+                </template>
+                {{ hit.name }}：{{ hit.guidance }}
+              </NTooltip>
+            </div>
             <div v-if="item.audienceUser" class="mt-5px flex flex-wrap items-center gap-8px text-11px">
               <NButton
                 v-if="item.audienceUser.user_douyin_id"
@@ -258,8 +291,12 @@ async function copyValue(label: string, value: string | null | undefined) {
                 待补：{{ item.hook.missing_elements.join('、') }}
               </NTag>
               <span>5分钟：评论 {{ item.hook.comment_after_5m || 0 }} · 客资 {{ item.hook.lead_after_5m || 0 }}</span>
-              <span>15分钟：评论 {{ item.hook.comment_after_15m || 0 }} · 客资 {{ item.hook.lead_after_15m || 0 }}</span>
-              <span>30分钟：评论 {{ item.hook.comment_after_30m || 0 }} · 客资 {{ item.hook.lead_after_30m || 0 }}</span>
+              <span>
+                15分钟：评论 {{ item.hook.comment_after_15m || 0 }} · 客资 {{ item.hook.lead_after_15m || 0 }}
+              </span>
+              <span>
+                30分钟：评论 {{ item.hook.comment_after_30m || 0 }} · 客资 {{ item.hook.lead_after_30m || 0 }}
+              </span>
               <span>高意向用户 {{ item.hook.high_intent_user_count || 0 }}</span>
             </div>
           </div>

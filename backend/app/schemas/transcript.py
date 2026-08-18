@@ -2,18 +2,39 @@
 
 from __future__ import annotations
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 from app.core.status import TaskStatus
 
 
 # ── 排队 ──
 
+
 class TranscriptQueueResponse(BaseModel):
     """POST /transcripts/{session_id}/queue"""
+
     task_id: int
     status: str
     created: bool
+    queue_source: Literal["auto", "manual"] = "manual"
+    exclusive_active: bool = True
+
+
+class TranscriptDispatchPolicyUpdate(BaseModel):
+    """PUT /transcripts/dispatch-policy"""
+
+    order_mode: Literal["smart", "latest", "fifo"]
+
+
+class TranscriptDispatchPolicyOut(BaseModel):
+    """GET /transcripts/dispatch-policy"""
+
+    order_mode: Literal["smart", "latest", "fifo"] = "smart"
+    manual_active: bool = False
+    manual_task_id: int | None = None
+    manual_session_id: int | None = None
+    auto_scope_timezone: str = "Asia/Shanghai"
+    auto_scope_description: str = "全部直播中场次 + 当天已下播场次"
 
 
 class TranscriptBatchResult(BaseModel):
@@ -27,6 +48,7 @@ class TranscriptBatchResult(BaseModel):
 
 class TranscriptBatchResponse(BaseModel):
     """POST /transcripts/batch/queue-by-anchor"""
+
     anchor_count: int = 0
     selected_count: int = 0
     created_count: int = 0
@@ -35,8 +57,10 @@ class TranscriptBatchResponse(BaseModel):
 
 # ── 任务状态 ──
 
+
 class TranscriptTaskStatusResponse(BaseModel):
     """GET /transcripts/tasks/status"""
+
     queued: int = 0
     processing: int = 0
     completed: int = 0
@@ -45,10 +69,13 @@ class TranscriptTaskStatusResponse(BaseModel):
 
 class TranscriptTaskOut(BaseModel):
     """GET /transcripts/tasks 单条任务"""
+
     id: int
     session_id: int | None = None
     status: str = TaskStatus.FAILED
     task_type: str = "offline"
+    queue_source: Literal["auto", "manual"] = "auto"
+    priority: int = 50
     anchor_name: str = "未知主播"
     session_title: str = "未命名直播场次"
     live_start_time: datetime | None = None
@@ -68,15 +95,29 @@ class TranscriptTaskOut(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     # 转写进度（音频分片维度，从 asr_audio_chunks 表统计）
-    total_chunks: int = 0     # 音频分片总数（进度分母）
-    completed_chunks: int = 0 # 已完成音频分片数（进度分子）
-    progress_percent: int = 0 # 转写进度百分比 0-100
+    total_chunks: int = 0  # 音频分片总数（进度分母）
+    completed_chunks: int = 0  # 已完成音频分片数（进度分子）
+    progress_percent: int = 0  # 转写进度百分比 0-100
 
 
 # ── 分段 / 全文 ──
 
+
+class TranscriptComplianceHit(BaseModel):
+    """关键词命中仅表示涉嫌违规，必须人工复核。"""
+
+    rule_code: str
+    name: str
+    category: str
+    matched_keyword: str
+    severity: str = "warning"
+    guidance: str
+    review_status: Literal["suspected"] = "suspected"
+
+
 class TranscriptSegmentOut(BaseModel):
     """GET /transcripts/{session_id}/segments"""
+
     id: int
     session_id: int | None = None
     segment_start: float = 0
@@ -85,10 +126,12 @@ class TranscriptSegmentOut(BaseModel):
     segment_type: str = ""
     asr_status: str = TaskStatus.PENDING
     ai_score: float | None = None
+    compliance_hits: list[TranscriptComplianceHit] = Field(default_factory=list)
 
 
 class TranscriptTaskDeleteResponse(BaseModel):
     """DELETE /transcripts/tasks/{task_id}"""
+
     task_id: int
     deleted: bool = True
     message: str = ""
@@ -96,12 +139,14 @@ class TranscriptTaskDeleteResponse(BaseModel):
 
 class TranscriptFailedClearResponse(BaseModel):
     """DELETE /transcripts/tasks/failed"""
+
     deleted_count: int = 0
     message: str = ""
 
 
 class TranscriptFullTextResponse(BaseModel):
     """GET /transcripts/{session_id}/full-text"""
+
     id: int | None = None
     full_text: str = ""
     available: bool = False

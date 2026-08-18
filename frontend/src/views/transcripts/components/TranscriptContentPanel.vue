@@ -57,7 +57,11 @@ defineEmits<{
 <template>
   <NCard title="话术阅读与检索" :bordered="false" class="card-wrapper transcript-content-card">
     <template #header-extra>
-      <NRadioGroup :value="viewMode" size="small" @update:value="(val: string) => $emit('update:viewMode', val as 'segments' | 'full')">
+      <NRadioGroup
+        :value="viewMode"
+        size="small"
+        @update:value="(val: string) => $emit('update:viewMode', val as 'segments' | 'full')"
+      >
         <NRadioButton value="segments">分段阅读</NRadioButton>
         <NRadioButton value="full">全文阅读</NRadioButton>
       </NRadioGroup>
@@ -105,7 +109,10 @@ defineEmits<{
                 :id="`transcript-segment-${item.id}`"
                 :key="item.id"
                 class="segment-card rounded-10px p-13px"
-                :class="{ 'segment-card--conversion': ['资料钩子', '留资承接'].includes(item.contentCategory) }"
+                :class="{
+                  'segment-card--conversion': ['资料钩子', '留资承接'].includes(item.contentCategory),
+                  'segment-card--compliance': item.compliance_hits.length
+                }"
               >
                 <div class="flex items-start gap-12px">
                   <!-- 时间戳按钮 -->
@@ -126,12 +133,27 @@ defineEmits<{
                       <NTag size="tiny" :type="item.categoryTone" :bordered="false">
                         {{ item.contentCategory }}
                       </NTag>
-                      <NTag size="tiny" :type="item.sourceLabel === '离线终稿' ? 'success' : 'warning'" :bordered="false">
+                      <NTag
+                        size="tiny"
+                        :type="item.sourceLabel === '离线终稿' ? 'success' : 'warning'"
+                        :bordered="false"
+                      >
                         {{ item.sourceLabel }}
                       </NTag>
                       <NTag size="tiny" :type="getStatusType(item.asr_status)" :bordered="false">
                         {{ getStatusLabel(item.asr_status) }}
                       </NTag>
+                      <NTooltip v-for="hit in item.compliance_hits" :key="hit.rule_code">
+                        <template #trigger>
+                          <NTag size="tiny" :type="hit.severity === 'critical' ? 'error' : 'warning'">
+                            涉嫌违规 · {{ hit.matched_keyword }}
+                          </NTag>
+                        </template>
+                        <div class="max-w-320px">
+                          <div class="font-600">{{ hit.name }}（待人工复核）</div>
+                          <div class="mt-4px">{{ hit.guidance }}</div>
+                        </div>
+                      </NTooltip>
                       <span class="text-11px text-gray-400">
                         {{ Math.max(0, item.segment_end - item.segment_start).toFixed(1) }} 秒
                       </span>
@@ -251,6 +273,11 @@ defineEmits<{
 .segment-card--conversion {
   border-left: 3px solid rgb(var(--warning-color));
   background: color-mix(in srgb, rgb(var(--warning-color)) 5%, transparent);
+}
+
+.segment-card--compliance {
+  border-left: 3px solid rgb(var(--error-color));
+  background: color-mix(in srgb, rgb(var(--error-color)) 5%, transparent);
 }
 
 .time-button {

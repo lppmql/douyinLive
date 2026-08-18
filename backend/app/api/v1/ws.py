@@ -1,7 +1,15 @@
 """Phase 5: WebSocket 转写 + REST 话术接口"""
+
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -15,8 +23,18 @@ from app.models.asr_audio_chunks import AsrAudioChunk
 from app.core.status import TaskStatus
 from app.models.asr_tasks import AsrTask
 from app.models.user import User
-from app.services.asr.queue import queue_session_transcription
+from app.services.asr.queue import (
+    AUTO_SCOPE_TIMEZONE,
+    automatic_session_scope_clause,
+    get_active_manual_task,
+    get_dispatch_policy,
+    queue_session_transcription,
+)
 from app.services.asr.websocket_manager import ws_manager
+from app.services.transcript_compliance import (
+    load_enabled_compliance_rules,
+    match_compliance_text,
+)
 from app.schemas.transcript import (
     TranscriptQueueResponse,
     TranscriptBatchResponse,
@@ -26,6 +44,8 @@ from app.schemas.transcript import (
     TranscriptFullTextResponse,
     TranscriptTaskDeleteResponse,
     TranscriptFailedClearResponse,
+    TranscriptDispatchPolicyOut,
+    TranscriptDispatchPolicyUpdate,
 )
 
 # REST 路由（注册到 v1_router）
@@ -53,7 +73,9 @@ def get_chunk_counts(db: Session, task_ids: list[int]) -> dict[int, tuple[int, i
     if not task_ids:
         return {}
     rows = (
-        db.query(AsrAudioChunk.task_id, AsrAudioChunk.status, func.count(AsrAudioChunk.id))
+        db.query(
+            AsrAudioChunk.task_id, AsrAudioChunk.status, func.count(AsrAudioChunk.id)
+        )
         .filter(AsrAudioChunk.task_id.in_(task_ids))
         .group_by(AsrAudioChunk.task_id, AsrAudioChunk.status)
         .all()
@@ -77,8 +99,10 @@ def serialize_transcription_task(
     """
     total_chunks, completed_chunks = chunk_counts
     progress_percent = (
-        100 if task.status == TaskStatus.COMPLETED
-        else int(completed_chunks / total_chunks * 100) if total_chunks
+        100
+        if task.status == TaskStatus.COMPLETED
+        else int(completed_chunks / total_chunks * 100)
+        if total_chunks
         else 0
     )
     return {
@@ -86,13 +110,16 @@ def serialize_transcription_task(
         "session_id": task.session_id,
         "status": task.status or "failed",
         "task_type": task.task_type or "offline",
+        "queue_source": getattr(task, "queue_source", None) or "auto",
+        "priority": 50 if getattr(task, "priority", None) is None else task.priority,
         "anchor_name": session.anchor_name or "未知主播",
         "session_title": session.session_title or "未命名直播场次",
         "live_start_time": session.live_start_time,
         "live_duration_seconds": session.live_duration_seconds or 0,
         "segment_count": int(segment_count or 0),
         "error_message": task.error_message,
-        "postprocess_status": getattr(task, "postprocess_status", None) or TaskStatus.PENDING,
+        "postprocess_status": getattr(task, "postprocess_status", None)
+        or TaskStatus.PENDING,
         "postprocess_error": getattr(task, "postprocess_error", None),
         "postprocess_result": getattr(task, "postprocess_result", None),
         "postprocess_attempt_count": getattr(task, "postprocess_attempt_count", 0) or 0,
@@ -111,9 +138,43 @@ def serialize_transcription_task(
     }
 
 
+def serialize_dispatch_policy(db: Session) -> dict:
+    """返回排序策略和当前人工独占状态，不暴露内部运行凭据。"""
+    policy = get_dispatch_policy(db)
+    manual = get_active_manual_task(db)
+    return {
+        "order_mode": policy.order_mode,
+        "manual_active": manual is not None,
+        "manual_task_id": manual.id if manual else None,
+        "manual_session_id": manual.session_id if manual else None,
+        "auto_scope_timezone": AUTO_SCOPE_TIMEZONE,
+        "auto_scope_description": "全部直播中场次 + 当天已下播场次",
+    }
+
+
+@rest_router.get("/dispatch-policy", response_model=TranscriptDispatchPolicyOut)
+def get_transcript_dispatch_policy(db: Session = Depends(get_db)):
+    """读取主播话术页的自动队列排序和人工独占状态。"""
+    result = serialize_dispatch_policy(db)
+    db.commit()
+    return result
+
+
+@rest_router.put("/dispatch-policy", response_model=TranscriptDispatchPolicyOut)
+def update_transcript_dispatch_policy(
+    payload: TranscriptDispatchPolicyUpdate,
+    db: Session = Depends(get_db),
+):
+    """更新自动队列排序；直播场次和人工任务的优先级不受影响。"""
+    policy = get_dispatch_policy(db)
+    policy.order_mode = payload.order_mode
+    db.commit()
+    return serialize_dispatch_policy(db)
+
+
 @rest_router.post("/{session_id:int}/queue", response_model=TranscriptQueueResponse)
 def queue_transcription(session_id: int, db: Session = Depends(get_db)):
-    """为指定场次排队转写，复用已采集流源并避免重复任务。
+    """人工选择指定场次独占转写，其他任务在分片边界保存断点并暂停。
 
     如果 ASR Worker 未运行（比如之前在采集页关闭了 ASR），自动拉起运行时，
     避免任务创建后无人处理一直卡在 queued 状态。
@@ -123,7 +184,7 @@ def queue_transcription(session_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "直播场次不存在")
 
     try:
-        task, created = queue_session_transcription(db, session)
+        task, created = queue_session_transcription(db, session, queue_source="manual")
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     db.commit()
@@ -131,9 +192,16 @@ def queue_transcription(session_id: int, db: Session = Depends(get_db)):
 
     # 确保 ASR 运行时在跑（已运行时 start_asr_runtime 是幂等的，不会重复启动）
     from app.services.asr.control import start_asr_runtime
+
     start_asr_runtime()
 
-    return {"task_id": task.id, "status": task.status, "created": created}
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "created": created,
+        "queue_source": task.queue_source,
+        "exclusive_active": task.status in {TaskStatus.QUEUED, TaskStatus.PROCESSING},
+    }
 
 
 @rest_router.post("/batch/queue-by-anchor", response_model=TranscriptBatchResponse)
@@ -161,6 +229,7 @@ def queue_transcription_by_anchor(
                 LiveSession.anchor_name == anchor,
                 LiveSession.live_duration_seconds >= min_duration_seconds,
                 StreamSource.status == "active",
+                automatic_session_scope_clause(),
             )
             .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
             .all()
@@ -176,17 +245,21 @@ def queue_transcription_by_anchor(
             # 批量增量不反复消耗已确认无语音/失效的回放；单场接口仍可人工重试。
             if latest_task and latest_task.status == "failed":
                 continue
-            task, created = queue_session_transcription(db, session)
+            task, created = queue_session_transcription(
+                db, session, queue_source="auto"
+            )
             if task.status == "completed":
                 continue
-            results.append({
-                "anchor_name": anchor,
-                "session_id": session.id,
-                "duration_seconds": session.live_duration_seconds,
-                "task_id": task.id,
-                "status": task.status,
-                "created": created,
-            })
+            results.append(
+                {
+                    "anchor_name": anchor,
+                    "session_id": session.id,
+                    "duration_seconds": session.live_duration_seconds,
+                    "task_id": task.id,
+                    "status": task.status,
+                    "created": created,
+                }
+            )
             created_count += int(created)
             selected += 1
             if selected >= per_anchor:
@@ -196,6 +269,7 @@ def queue_transcription_by_anchor(
 
     # 确保 ASR 运行时在跑（比如之前在采集页关闭了 ASR，批量排队后需要 Worker 来处理）
     from app.services.asr.control import start_asr_runtime
+
     start_asr_runtime()
 
     return {
@@ -210,7 +284,9 @@ def queue_transcription_by_anchor(
 def get_transcription_task_status(db: Session = Depends(get_db)):
     """返回话术任务汇总，供页面显示真实排队进度。"""
     counts = {TaskStatus.QUEUED: 0, "processing": 0, "completed": 0, "failed": 0}
-    for status, count in db.query(AsrTask.status, func.count(AsrTask.id)).group_by(AsrTask.status):
+    for status, count in db.query(AsrTask.status, func.count(AsrTask.id)).group_by(
+        AsrTask.status
+    ):
         counts[status or "failed"] = count
     return counts
 
@@ -261,7 +337,9 @@ def list_transcription_tasks(
     chunk_counts_map = get_chunk_counts(db, task_ids)
     return [
         serialize_transcription_task(
-            task, session, segment_count,
+            task,
+            session,
+            segment_count,
             chunk_counts=chunk_counts_map.get(task.id, (0, 0)),
         )
         for task, session, segment_count in rows
@@ -297,13 +375,22 @@ def clear_failed_transcription_tasks(db: Session = Depends(get_db)):
         ).delete(synchronize_session=False)
 
     # 2. 再删音频分片（引用 asr_tasks）
-    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id.in_(task_ids)).delete(synchronize_session=False)
+    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id.in_(task_ids)).delete(
+        synchronize_session=False
+    )
 
     # 3. 最后删失败任务本身
-    deleted = db.query(AsrTask).filter(AsrTask.id.in_(task_ids)).delete(synchronize_session=False)
+    deleted = (
+        db.query(AsrTask)
+        .filter(AsrTask.id.in_(task_ids))
+        .delete(synchronize_session=False)
+    )
 
     db.commit()
-    return {"deleted_count": deleted, "message": f"已清理 {deleted} 条失败任务及关联数据"}
+    return {
+        "deleted_count": deleted,
+        "message": f"已清理 {deleted} 条失败任务及关联数据",
+    }
 
 
 @rest_router.delete("/tasks/{task_id:int}", response_model=TranscriptTaskDeleteResponse)
@@ -335,7 +422,9 @@ def delete_transcription_task(task_id: int, db: Session = Depends(get_db)):
         ).delete(synchronize_session=False)
 
     # 2. 再删音频分片（引用 asr_tasks）
-    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id == task_id).delete(synchronize_session=False)
+    db.query(AsrAudioChunk).filter(AsrAudioChunk.task_id == task_id).delete(
+        synchronize_session=False
+    )
 
     # 3. 最后删任务本身
     db.delete(task)
@@ -344,7 +433,9 @@ def delete_transcription_task(task_id: int, db: Session = Depends(get_db)):
     return {"task_id": task_id, "deleted": True, "message": f"任务 #{task_id} 已删除"}
 
 
-@rest_router.get("/{session_id:int}/segments", response_model=list[TranscriptSegmentOut])
+@rest_router.get(
+    "/{session_id:int}/segments", response_model=list[TranscriptSegmentOut]
+)
 def list_transcript_segments(
     session_id: int,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -367,6 +458,7 @@ def list_transcript_segments(
     if offset:
         query = query.offset(offset)
     segments = query.limit(limit).all()
+    rules = load_enabled_compliance_rules(db)
     return [
         {
             "id": s.id,
@@ -377,12 +469,15 @@ def list_transcript_segments(
             "segment_type": s.segment_type or "",
             "asr_status": s.asr_status or TaskStatus.PENDING,
             "ai_score": float(s.ai_score) if s.ai_score else None,
+            "compliance_hits": match_compliance_text(s.text_content or "", rules),
         }
         for s in segments
     ]
 
 
-@rest_router.get("/{session_id:int}/full-text", response_model=TranscriptFullTextResponse)
+@rest_router.get(
+    "/{session_id:int}/full-text", response_model=TranscriptFullTextResponse
+)
 def get_full_text(session_id: int, db: Session = Depends(get_db)):
     """获取某场直播的完整话术文本"""
     record = (
@@ -407,7 +502,11 @@ def get_full_text(session_id: int, db: Session = Depends(get_db)):
         full_text = build_full_transcript_text(segments)
         # 未开始或失败场次没有缓存全文是正常状态；已有分段时仍返回完整可读内容。
         return {"id": None, "full_text": full_text, "available": bool(full_text)}
-    return {"id": record.id, "full_text": record.full_text or "", "available": bool(record.full_text)}
+    return {
+        "id": record.id,
+        "full_text": record.full_text or "",
+        "available": bool(record.full_text),
+    }
 
 
 # WebSocket 路由（直接在 app 上注册）

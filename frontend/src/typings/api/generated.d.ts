@@ -1427,6 +1427,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/transcripts/dispatch-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Transcript Dispatch Policy
+         * @description 读取主播话术页的自动队列排序和人工独占状态。
+         */
+        get: operations["get_transcript_dispatch_policy_api_v1_transcripts_dispatch_policy_get"];
+        /**
+         * Update Transcript Dispatch Policy
+         * @description 更新自动队列排序；直播场次和人工任务的优先级不受影响。
+         */
+        put: operations["update_transcript_dispatch_policy_api_v1_transcripts_dispatch_policy_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/transcripts/{session_id}/queue": {
         parameters: {
             query?: never;
@@ -1438,7 +1462,7 @@ export interface paths {
         put?: never;
         /**
          * Queue Transcription
-         * @description 为指定场次排队转写，复用已采集流源并避免重复任务。
+         * @description 人工选择指定场次独占转写，其他任务在分片边界保存断点并暂停。
          *
          *     如果 ASR Worker 未运行（比如之前在采集页关闭了 ASR），自动拉起运行时，
          *     避免任务创建后无人处理一直卡在 queued 状态。
@@ -6956,6 +6980,75 @@ export interface components {
             created: boolean;
         };
         /**
+         * TranscriptComplianceHit
+         * @description 关键词命中仅表示涉嫌违规，必须人工复核。
+         */
+        TranscriptComplianceHit: {
+            /** Rule Code */
+            rule_code: string;
+            /** Name */
+            name: string;
+            /** Category */
+            category: string;
+            /** Matched Keyword */
+            matched_keyword: string;
+            /**
+             * Severity
+             * @default warning
+             */
+            severity: string;
+            /** Guidance */
+            guidance: string;
+            /**
+             * Review Status
+             * @default suspected
+             * @constant
+             */
+            review_status: "suspected";
+        };
+        /**
+         * TranscriptDispatchPolicyOut
+         * @description GET /transcripts/dispatch-policy
+         */
+        TranscriptDispatchPolicyOut: {
+            /**
+             * Order Mode
+             * @default smart
+             * @enum {string}
+             */
+            order_mode: "smart" | "latest" | "fifo";
+            /**
+             * Manual Active
+             * @default false
+             */
+            manual_active: boolean;
+            /** Manual Task Id */
+            manual_task_id?: number | null;
+            /** Manual Session Id */
+            manual_session_id?: number | null;
+            /**
+             * Auto Scope Timezone
+             * @default Asia/Shanghai
+             */
+            auto_scope_timezone: string;
+            /**
+             * Auto Scope Description
+             * @default 全部直播中场次 + 当天已下播场次
+             */
+            auto_scope_description: string;
+        };
+        /**
+         * TranscriptDispatchPolicyUpdate
+         * @description PUT /transcripts/dispatch-policy
+         */
+        TranscriptDispatchPolicyUpdate: {
+            /**
+             * Order Mode
+             * @enum {string}
+             */
+            order_mode: "smart" | "latest" | "fifo";
+        };
+        /**
          * TranscriptFailedClearResponse
          * @description DELETE /transcripts/tasks/failed
          */
@@ -7042,6 +7135,17 @@ export interface components {
             status: string;
             /** Created */
             created: boolean;
+            /**
+             * Queue Source
+             * @default manual
+             * @enum {string}
+             */
+            queue_source: "auto" | "manual";
+            /**
+             * Exclusive Active
+             * @default true
+             */
+            exclusive_active: boolean;
         };
         /** TranscriptSegmentCreate */
         TranscriptSegmentCreate: {
@@ -7113,6 +7217,8 @@ export interface components {
             asr_status: string;
             /** Ai Score */
             ai_score?: number | null;
+            /** Compliance Hits */
+            compliance_hits?: components["schemas"]["TranscriptComplianceHit"][];
         };
         /** TranscriptSegmentResponse */
         TranscriptSegmentResponse: {
@@ -7199,6 +7305,17 @@ export interface components {
              * @default offline
              */
             task_type: string;
+            /**
+             * Queue Source
+             * @default auto
+             * @enum {string}
+             */
+            queue_source: "auto" | "manual";
+            /**
+             * Priority
+             * @default 50
+             */
+            priority: number;
             /**
              * Anchor Name
              * @default 未知主播
@@ -10259,6 +10376,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MonitorActionResponse"];
+                };
+            };
+        };
+    };
+    get_transcript_dispatch_policy_api_v1_transcripts_dispatch_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptDispatchPolicyOut"];
+                };
+            };
+        };
+    };
+    update_transcript_dispatch_policy_api_v1_transcripts_dispatch_policy_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TranscriptDispatchPolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptDispatchPolicyOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

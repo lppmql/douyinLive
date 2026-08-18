@@ -68,7 +68,9 @@ def frontend_contracts():
             path = url_match.group(2)
             if not (path.startswith("/") or path.startswith("${API_PREFIX}")):
                 continue
-            method_match = re.search(r"method:\s*['\"](get|post|put|patch|delete)['\"]", call, re.IGNORECASE)
+            method_match = re.search(
+                r"method:\s*['\"](get|post|put|patch|delete)['\"]", call, re.IGNORECASE
+            )
             method = method_match.group(1).upper() if method_match else "GET"
             contracts.add((method, normalize_api_path(path)))
     return contracts
@@ -99,7 +101,9 @@ def test_collector_query_names_match_fastapi_contract():
 
 
 def test_frontend_request_layer_does_not_bundle_fixed_api_tokens():
-    source = (PROJECT_ROOT / "frontend" / "src" / "service" / "request" / "index.ts").read_text(encoding="utf-8")
+    source = (
+        PROJECT_ROOT / "frontend" / "src" / "service" / "request" / "index.ts"
+    ).read_text(encoding="utf-8")
 
     assert "apifoxToken" not in source
 
@@ -109,14 +113,15 @@ def test_transcript_websocket_uses_backend_service_and_vite_ws_proxy():
         PROJECT_ROOT
         / "frontend"
         / "src"
-        / "views"
-        / "transcripts"
-        / "composables"
-        / "useTranscriptRealtime.ts"
+        / "hooks"
+        / "business"
+        / "transcript-realtime.ts"
     ).read_text(
         encoding="utf-8",
     )
-    proxy_source = (PROJECT_ROOT / "frontend" / "build" / "config" / "proxy.ts").read_text(encoding="utf-8")
+    proxy_source = (
+        PROJECT_ROOT / "frontend" / "build" / "config" / "proxy.ts"
+    ).read_text(encoding="utf-8")
 
     assert "getServiceBaseURL" in realtime_source
     assert "otherBaseURL.backend" in realtime_source
@@ -136,7 +141,9 @@ def test_transcript_segment_payload_contains_declared_session_id():
         ai_score=88,
     )
     query = MagicMock()
-    query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [segment]
+    query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+        segment
+    ]
     db = MagicMock()
     db.query.return_value = query
 

@@ -21,11 +21,13 @@ import {
   fetchTranscriptSegments,
   fetchTranscriptTasks,
   fetchTranscriptTaskStatus,
+  fetchTranscriptDispatchPolicy,
   queueTranscript,
   queueTranscriptsByAnchor,
   runTranscriptAiPipeline,
   deleteTranscriptTask,
-  clearFailedTranscriptTasks
+  clearFailedTranscriptTasks,
+  updateTranscriptDispatchPolicy
 } from '@/service/api/douyin';
 import { unwrapServiceData } from '@/utils/service';
 import { sortSessionsByLatest } from '@/utils/analysisHelpers';
@@ -39,7 +41,7 @@ import {
   selectTranscriptVersionSegments
 } from '@/adapters/transcript-adapter';
 
-import { useTranscriptRealtime } from './useTranscriptRealtime';
+import { useTranscriptRealtime } from '@/hooks/business/transcript-realtime';
 
 // ========== 类型别名 ==========
 
@@ -58,16 +60,13 @@ function taskPriority(task: Api.Douyin.TranscriptTask): [number, number, number]
   return [statusPriority[task.status] ?? 5, task.task_type === 'offline' ? 0 : 1, -task.id];
 }
 
-function isPreferredTask(
-  candidate: Api.Douyin.TranscriptTask,
-  current: Api.Douyin.TranscriptTask
-): boolean {
+function isPreferredTask(candidate: Api.Douyin.TranscriptTask, current: Api.Douyin.TranscriptTask): boolean {
   const left = taskPriority(candidate);
   const right = taskPriority(current);
   return (
-    left[0] < right[0]
-    || (left[0] === right[0] && left[1] < right[1])
-    || (left[0] === right[0] && left[1] === right[1] && left[2] < right[2])
+    left[0] < right[0] ||
+    (left[0] === right[0] && left[1] < right[1]) ||
+    (left[0] === right[0] && left[1] === right[1] && left[2] < right[2])
   );
 }
 
@@ -105,6 +104,8 @@ export function useTranscriptWorkbench() {
   const visibleSegmentLimit = ref(80);
   const loadError = ref('');
   const pageActive = ref(true);
+  const dispatchPolicy = ref<Api.Douyin.TranscriptDispatchPolicy | null>(null);
+  const dispatchPolicyLoading = ref(false);
 
   // ── 实时话术 WebSocket ──
 
@@ -115,14 +116,20 @@ export function useTranscriptWorkbench() {
     onPageDeactivated: wsDeactivate
   } = useTranscriptRealtime({
     selectedSessionId,
-    onFinalSegment: (sid) => { loadTranscript(sid, true); }
+    onSegment: (segment, sessionId) => {
+      if (sessionId !== selectedSessionId.value) return;
+      const index = segments.value.findIndex(item => item.id === segment.id);
+      if (index >= 0) segments.value[index] = segment;
+      else
+        segments.value = [...segments.value, segment].sort(
+          (left, right) => left.segment_start - right.segment_start || left.id - right.id
+        );
+    }
   });
 
   // ── 计算属性 ──
 
-  const selectedSession = computed(() =>
-    sessions.value.find(item => item.id === selectedSessionId.value) || null
-  );
+  const selectedSession = computed(() => sessions.value.find(item => item.id === selectedSessionId.value) || null);
 
   /** 同场可能同时存在直播初稿与下播终稿，统一选出页面应该展示的那一条。 */
   const taskBySession = computed(() => {
@@ -139,19 +146,13 @@ export function useTranscriptWorkbench() {
     return sessionId === null ? null : taskBySession.value.get(sessionId) || null;
   });
 
-  const activeTaskCount = computed(() =>
-    taskSummary.value.queued + taskSummary.value.processing
-  );
+  const activeTaskCount = computed(() => taskSummary.value.queued + taskSummary.value.processing);
 
   /** 4 张任务状态卡片配置（含进度信息） */
-  const taskStatusCards = computed(() =>
-    buildTaskStatusCards(taskSummary.value, tasks.value)
-  );
+  const taskStatusCards = computed(() => buildTaskStatusCards(taskSummary.value, tasks.value));
 
   /** 场次下拉选项列表 */
-  const sessionOptions = computed(() =>
-    buildSessionOptions(sessions.value, taskBySession.value)
-  );
+  const sessionOptions = computed(() => buildSessionOptions(sessions.value, taskBySession.value));
 
   /** 页面只选择一个话术版本：终稿存在时完全排除实时初稿，避免重复统计。 */
   const versionSegments = computed(() => selectTranscriptVersionSegments(segments.value));
@@ -160,9 +161,7 @@ export function useTranscriptWorkbench() {
   const readableSegments = computed(() => buildReadableSegments(versionSegments.value));
 
   /** 话术业务内容结构统计 */
-  const categoryStats = computed(() =>
-    buildCategoryStats(readableSegments.value)
-  );
+  const categoryStats = computed(() => buildCategoryStats(readableSegments.value));
 
   /** 分类筛选下拉选项 */
   const categoryOptions = computed(() => [
@@ -184,9 +183,7 @@ export function useTranscriptWorkbench() {
   });
 
   /** 当前可见的分段（懒加载，默认 80 条） */
-  const visibleSegments = computed(() =>
-    filteredSegments.value.slice(0, visibleSegmentLimit.value)
-  );
+  const visibleSegments = computed(() => filteredSegments.value.slice(0, visibleSegmentLimit.value));
 
   /** 话术总字数 */
   const totalCharacters = computed(() =>
@@ -194,9 +191,7 @@ export function useTranscriptWorkbench() {
   );
 
   /** 已转写的最大秒数 */
-  const transcribedSeconds = computed(() =>
-    Math.max(0, ...versionSegments.value.map(item => item.segment_end || 0))
-  );
+  const transcribedSeconds = computed(() => Math.max(0, ...versionSegments.value.map(item => item.segment_end || 0)));
 
   /** 话术时间覆盖率（已转写 / 直播时长） */
   const coveragePercent = computed(() => {
@@ -215,12 +210,8 @@ export function useTranscriptWorkbench() {
 
   /** 平均 AI 评分 */
   const averageAiScore = computed(() => {
-    const scores = readableSegments.value
-      .map(item => item.ai_score)
-      .filter((value): value is number => value !== null);
-    return scores.length
-      ? scores.reduce((total, value) => total + value, 0) / scores.length
-      : null;
+    const scores = readableSegments.value.map(item => item.ai_score).filter((value): value is number => value !== null);
+    return scores.length ? scores.reduce((total, value) => total + value, 0) / scores.length : null;
   });
 
   const contentVersion = computed<'offline-final' | 'realtime-draft' | 'empty'>(() => {
@@ -239,30 +230,25 @@ export function useTranscriptWorkbench() {
   );
 
   /** AI 复盘只使用下播后的完整终稿，避免拿直播初稿生成错误结论。 */
-  const canRunAiPipeline = computed(() =>
-    contentVersion.value === 'offline-final'
-    && selectedTask.value?.task_type === 'offline'
-    && selectedTask.value.status === 'completed'
+  const canRunAiPipeline = computed(
+    () =>
+      contentVersion.value === 'offline-final' &&
+      selectedTask.value?.task_type === 'offline' &&
+      selectedTask.value.status === 'completed'
   );
 
   const displayedFullText = computed(() => {
     if (contentVersion.value === 'offline-final' && fullText.value) return fullText.value;
-    return readableSegments.value
-      .map(item => `[${formatTime(item.segment_start)}] ${item.text_content}`)
-      .join('\n\n');
+    return readableSegments.value.map(item => `[${formatTime(item.segment_start)}] ${item.text_content}`).join('\n\n');
   });
 
   /** 按状态筛选后的任务列表 */
   const filteredTasks = computed(() =>
-    taskFilter.value === 'all'
-      ? tasks.value
-      : tasks.value.filter(item => item.status === taskFilter.value)
+    taskFilter.value === 'all' ? tasks.value : tasks.value.filter(item => item.status === taskFilter.value)
   );
 
   /** 是否有话术内容（控制复制按钮等 UI 状态） */
-  const hasContent = computed(() =>
-    readableSegments.value.length > 0 || Boolean(fullText.value)
-  );
+  const hasContent = computed(() => readableSegments.value.length > 0 || Boolean(fullText.value));
 
   // ── 异步操作 ──
 
@@ -274,12 +260,14 @@ export function useTranscriptWorkbench() {
 
   /** 加载任务汇总 + 任务列表 */
   async function loadTaskData() {
-    const [summaryResponse, taskResponse] = await Promise.all([
+    const [summaryResponse, taskResponse, policyResponse] = await Promise.all([
       fetchTranscriptTaskStatus(),
-      fetchTranscriptTasks()
+      fetchTranscriptTasks(),
+      fetchTranscriptDispatchPolicy()
     ]);
     taskSummary.value = unwrapServiceData(summaryResponse, '话术任务汇总读取失败');
     tasks.value = unwrapServiceData(taskResponse, '话术任务读取失败');
+    dispatchPolicy.value = unwrapServiceData(policyResponse, '话术调度策略读取失败');
   }
 
   /** 加载单个场次的话术数据（分段 + 全文） */
@@ -349,8 +337,8 @@ export function useTranscriptWorkbench() {
       const data = unwrapServiceData(response, '转写任务响应为空');
       message.success(
         isRecovery
-          ? `任务 #${data.task_id} 已断点续传，系统将自动刷新回放地址`
-          : `任务已${data.created ? '创建' : '在队列中'}，编号 ${data.task_id}`
+          ? `人工任务 #${data.task_id} 已断点续传，其他场次将在安全边界暂停`
+          : `人工任务 #${data.task_id} 已优先，完成后自动恢复其他场次`
       );
       await loadTaskData();
     } catch (error) {
@@ -360,18 +348,32 @@ export function useTranscriptWorkbench() {
     }
   }
 
-  /** 批量增量转写（每主播最近 1 场） */
+  /** 补排今日自动转写范围内的场次。 */
   async function queueAnchorBatch() {
     batchLoading.value = true;
     try {
       const response = await queueTranscriptsByAnchor(1);
       const data = unwrapServiceData(response, '批量任务响应为空');
-      message.success(`检查 ${data.anchor_count} 位主播，新建 ${data.created_count} 个任务`);
+      message.success(`已检查今日 ${data.anchor_count} 位主播，新建 ${data.created_count} 个自动任务`);
       await loadTaskData();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '增量转写失败，请确认已采集真实回放');
     } finally {
       batchLoading.value = false;
+    }
+  }
+
+  /** 修改自动队列排序，不改变直播和人工任务的硬优先级。 */
+  async function changeDispatchOrder(orderMode: Api.Douyin.TranscriptDispatchPolicy['order_mode']) {
+    dispatchPolicyLoading.value = true;
+    try {
+      const response = await updateTranscriptDispatchPolicy(orderMode);
+      dispatchPolicy.value = unwrapServiceData(response, '话术调度策略更新失败');
+      message.success('自动转写排序已更新');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '自动转写排序更新失败');
+    } finally {
+      dispatchPolicyLoading.value = false;
     }
   }
 
@@ -426,7 +428,9 @@ export function useTranscriptWorkbench() {
     const segmentIndex = segments.value.findIndex(item => item.id === segment.id);
     visibleSegmentLimit.value = Math.max(80, segmentIndex + 1);
     await nextTick();
-    document.getElementById(`transcript-segment-${segment.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document
+      .getElementById(`transcript-segment-${segment.id}`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
   /** 打开任务抽屉（可选按状态预筛选） */
@@ -532,11 +536,7 @@ export function useTranscriptWorkbench() {
   );
 
   // 有活跃任务就轮询，没有就暂停
-  watch(
-    activeTaskCount,
-    count => (count && pageActive.value ? resumePolling() : pausePolling()),
-    { immediate: true }
-  );
+  watch(activeTaskCount, count => (count && pageActive.value ? resumePolling() : pausePolling()), { immediate: true });
 
   // 切换场次 / 搜索 / 筛选 → 重置懒加载数量
   watch([selectedSessionId, searchKeyword, categoryFilter], () => {
@@ -590,6 +590,8 @@ export function useTranscriptWorkbench() {
     visibleSegmentLimit,
     loadError,
     livePreview,
+    dispatchPolicy,
+    dispatchPolicyLoading,
     // 计算属性
     selectedSession,
     selectedTask,
@@ -618,6 +620,7 @@ export function useTranscriptWorkbench() {
     loadTranscript,
     startTranscription,
     queueAnchorBatch,
+    changeDispatchOrder,
     runAiPipeline,
     copyText,
     copyFullText,

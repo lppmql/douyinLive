@@ -53,7 +53,7 @@ export function fetchLiveSessionPage(params: {
   const safeParams = {
     ...params,
     current: Math.max(1, params.current || 1),
-    size: Math.min(500, Math.max(1, params.size || 20)),
+    size: Math.min(500, Math.max(1, params.size || 20))
   };
   return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.LiveSessionListItem>>({
     url: `${API_PREFIX}/live-sessions/page`,
@@ -137,7 +137,7 @@ export function getLiveSessionPlaybackUrl(id: number, startSeconds = 0) {
 export function refreshSessionStream(sessionId: number) {
   return backendRequest<{ message: string; stream_url: string; source: string }>({
     url: `${API_PREFIX}/live-sessions/${sessionId}/refresh-stream`,
-    method: 'POST',
+    method: 'POST'
   });
 }
 
@@ -315,9 +315,31 @@ export function fetchTranscriptFullText(sessionId: number) {
 }
 
 export function queueTranscript(sessionId: number) {
-  return backendRequest<{ task_id: number; status: string; created: boolean }>({
+  return backendRequest<{
+    task_id: number;
+    status: string;
+    created: boolean;
+    queue_source: 'auto' | 'manual';
+    exclusive_active: boolean;
+  }>({
     url: `${API_PREFIX}/transcripts/${sessionId}/queue`,
     method: 'POST'
+  });
+}
+
+/** 读取自动转写排序及当前人工独占场次。 */
+export function fetchTranscriptDispatchPolicy() {
+  return backendRequest<Api.Douyin.TranscriptDispatchPolicy>({
+    url: `${API_PREFIX}/transcripts/dispatch-policy`
+  });
+}
+
+/** 修改自动队列排序；直播和人工任务仍保持更高优先级。 */
+export function updateTranscriptDispatchPolicy(orderMode: Api.Douyin.TranscriptDispatchPolicy['order_mode']) {
+  return backendRequest<Api.Douyin.TranscriptDispatchPolicy>({
+    url: `${API_PREFIX}/transcripts/dispatch-policy`,
+    method: 'PUT',
+    data: { order_mode: orderMode }
   });
 }
 
@@ -404,7 +426,18 @@ export function generateSessionReview(sessionId: number) {
 export function overrideAudienceAnalysis(
   sessionId: number,
   analysisId: number,
-  data: Partial<Pick<Api.Douyin.UnifiedAiUserAnalysis, 'business_stage' | 'follow_up_status' | 'demand_scope' | 'interaction_type' | 'precision_status' | 'is_precision_lead' | 'exclusion_reason'>> & { clear?: boolean }
+  data: Partial<
+    Pick<
+      Api.Douyin.UnifiedAiUserAnalysis,
+      | 'business_stage'
+      | 'follow_up_status'
+      | 'demand_scope'
+      | 'interaction_type'
+      | 'precision_status'
+      | 'is_precision_lead'
+      | 'exclusion_reason'
+    >
+  > & { clear?: boolean }
 ) {
   return backendRequest<Api.Douyin.UnifiedAiReview>({
     url: `${API_PREFIX}/reviews/${sessionId}/audience/${analysisId}`,
@@ -523,7 +556,7 @@ export function fetchKnowledgeItemPage(params: {
   const safeParams = {
     ...params,
     current: Math.max(1, params.current || 1),
-    size: Math.min(500, Math.max(1, params.size || 20)),
+    size: Math.min(500, Math.max(1, params.size || 20))
   };
   return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.KnowledgeItem>>({
     url: `${API_PREFIX}/knowledge-base/page`,
@@ -558,7 +591,7 @@ export function fetchKnowledgeTimeSlicePage(params: {
   const safeParams = {
     ...params,
     current: Math.max(1, params.current || 1),
-    size: Math.min(500, Math.max(1, params.size || 20)),
+    size: Math.min(500, Math.max(1, params.size || 20))
   };
   return backendRequest<Api.Common.PaginatingQueryRecord<Api.Douyin.KnowledgeTimeSlice>>({
     url: `${API_PREFIX}/knowledge-base/time-slices/page`,
@@ -670,12 +703,12 @@ export async function askKnowledgeStream(
   // 和 backendRequest 用同一套 baseURL 构建逻辑，确保走 Vite 代理
   const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
   const { otherBaseURL } = getServiceBaseURL(import.meta.env, isHttpProxy);
-  const baseUrl = otherBaseURL.backend;  // 开发代理模式：/proxy-backend；直连模式：http://localhost:8000
+  const baseUrl = otherBaseURL.backend; // 开发代理模式：/proxy-backend；直连模式：http://localhost:8000
 
   // 从 localStorage 取 token（和 request/index.ts 里的 backendRequest 用同一套存储）
   const token = localStg.get('token');
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    'Content-Type': 'application/json'
   };
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
@@ -686,7 +719,7 @@ export async function askKnowledgeStream(
   const response = await fetch(`${baseUrl}${API_PREFIX}/ai/qa/stream`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question, category, history }),
+    body: JSON.stringify({ question, category, history })
   });
 
   console.log('[askKnowledgeStream] 响应状态', response.status, response.headers.get('content-type'));
@@ -702,7 +735,7 @@ export async function askKnowledgeStream(
   }
 
   const decoder = new TextDecoder('utf-8');
-  let buffer = '';  // 缓冲区：拼接不完整的 SSE 行
+  let buffer = ''; // 缓冲区：拼接不完整的 SSE 行
 
   while (true) {
     const { done, value } = await reader.read();
@@ -719,7 +752,7 @@ export async function askKnowledgeStream(
     for (const line of lines) {
       if (!line.startsWith('data: ')) continue;
 
-      const jsonStr = line.slice(6);  // 去掉 "data: " 前缀
+      const jsonStr = line.slice(6); // 去掉 "data: " 前缀
       try {
         const event: QaStreamEvent = JSON.parse(jsonStr);
         switch (event.type) {
