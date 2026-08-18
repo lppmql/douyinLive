@@ -17,7 +17,11 @@ from app.models.asr_tasks import AsrTask
 from app.models.collector_module_states import CollectorModuleState
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_tasks import ScraperTask
-from app.services.asr.control import start_asr_runtime, stop_asr_runtime
+from app.services.asr.control import (
+    get_asr_runtime_status,
+    start_asr_runtime,
+    stop_asr_runtime,
+)
 from app.services.asr.queue import queue_auto_transcriptions
 from app.services.collector.browser import browser_manager
 from app.services.collector.scheduler import scheduler_manager
@@ -303,6 +307,7 @@ class CollectorModuleServiceManager:
         while not self._stop_event.is_set():
             try:
                 usage = await asyncio.to_thread(get_system_usage)
+                await self._ensure_asr_runtime_healthy()
                 await asyncio.to_thread(self._schedule_due_modules_sync, usage)
                 await self._release_browser_if_unused()
                 await asyncio.sleep(max(5, settings.COLLECTOR_SERVICE_TICK_SECONDS))
@@ -311,6 +316,21 @@ class CollectorModuleServiceManager:
             except Exception as exc:
                 logger.exception("持续模块调度异常: %s", exc)
                 await asyncio.sleep(max(5, settings.COLLECTOR_SERVICE_TICK_SECONDS))
+
+    async def _ensure_asr_runtime_healthy(self) -> None:
+        """ASR 开关开启时持续检查独立心跳，僵死后自动替换 Worker。"""
+        if not self.is_enabled("asr"):
+            return
+        runtime = await asyncio.to_thread(get_asr_runtime_status)
+        if runtime.get("worker_healthy"):
+            return
+        try:
+            await asyncio.to_thread(start_asr_runtime)
+            self._save_error("asr", "")
+            logger.warning("ASR Worker 心跳异常，已自动恢复运行时")
+        except Exception as exc:
+            self._save_error("asr", f"ASR 自动恢复失败：{str(exc)[:400]}")
+            logger.warning("ASR Worker 自动恢复失败: %s", exc)
 
     def _schedule_due_modules_sync(self, usage: dict[str, Any]) -> None:
         db = SessionLocal()

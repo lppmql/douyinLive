@@ -14,6 +14,7 @@ ASR Worker 进程 — 独立运行的话术转写服务
 
 import asyncio
 import hashlib
+import os
 import signal
 from pathlib import Path
 from time import monotonic
@@ -65,6 +66,10 @@ from app.services.asr.queue import (
 )
 from app.services.asr.websocket_manager import ws_manager
 from app.services.asr.corrector import correct_text as correct_asr_text
+from app.services.asr.control import (
+    clear_asr_worker_heartbeat,
+    write_asr_worker_heartbeat,
+)
 from app.services.ai.post_collection import process_session_post_collection
 from app.services.collector.stream_health import probe_stream_url
 from app.services.resources.asr_policy import AsrResourcePlan, build_asr_resource_plan
@@ -224,6 +229,7 @@ class AsrWorker:
     async def run(self):
         """主循环"""
         self._running = True
+        write_asr_worker_heartbeat(self._worker_id)
         logger.info(
             "ASR Worker 启动（资源自适应并发，安全上限: %s）",
             settings.ASR_DYNAMIC_MAX_TASKS,
@@ -232,7 +238,9 @@ class AsrWorker:
 
         while self._running:
             try:
+                write_asr_worker_heartbeat(self._worker_id)
                 await self._poll_tasks()
+                write_asr_worker_heartbeat(self._worker_id)
                 # AI 复盘由详情页手动生成，知识库和 DataEase 由后台自动同步。
                 await asyncio.sleep(self._poll_interval)
             except asyncio.CancelledError:
@@ -240,6 +248,29 @@ class AsrWorker:
             except Exception as e:
                 logger.error(f"ASR Worker 异常: {e}")
                 await asyncio.sleep(10)
+
+    async def shutdown(self) -> None:
+        """停止领取任务，并尽量在外部强制清理期限前结束全部子协程。"""
+        self._running = False
+        pending_tasks = [
+            task
+            for task in (*self._active_tasks, *self._active_postprocess_tasks)
+            if not task.done()
+        ]
+        for task in pending_tasks:
+            task.cancel()
+        if pending_tasks:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*pending_tasks, return_exceptions=True), timeout=6
+                )
+            except asyncio.TimeoutError:
+                logger.warning("ASR 子任务未在 6 秒内退出，将由运行时控制器清理")
+        async with self._audio_buffer_lock:
+            buffers = list(self._audio_buffers.values())
+            self._audio_buffers.clear()
+        for buffer in buffers:
+            await buffer.stop()
 
     def _recover_stale_tasks(self, recover_all: bool = False):
         """回收重启遗留或心跳超时的任务，并保留已完成分片。"""
@@ -1910,6 +1941,7 @@ async def main():
 
     def _signal_handler():
         logger.info("收到停止信号，ASR Worker 关闭中...")
+        write_asr_worker_heartbeat(worker._worker_id, status="stopping")
         stop_event.set()
 
     loop = asyncio.get_event_loop()
@@ -1928,9 +1960,12 @@ async def main():
         await worker_task
     except asyncio.CancelledError:
         pass
-
-    await ws_manager.close()
-    logger.info("ASR Worker 已退出")
+    try:
+        await worker.shutdown()
+        await ws_manager.close()
+        logger.info("ASR Worker 已退出")
+    finally:
+        clear_asr_worker_heartbeat(os.getpid())
 
 
 if __name__ == "__main__":

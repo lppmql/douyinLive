@@ -54,9 +54,29 @@ const props = defineProps<{
   /** 自动任务排序及当前人工独占状态 */
   dispatchPolicy: Api.Douyin.TranscriptDispatchPolicy | null;
   dispatchPolicyLoading: boolean;
+  /** 模型与 Worker 的真实运行状态。 */
+  asrRuntime: Api.Douyin.AsrControlStatus | null;
+  runtimeActionLoading: boolean;
+}>();
+
+const emit = defineEmits<{
+  'update:selectedSessionId': [value: number];
+  startTranscription: [];
+  runAiPipeline: [];
+  copyFullText: [];
+  queueAnchorBatch: [];
+  openTaskDrawer: [status?: string];
+  openSessionDetail: [sessionId: number];
+  changeDispatchOrder: [value: Api.Douyin.TranscriptDispatchPolicy['order_mode']];
+  restoreRuntime: [];
+  releaseTaskPriority: [task: Api.Douyin.TranscriptTask];
+  stopTask: [task: Api.Douyin.TranscriptTask];
 }>();
 
 const taskBusy = computed(() => ['queued', 'processing'].includes(props.selectedTask?.status || ''));
+const manualPriorityActive = computed(
+  () => taskBusy.value && props.selectedTask?.queue_source === 'manual' && !props.selectedTask.cancel_requested
+);
 const failureInfo = computed(() => getTranscriptFailureInfo(props.selectedTask?.error_message));
 const canStartTranscription = computed(() => {
   if (!props.selectedSessionId) return false;
@@ -80,22 +100,30 @@ const versionTone = computed<'success' | 'warning' | 'default'>(() => {
   return 'default';
 });
 
-defineEmits<{
-  'update:selectedSessionId': [value: number];
-  startTranscription: [];
-  runAiPipeline: [];
-  copyFullText: [];
-  queueAnchorBatch: [];
-  openTaskDrawer: [status?: string];
-  openSessionDetail: [sessionId: number];
-  changeDispatchOrder: [value: Api.Douyin.TranscriptDispatchPolicy['order_mode']];
-}>();
-
 const dispatchOrderOptions = [
   { label: '智能排序（推荐）', value: 'smart' },
   { label: '最新场次优先', value: 'latest' },
   { label: '最早排队优先', value: 'fifo' }
 ];
+
+const moreActionOptions = computed(() => [
+  { label: '补排今日自动任务', key: 'batch' },
+  { label: '查看全部任务', key: 'tasks' },
+  { label: '打开场次详情', key: 'detail', disabled: !props.selectedSessionId },
+  {
+    label: props.selectedTask?.cancel_requested ? '正在安全停止' : '安全停止本场任务',
+    key: 'stop',
+    disabled: !taskBusy.value || Boolean(props.selectedTask?.cancel_requested)
+  }
+]);
+
+function handleMoreAction(key: string) {
+  if (key === 'batch') return emit('queueAnchorBatch');
+  if (key === 'tasks') return emit('openTaskDrawer');
+  if (key === 'detail' && props.selectedSessionId) return emit('openSessionDetail', props.selectedSessionId);
+  if (key === 'stop' && props.selectedTask) return emit('stopTask', props.selectedTask);
+  return undefined;
+}
 
 /** 渲染场次下拉选项（带主播头像） */
 function renderSessionLabel(option: SelectOption) {
@@ -141,7 +169,7 @@ function renderSessionLabel(option: SelectOption) {
           :render-label="renderSessionLabel"
           :loading="loading"
           placeholder="搜索主播、日期或场次"
-          @update:value="(val: number) => $emit('update:selectedSessionId', val)"
+          @update:value="(val: number) => emit('update:selectedSessionId', val)"
         />
         <div
           v-if="selectedSession"
@@ -171,16 +199,26 @@ function renderSessionLabel(option: SelectOption) {
       </div>
 
       <div class="business-toolbar__actions self-end">
-        <NButton secondary :disabled="!selectedSessionId || !hasContent" @click="$emit('copyFullText')">
+        <NButton secondary :disabled="!selectedSessionId || !hasContent" @click="emit('copyFullText')">
           <template #icon><SvgIcon icon="mdi:content-copy" /></template>
           复制当前版本
         </NButton>
         <NButton
+          v-if="manualPriorityActive && selectedTask"
+          type="warning"
+          secondary
+          :loading="queueLoading"
+          @click="emit('releaseTaskPriority', selectedTask)"
+        >
+          取消人工优先
+        </NButton>
+        <NButton
+          v-else
           type="primary"
           secondary
           :disabled="!canStartTranscription"
           :loading="queueLoading"
-          @click="$emit('startTranscription')"
+          @click="emit('startTranscription')"
         >
           {{ transcriptionActionLabel }}
         </NButton>
@@ -191,7 +229,7 @@ function renderSessionLabel(option: SelectOption) {
                 type="primary"
                 :disabled="!canRunAiPipeline"
                 :loading="aiLoading"
-                @click="$emit('runAiPipeline')"
+                @click="emit('runAiPipeline')"
               >
                 生成复盘并入库
               </NButton>
@@ -201,19 +239,8 @@ function renderSessionLabel(option: SelectOption) {
         </NTooltip>
         <NDropdown
           trigger="click"
-          :options="[
-            { label: '补排今日自动任务', key: 'batch' },
-            { label: '查看全部任务', key: 'tasks' },
-            { label: '打开场次详情', key: 'detail', disabled: !selectedSessionId }
-          ]"
-          @select="
-            key =>
-              key === 'batch'
-                ? $emit('queueAnchorBatch')
-                : key === 'tasks'
-                  ? $emit('openTaskDrawer')
-                  : selectedSessionId && $emit('openSessionDetail', selectedSessionId)
-          "
+          :options="moreActionOptions"
+          @select="handleMoreAction"
         >
           <NButton quaternary :loading="batchLoading" aria-label="更多话术操作">
             <SvgIcon icon="mdi:dots-horizontal" />
@@ -221,6 +248,27 @@ function renderSessionLabel(option: SelectOption) {
         </NDropdown>
       </div>
     </div>
+
+    <NAlert
+      v-if="asrRuntime && !asrRuntime.worker_healthy"
+      class="mt-16px"
+      type="error"
+      :bordered="false"
+      show-icon
+      aria-live="assertive"
+    >
+      <template #header>转写服务没有有效心跳</template>
+      {{ asrRuntime.message || '当前任务会保留在队列，恢复 Worker 后从断点继续。' }}
+      <NButton
+        text
+        type="error"
+        class="ml-8px"
+        :loading="runtimeActionLoading"
+        @click="emit('restoreRuntime')"
+      >
+        立即恢复
+      </NButton>
+    </NAlert>
 
     <div
       class="mt-16px grid items-center gap-12px rounded-10px bg-gray-50 px-14px py-12px dark:bg-white/4 md:grid-cols-[minmax(0,1fr)_250px]"
@@ -241,7 +289,7 @@ function renderSessionLabel(option: SelectOption) {
         :options="dispatchOrderOptions"
         :loading="dispatchPolicyLoading"
         aria-label="自动转写排序"
-        @update:value="value => $emit('changeDispatchOrder', value)"
+        @update:value="value => emit('changeDispatchOrder', value)"
       />
     </div>
 

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.api.v1.ws import build_full_transcript_text, get_full_text, serialize_transcription_task
+from app.services.asr import control
 from app.services.asr.control import _worker_pids
 
 
@@ -26,6 +27,42 @@ def test_worker_pids_excludes_pgrep_and_shell_commands():
             errors="replace",
             check=False,
         )
+
+
+def test_runtime_status_requires_fresh_worker_heartbeat(tmp_path, monkeypatch):
+    heartbeat_path = tmp_path / "asr-worker.json"
+    clock = [1000.0]
+    monkeypatch.setattr(control, "ASR_RUNTIME_STATE_PATH", heartbeat_path)
+    monkeypatch.setattr(control.os, "getpid", lambda: 321)
+    monkeypatch.setattr(control.time, "time", lambda: clock[0])
+    monkeypatch.setattr(control, "_worker_pids", lambda: [321])
+    monkeypatch.setattr(control, "_engine_running", lambda: True)
+
+    control.write_asr_worker_heartbeat("asr:test:321")
+    healthy = control.get_asr_runtime_status()
+    assert healthy["enabled"] is True
+    assert healthy["worker_healthy"] is True
+    assert healthy["worker_status"] == "healthy"
+
+    clock[0] += control.ASR_WORKER_HEARTBEAT_TIMEOUT_SECONDS + 1
+    stale = control.get_asr_runtime_status()
+    assert stale["enabled"] is False
+    assert stale["worker_running"] is True
+    assert stale["worker_healthy"] is False
+    assert stale["worker_status"] == "stale"
+
+
+def test_terminate_worker_force_kills_process_that_ignores_sigterm(monkeypatch):
+    worker_snapshots = iter(([456], [456], []))
+    signals = []
+    monkeypatch.setattr(control, "_worker_pids", lambda: next(worker_snapshots))
+    monkeypatch.setattr(control.os, "kill", lambda pid, sig: signals.append((pid, sig)))
+    monkeypatch.setattr(control, "clear_asr_worker_heartbeat", lambda: None)
+
+    forced = control._terminate_worker_processes(grace_seconds=0)
+
+    assert forced == [456]
+    assert signals == [(456, control.signal.SIGTERM), (456, control.signal.SIGKILL)]
 
 
 def test_transcription_task_payload_keeps_real_failure_context():

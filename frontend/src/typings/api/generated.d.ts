@@ -1534,6 +1534,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/transcripts/tasks/{task_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop Transcription Task
+         * @description 停止单个转写任务，已完成分片不会删除。
+         */
+        post: operations["stop_transcription_task_api_v1_transcripts_tasks__task_id__stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transcripts/tasks/{task_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Transcription Task
+         * @description 把失败或暂停任务从断点重新加入自动队列，并确保 Worker 正常。
+         */
+        post: operations["retry_transcription_task_api_v1_transcripts_tasks__task_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/transcripts/tasks/{task_id}/release-priority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release Transcription Manual Priority
+         * @description 取消人工独占，当前任务不断点、不删除，恢复自动排序。
+         */
+        post: operations["release_transcription_manual_priority_api_v1_transcripts_tasks__task_id__release_priority_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/transcripts/tasks/failed": {
         parameters: {
             query?: never;
@@ -3323,6 +3383,20 @@ export interface components {
             engine_running: boolean;
             /** Worker Running */
             worker_running: boolean;
+            /**
+             * Worker Healthy
+             * @default false
+             */
+            worker_healthy: boolean;
+            /**
+             * Worker Status
+             * @default stopped
+             */
+            worker_status: string;
+            /** Worker Heartbeat At */
+            worker_heartbeat_at?: number | null;
+            /** Worker Heartbeat Age Seconds */
+            worker_heartbeat_age_seconds?: number | null;
             /**
              * Queued Count
              * @default 0
@@ -7269,6 +7343,24 @@ export interface components {
             created_at: string;
         };
         /**
+         * TranscriptTaskActionResponse
+         * @description 单任务停止、重试或取消人工优先的统一结果。
+         */
+        TranscriptTaskActionResponse: {
+            /** Task Id */
+            task_id: number;
+            /** Status */
+            status: string;
+            /**
+             * Queue Source
+             * @default auto
+             * @enum {string}
+             */
+            queue_source: "auto" | "manual";
+            /** Message */
+            message: string;
+        };
+        /**
          * TranscriptTaskDeleteResponse
          * @description DELETE /transcripts/tasks/{task_id}
          */
@@ -7316,6 +7408,13 @@ export interface components {
              * @default 50
              */
             priority: number;
+            /** Queue Position */
+            queue_position?: number | null;
+            /**
+             * Cancel Requested
+             * @default false
+             */
+            cancel_requested: boolean;
             /**
              * Anchor Name
              * @default 未知主播
@@ -7417,6 +7516,16 @@ export interface components {
              * @default 0
              */
             failed: number;
+            /**
+             * Cancelled
+             * @default 0
+             */
+            cancelled: number;
+            /**
+             * Needs Attention
+             * @default 0
+             */
+            needs_attention: number;
         };
         /**
          * UnifiedTaskResponse
@@ -10535,6 +10644,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TranscriptTaskOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stop_transcription_task_api_v1_transcripts_tasks__task_id__stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptTaskActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_transcription_task_api_v1_transcripts_tasks__task_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptTaskActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    release_transcription_manual_priority_api_v1_transcripts_tasks__task_id__release_priority_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TranscriptTaskActionResponse"];
                 };
             };
             /** @description Validation Error */

@@ -65,6 +65,8 @@ class TranscriptTaskStatusResponse(BaseModel):
     processing: int = 0
     completed: int = 0
     failed: int = 0
+    cancelled: int = 0
+    needs_attention: int = 0
 
 
 class TranscriptTaskOut(BaseModel):
@@ -76,6 +78,8 @@ class TranscriptTaskOut(BaseModel):
     task_type: str = "offline"
     queue_source: Literal["auto", "manual"] = "auto"
     priority: int = 50
+    queue_position: int | None = None
+    cancel_requested: bool = False
     anchor_name: str = "未知主播"
     session_title: str = "未命名直播场次"
     live_start_time: datetime | None = None
@@ -135,6 +139,15 @@ class TranscriptTaskDeleteResponse(BaseModel):
     task_id: int
     deleted: bool = True
     message: str = ""
+
+
+class TranscriptTaskActionResponse(BaseModel):
+    """单任务停止、重试或取消人工优先的统一结果。"""
+
+    task_id: int
+    status: str
+    queue_source: Literal["auto", "manual"] = "auto"
+    message: str
 
 
 class TranscriptFailedClearResponse(BaseModel):

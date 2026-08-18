@@ -12,20 +12,35 @@ defineOptions({ name: 'TranscriptTaskCards' });
 defineProps<{
   /** 4 张卡片的数据配置 */
   taskStatusCards: TaskStatusCard[];
-  /** 失败任务数（用于显示警告条） */
-  failedCount: number;
+  /** 失败和已暂停任务总数。 */
+  attentionCount: number;
+  /** ASR 模型与 Worker 的真实运行状态。 */
+  asrRuntime: Api.Douyin.AsrControlStatus | null;
+  runtimeActionLoading: boolean;
 }>();
 
 defineEmits<{
   /** 点击卡片 → 打开任务抽屉，传状态值用于预筛选 */
   openDrawer: [status: string];
+  restoreRuntime: [];
 }>();
 </script>
 
 <template>
   <NCard :bordered="false" class="card-wrapper" size="small" title="全部转写任务">
     <template #header-extra>
-      <NButton text type="primary" @click="$emit('openDrawer', 'all')">查看任务明细</NButton>
+      <div class="flex items-center gap-10px">
+        <NTag
+          v-if="asrRuntime"
+          size="small"
+          :type="asrRuntime.worker_healthy ? 'success' : 'error'"
+          :bordered="false"
+          round
+        >
+          {{ asrRuntime.worker_healthy ? '转写服务正常' : '转写服务异常' }}
+        </NTag>
+        <NButton text type="primary" @click="$emit('openDrawer', 'all')">查看任务明细</NButton>
+      </div>
     </template>
     <div class="grid grid-cols-2 gap-8px lg:grid-cols-4">
       <button
@@ -45,14 +60,27 @@ defineEmits<{
             <strong class="text-20px">{{ card.value }}</strong>
           </div>
           <div class="mt-2px truncate text-11px text-gray-400">
-            {{ card.status === 'processing' && card.maxProgress != null ? `最快 ${card.maxProgress}%` : '点击筛选查看' }}
+            {{ card.status === 'processing' && card.maxProgress != null ? `最高进度 ${card.maxProgress}%` : '点击筛选查看' }}
           </div>
         </div>
       </button>
     </div>
-    <NAlert v-if="failedCount" class="mt-10px" type="warning" :bordered="false" show-icon>
-      {{ failedCount }} 场需要处理；系统会刷新回放地址并从失败分片续传。
-      <NButton text type="warning" class="ml-8px" @click="$emit('openDrawer', 'failed')">立即处理</NButton>
+    <NAlert v-if="asrRuntime && !asrRuntime.worker_healthy" class="mt-10px" type="error" :bordered="false" show-icon>
+      <template #header>转写 Worker 没有有效心跳</template>
+      {{ asrRuntime.message || '排队任务暂时不会推进，系统正在自动恢复。' }}
+      <NButton
+        text
+        type="error"
+        class="ml-8px"
+        :loading="runtimeActionLoading"
+        @click="$emit('restoreRuntime')"
+      >
+        立即恢复
+      </NButton>
+    </NAlert>
+    <NAlert v-if="attentionCount" class="mt-10px" type="warning" :bordered="false" show-icon>
+      {{ attentionCount }} 场已暂停或失败；已完成话术和分片均已保留。
+      <NButton text type="warning" class="ml-8px" @click="$emit('openDrawer', 'attention')">立即处理</NButton>
     </NAlert>
   </NCard>
 </template>

@@ -17,10 +17,10 @@ import {
 } from '@/utils/transcriptHelpers';
 import { computed } from 'vue';
 import { useAuthStore } from '@/store/modules/auth';
+import type { TranscriptTaskFilter } from '../composables/useTranscriptWorkbench';
 
 defineOptions({ name: 'TranscriptTaskDrawer' });
 
-type TaskStatus = Api.Douyin.TranscriptTask['status'];
 const authStore = useAuthStore();
 /** 删除会清理技术任务数据，因此只给超级管理员显示。 */
 const canDeleteTasks = computed(() => authStore.userInfo.roles.some(role => role === 'R_SUPER' || role === 'R_ADMIN'));
@@ -29,31 +29,51 @@ const canRetryTasks = computed(() =>
   authStore.userInfo.roles.some(role => ['R_SUPER', 'R_ADMIN', 'R_USER'].includes(role))
 );
 
-defineProps<{
-  /** 抽屉是否可见 */
+const props = defineProps<{
   visible: boolean;
-  /** 当前筛选状态 */
-  taskFilter: TaskStatus | 'all';
-  /** 筛选后的任务列表 */
+  taskFilter: TranscriptTaskFilter;
   filteredTasks: Api.Douyin.TranscriptTask[];
-  /** 是否正在清空全部失败任务 */
   clearFailedLoading?: boolean;
-  /** 正在删除中的任务 ID 集合 */
   deletingTaskIds?: Set<number>;
+  taskActionIds: Set<number>;
+  asrRuntime: Api.Douyin.AsrControlStatus | null;
+  dispatchPolicy: Api.Douyin.TranscriptDispatchPolicy | null;
 }>();
 
 defineEmits<{
   'update:visible': [value: boolean];
-  'update:taskFilter': [value: TaskStatus | 'all'];
+  'update:taskFilter': [value: TranscriptTaskFilter];
   selectTask: [task: Api.Douyin.TranscriptTask];
   openSessionDetail: [sessionId: number];
   /** 删除单条失败任务 */
   deleteTask: [task: Api.Douyin.TranscriptTask];
   /** 保留已完成分片并重试失败任务 */
   retryTask: [task: Api.Douyin.TranscriptTask];
+  prioritizeTask: [task: Api.Douyin.TranscriptTask];
+  releaseTaskPriority: [task: Api.Douyin.TranscriptTask];
+  stopTask: [task: Api.Douyin.TranscriptTask];
   /** 一键清空全部失败任务 */
   clearFailedTasks: [];
 }>();
+
+function formatWaitingTime(task: Api.Douyin.TranscriptTask): string {
+  if (task.status !== 'queued' || !task.created_at) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(task.created_at).getTime()) / 1000));
+  if (seconds < 60) return `已等待 ${seconds} 秒`;
+  if (seconds < 3600) return `已等待 ${Math.floor(seconds / 60)} 分钟`;
+  return `已等待 ${(seconds / 3600).toFixed(1)} 小时`;
+}
+
+function blockedReason(task: Api.Douyin.TranscriptTask): string {
+  if (task.cancel_requested) return '正在等待当前音频安全点后停止';
+  if (task.status !== 'queued') return '';
+  if (!props.asrRuntime?.worker_healthy) return '转写 Worker 无有效心跳，等待自动恢复';
+  if (task.queue_source === 'auto' && props.dispatchPolicy?.manual_active) {
+    return `等待人工优先场次 #${props.dispatchPolicy.manual_session_id} 完成`;
+  }
+  return task.queue_position ? `当前排队第 ${task.queue_position} 位` : '等待可用转写通道';
+}
+
 </script>
 
 <template>
@@ -69,21 +89,26 @@ defineEmits<{
         <NRadioGroup
           :value="taskFilter"
           size="small"
-          @update:value="(val: string) => $emit('update:taskFilter', val as TaskStatus | 'all')"
+          @update:value="(val: string) => $emit('update:taskFilter', val as TranscriptTaskFilter)"
         >
           <NRadioButton value="all">全部</NRadioButton>
           <NRadioButton value="queued">等待</NRadioButton>
           <NRadioButton value="processing">处理中</NRadioButton>
           <NRadioButton value="completed">完成</NRadioButton>
-          <NRadioButton value="failed">失败</NRadioButton>
+          <NRadioButton value="attention">暂停/失败</NRadioButton>
         </NRadioGroup>
         <span class="text-12px text-gray-500">{{ filteredTasks.length }} 个真实任务</span>
       </div>
 
-      <!-- 清空全部失败任务（仅筛选到「失败」tab 时显示） -->
-      <div v-if="canDeleteTasks && taskFilter === 'failed' && filteredTasks.length > 0" class="mb-12px">
+      <NAlert v-if="asrRuntime && !asrRuntime.worker_healthy" type="error" :bordered="false" class="mb-12px">
+        <template #header>任务队列暂时无法推进</template>
+        {{ asrRuntime.message }}
+      </NAlert>
+
+      <!-- 清空失败和暂停任务（仅筛选到“暂停/失败”时显示） -->
+      <div v-if="canDeleteTasks && taskFilter === 'attention' && filteredTasks.length > 0" class="mb-12px">
         <NButton type="error" size="small" :loading="clearFailedLoading" @click="$emit('clearFailedTasks')">
-          清空全部失败任务（{{ filteredTasks.length }} 条）
+          清空暂停/失败任务（{{ filteredTasks.length }} 条）
         </NButton>
       </div>
 
@@ -105,6 +130,10 @@ defineEmits<{
                   {{ task.task_type === 'realtime' ? '实时滚动转写' : '结束后转写' }}
                 </NTag>
                 <NTag v-if="task.queue_source === 'manual'" size="tiny" type="warning" :bordered="false">人工独占</NTag>
+                <NTag v-if="task.cancel_requested" size="tiny" type="error" :bordered="false">停止中</NTag>
+                <NTag v-if="task.status === 'queued' && task.queue_position" size="tiny" :bordered="false">
+                  排队第 {{ task.queue_position }} 位
+                </NTag>
                 <NTag
                   v-if="task.status === 'completed'"
                   size="tiny"
@@ -123,6 +152,13 @@ defineEmits<{
                 <span>{{ formatDuration(task.live_duration_seconds) }}</span>
                 <span>{{ task.segment_count }} 个分段</span>
                 <span v-if="task.retry_count">已尝试 {{ task.retry_count }}/{{ task.max_retries }} 次</span>
+                <span v-if="formatWaitingTime(task)">{{ formatWaitingTime(task) }}</span>
+              </div>
+              <div
+                v-if="blockedReason(task)"
+                class="mt-7px rounded-6px bg-gray-50 px-8px py-5px text-11px text-gray-500 dark:bg-white/5"
+              >
+                {{ blockedReason(task) }}
               </div>
               <!-- 转写进度条（仅处理中的任务显示） -->
               <div v-if="task.status === 'processing' && task.total_chunks > 0" class="mt-8px">
@@ -146,25 +182,56 @@ defineEmits<{
             <div class="flex shrink-0 flex-col gap-6px">
               <NButton size="tiny" secondary @click="$emit('selectTask', task)">查看话术</NButton>
               <NButton
+                v-if="canRetryTasks && ['queued', 'processing'].includes(task.status) && task.queue_source === 'auto'"
+                size="tiny"
+                type="warning"
+                secondary
+                :loading="taskActionIds.has(task.id)"
+                @click="$emit('prioritizeTask', task)"
+              >
+                人工优先
+              </NButton>
+              <NButton
+                v-if="canRetryTasks && ['queued', 'processing'].includes(task.status) && task.queue_source === 'manual'"
+                size="tiny"
+                type="warning"
+                secondary
+                :loading="taskActionIds.has(task.id)"
+                @click="$emit('releaseTaskPriority', task)"
+              >
+                取消优先
+              </NButton>
+              <NButton
+                v-if="canRetryTasks && ['queued', 'processing'].includes(task.status)"
+                size="tiny"
+                type="error"
+                secondary
+                :disabled="task.cancel_requested"
+                :loading="taskActionIds.has(task.id)"
+                @click="$emit('stopTask', task)"
+              >
+                {{ task.cancel_requested ? '停止中' : '安全停止' }}
+              </NButton>
+              <NButton
                 v-if="canRetryTasks && (task.status === 'failed' || task.status === 'cancelled')"
                 size="tiny"
                 type="primary"
                 secondary
+                :loading="taskActionIds.has(task.id)"
                 @click="$emit('retryTask', task)"
               >
                 断点重试
               </NButton>
+              <NButton
+                v-if="canDeleteTasks && (task.status === 'failed' || task.status === 'cancelled')"
+                size="tiny"
+                type="error"
+                :loading="deletingTaskIds?.has(task.id)"
+                @click="$emit('deleteTask', task)"
+              >
+                删除
+              </NButton>
             </div>
-            <!-- 失败/已取消任务显示删除按钮 -->
-            <NButton
-              v-if="canDeleteTasks && (task.status === 'failed' || task.status === 'cancelled')"
-              size="tiny"
-              type="error"
-              :loading="deletingTaskIds?.has(task.id)"
-              @click="$emit('deleteTask', task)"
-            >
-              删除
-            </NButton>
           </div>
           <!-- 转写错误 -->
           <NAlert

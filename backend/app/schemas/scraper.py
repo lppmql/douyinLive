@@ -160,6 +160,10 @@ class AsrControlResponse(BaseModel):
     enabled: bool
     engine_running: bool
     worker_running: bool
+    worker_healthy: bool = False
+    worker_status: str = "stopped"
+    worker_heartbeat_at: float | None = None
+    worker_heartbeat_age_seconds: float | None = None
     queued_count: int = 0
     processing_count: int = 0
     postprocess_pending_count: int = 0

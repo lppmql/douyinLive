@@ -190,7 +190,13 @@ export function buildTaskStatusCards(
     { status: 'queued', label: '等待转写', value: taskSummary.queued || 0, icon: 'mdi:clock-outline', tone: 'info' },
     { status: 'processing', label: '正在转写', value: taskSummary.processing || 0, icon: 'mdi:waveform', tone: 'warning', maxProgress },
     { status: 'completed', label: '转写完成', value: taskSummary.completed || 0, icon: 'mdi:check-circle-outline', tone: 'success' },
-    { status: 'failed', label: '需要处理', value: taskSummary.failed || 0, icon: 'mdi:alert-circle-outline', tone: 'error' }
+    {
+      status: 'attention',
+      label: '暂停或失败',
+      value: taskSummary.needs_attention || 0,
+      icon: 'mdi:alert-circle-outline',
+      tone: 'error'
+    }
   ];
 }
 

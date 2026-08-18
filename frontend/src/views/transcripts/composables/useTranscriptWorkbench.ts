@@ -27,7 +27,12 @@ import {
   runTranscriptAiPipeline,
   deleteTranscriptTask,
   clearFailedTranscriptTasks,
-  updateTranscriptDispatchPolicy
+  updateTranscriptDispatchPolicy,
+  fetchAsrControlStatus,
+  setAsrControl,
+  stopTranscriptTask,
+  retryTranscriptTask,
+  releaseTranscriptTaskPriority
 } from '@/service/api/douyin';
 import { unwrapServiceData } from '@/utils/service';
 import { sortSessionsByLatest } from '@/utils/analysisHelpers';
@@ -46,8 +51,7 @@ import { useTranscriptRealtime } from '@/hooks/business/transcript-realtime';
 // ========== 类型别名 ==========
 
 type TaskStatus = Api.Douyin.TranscriptTask['status'];
-/** 顶部汇总接口只展示四种主状态；cancelled 仍会出现在任务明细中。 */
-type TaskSummaryStatus = 'queued' | 'processing' | 'completed' | 'failed';
+export type TranscriptTaskFilter = TaskStatus | 'all' | 'attention';
 
 function taskPriority(task: Api.Douyin.TranscriptTask): [number, number, number] {
   const statusPriority: Record<string, number> = {
@@ -85,11 +89,13 @@ export function useTranscriptWorkbench() {
   const segments = ref<Api.Douyin.TranscriptSegment[]>([]);
   const fullText = ref('');
   const selectedSessionId = ref<number | null>(null);
-  const taskSummary = ref<Record<TaskSummaryStatus, number>>({
+  const taskSummary = ref<Api.Douyin.TranscriptTaskSummary>({
     queued: 0,
     processing: 0,
     completed: 0,
-    failed: 0
+    failed: 0,
+    cancelled: 0,
+    needs_attention: 0
   });
   const loading = ref(true);
   const refreshing = ref(false);
@@ -97,7 +103,7 @@ export function useTranscriptWorkbench() {
   const batchLoading = ref(false);
   const aiLoading = ref(false);
   const taskDrawerVisible = ref(false);
-  const taskFilter = ref<TaskStatus | 'all'>('all');
+  const taskFilter = ref<TranscriptTaskFilter>('all');
   const searchKeyword = ref('');
   const categoryFilter = ref<string | null>(null);
   const viewMode = ref<'segments' | 'full'>('segments');
@@ -106,6 +112,9 @@ export function useTranscriptWorkbench() {
   const pageActive = ref(true);
   const dispatchPolicy = ref<Api.Douyin.TranscriptDispatchPolicy | null>(null);
   const dispatchPolicyLoading = ref(false);
+  const asrRuntime = ref<Api.Douyin.AsrControlStatus | null>(null);
+  const runtimeActionLoading = ref(false);
+  const taskActionIds = ref(new Set<number>());
 
   // ── 实时话术 WebSocket ──
 
@@ -244,7 +253,11 @@ export function useTranscriptWorkbench() {
 
   /** 按状态筛选后的任务列表 */
   const filteredTasks = computed(() =>
-    taskFilter.value === 'all' ? tasks.value : tasks.value.filter(item => item.status === taskFilter.value)
+    taskFilter.value === 'all'
+      ? tasks.value
+      : taskFilter.value === 'attention'
+        ? tasks.value.filter(item => ['failed', 'cancelled'].includes(item.status))
+        : tasks.value.filter(item => item.status === taskFilter.value)
   );
 
   /** 是否有话术内容（控制复制按钮等 UI 状态） */
@@ -260,14 +273,16 @@ export function useTranscriptWorkbench() {
 
   /** 加载任务汇总 + 任务列表 */
   async function loadTaskData() {
-    const [summaryResponse, taskResponse, policyResponse] = await Promise.all([
+    const [summaryResponse, taskResponse, policyResponse, runtimeResponse] = await Promise.all([
       fetchTranscriptTaskStatus(),
       fetchTranscriptTasks(),
-      fetchTranscriptDispatchPolicy()
+      fetchTranscriptDispatchPolicy(),
+      fetchAsrControlStatus()
     ]);
     taskSummary.value = unwrapServiceData(summaryResponse, '话术任务汇总读取失败');
     tasks.value = unwrapServiceData(taskResponse, '话术任务读取失败');
     dispatchPolicy.value = unwrapServiceData(policyResponse, '话术调度策略读取失败');
+    asrRuntime.value = unwrapServiceData(runtimeResponse, 'ASR 运行状态读取失败');
   }
 
   /** 加载单个场次的话术数据（分段 + 全文） */
@@ -434,7 +449,7 @@ export function useTranscriptWorkbench() {
   }
 
   /** 打开任务抽屉（可选按状态预筛选） */
-  function openTaskDrawer(status: TaskStatus | 'all' = 'all') {
+  function openTaskDrawer(status: TranscriptTaskFilter = 'all') {
     taskFilter.value = status;
     taskDrawerVisible.value = true;
   }
@@ -447,10 +462,91 @@ export function useTranscriptWorkbench() {
 
   /** 从任务抽屉直接断点重试指定失败场次。 */
   async function retryTask(task: Api.Douyin.TranscriptTask) {
+    taskActionIds.value.add(task.id);
+    taskActionIds.value = new Set(taskActionIds.value);
+    try {
+      const response = await retryTranscriptTask(task.id);
+      const data = unwrapServiceData(response, '断点重试响应为空');
+      message.success(data.message);
+      await loadTaskData();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '断点重试失败');
+    } finally {
+      taskActionIds.value.delete(task.id);
+      taskActionIds.value = new Set(taskActionIds.value);
+    }
+  }
+
+  /** 从任务抽屉直接把某一场设为人工独占。 */
+  async function prioritizeTask(task: Api.Douyin.TranscriptTask) {
+    taskActionIds.value.add(task.id);
+    taskActionIds.value = new Set(taskActionIds.value);
     selectedSessionId.value = task.session_id;
-    await startTranscription();
-    taskDrawerVisible.value = false;
-    await loadTranscript(task.session_id);
+    try {
+      await startTranscription();
+    } finally {
+      taskActionIds.value.delete(task.id);
+      taskActionIds.value = new Set(taskActionIds.value);
+    }
+  }
+
+  /** 取消人工独占但不中止任务，其他场次立即恢复自动调度。 */
+  async function releaseTaskPriority(task: Api.Douyin.TranscriptTask) {
+    if (task.session_id === selectedSessionId.value) queueLoading.value = true;
+    taskActionIds.value.add(task.id);
+    taskActionIds.value = new Set(taskActionIds.value);
+    try {
+      const response = await releaseTranscriptTaskPriority(task.id);
+      const data = unwrapServiceData(response, '取消人工优先响应为空');
+      message.success(data.message);
+      await loadTaskData();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '取消人工优先失败');
+    } finally {
+      queueLoading.value = false;
+      taskActionIds.value.delete(task.id);
+      taskActionIds.value = new Set(taskActionIds.value);
+    }
+  }
+
+  /** 安全停止任务，处理中任务会在当前音频安全点结束。 */
+  function stopTask(task: Api.Douyin.TranscriptTask) {
+    dialog.warning({
+      title: '停止转写任务',
+      content: `确定停止任务 #${task.id} 吗？已经完成的分片和话术会保留。`,
+      positiveText: '安全停止',
+      negativeText: '继续转写',
+      onPositiveClick: async () => {
+        taskActionIds.value.add(task.id);
+        taskActionIds.value = new Set(taskActionIds.value);
+        try {
+          const response = await stopTranscriptTask(task.id);
+          const data = unwrapServiceData(response, '停止任务响应为空');
+          message.success(data.message);
+          await loadTaskData();
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '停止任务失败');
+        } finally {
+          taskActionIds.value.delete(task.id);
+          taskActionIds.value = new Set(taskActionIds.value);
+        }
+      }
+    });
+  }
+
+  /** 页面检测到无心跳时，手动触发同一套僵死清理与恢复逻辑。 */
+  async function restoreAsrRuntime() {
+    runtimeActionLoading.value = true;
+    try {
+      const response = await setAsrControl(true);
+      asrRuntime.value = unwrapServiceData(response, 'ASR 恢复响应为空');
+      message.success('ASR 转写服务已恢复，排队任务将从断点继续');
+      await loadTaskData();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'ASR 转写服务恢复失败');
+    } finally {
+      runtimeActionLoading.value = false;
+    }
   }
 
   /** 正在删除中的任务 ID 集合（用于按钮 loading 状态） */
@@ -488,14 +584,14 @@ export function useTranscriptWorkbench() {
 
   /** 一键清空全部失败任务（带确认弹窗） */
   function clearFailedTasks() {
-    const failedCount = taskSummary.value.failed;
-    if (!failedCount) {
-      message.info('当前没有失败任务需要清理');
+    const attentionCount = taskSummary.value.needs_attention;
+    if (!attentionCount) {
+      message.info('当前没有暂停或失败任务需要清理');
       return;
     }
     dialog.warning({
       title: '确认清空',
-      content: `确定要清空全部 ${failedCount} 条失败任务吗？关联的话术分段也会被清理，此操作不可撤销。`,
+      content: `确定要清空全部 ${attentionCount} 条暂停或失败任务吗？关联的话术分段也会被清理，此操作不可撤销。`,
       positiveText: '全部清空',
       negativeText: '取消',
       onPositiveClick: async () => {
@@ -592,6 +688,9 @@ export function useTranscriptWorkbench() {
     livePreview,
     dispatchPolicy,
     dispatchPolicyLoading,
+    asrRuntime,
+    runtimeActionLoading,
+    taskActionIds,
     // 计算属性
     selectedSession,
     selectedTask,
@@ -628,6 +727,10 @@ export function useTranscriptWorkbench() {
     openTaskDrawer,
     selectTask,
     retryTask,
+    prioritizeTask,
+    releaseTaskPriority,
+    stopTask,
+    restoreAsrRuntime,
     openSessionDetail,
     // 删除相关
     deletingTaskIds,

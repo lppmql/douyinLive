@@ -10,7 +10,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
@@ -29,6 +29,12 @@ from app.services.asr.queue import (
     get_active_manual_task,
     get_dispatch_policy,
     queue_session_transcription,
+    list_all_queued_task_ids_for_display,
+)
+from app.services.asr.task_control import (
+    release_manual_priority,
+    request_stop_asr_task,
+    retry_asr_task,
 )
 from app.services.asr.websocket_manager import ws_manager
 from app.services.transcript_compliance import (
@@ -43,6 +49,7 @@ from app.schemas.transcript import (
     TranscriptSegmentOut,
     TranscriptFullTextResponse,
     TranscriptTaskDeleteResponse,
+    TranscriptTaskActionResponse,
     TranscriptFailedClearResponse,
     TranscriptDispatchPolicyOut,
     TranscriptDispatchPolicyUpdate,
@@ -92,6 +99,7 @@ def serialize_transcription_task(
     session: LiveSession,
     segment_count: int,
     chunk_counts: tuple[int, int] = (0, 0),
+    queue_position: int | None = None,
 ) -> dict:
     """统一任务明细结构，页面只展示数据库中的真实任务与场次信息。
 
@@ -112,6 +120,10 @@ def serialize_transcription_task(
         "task_type": task.task_type or "offline",
         "queue_source": getattr(task, "queue_source", None) or "auto",
         "priority": 50 if getattr(task, "priority", None) is None else task.priority,
+        "queue_position": queue_position,
+        "cancel_requested": task.status
+        in {TaskStatus.QUEUED, TaskStatus.PROCESSING}
+        and getattr(task, "cancel_requested_at", None) is not None,
         "anchor_name": session.anchor_name or "未知主播",
         "session_title": session.session_title or "未命名直播场次",
         "live_start_time": session.live_start_time,
@@ -283,17 +295,26 @@ def queue_transcription_by_anchor(
 @rest_router.get("/tasks/status", response_model=TranscriptTaskStatusResponse)
 def get_transcription_task_status(db: Session = Depends(get_db)):
     """返回话术任务汇总，供页面显示真实排队进度。"""
-    counts = {TaskStatus.QUEUED: 0, "processing": 0, "completed": 0, "failed": 0}
+    counts = {
+        TaskStatus.QUEUED: 0,
+        TaskStatus.PROCESSING: 0,
+        TaskStatus.COMPLETED: 0,
+        TaskStatus.FAILED: 0,
+        TaskStatus.CANCELLED: 0,
+    }
     for status, count in db.query(AsrTask.status, func.count(AsrTask.id)).group_by(
         AsrTask.status
     ):
         counts[status or "failed"] = count
+    counts["needs_attention"] = counts[TaskStatus.FAILED] + counts[TaskStatus.CANCELLED]
     return counts
 
 
 @rest_router.get("/tasks", response_model=list[TranscriptTaskOut])
 def list_transcription_tasks(
-    status: str | None = Query(None, pattern="^(queued|processing|completed|failed)$"),
+    status: str | None = Query(
+        None, pattern="^(queued|processing|completed|failed|cancelled)$"
+    ),
     limit: int = Query(100, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
@@ -325,6 +346,15 @@ def list_transcription_tasks(
         query = query.filter(AsrTask.status == status)
     rows = (
         query.order_by(
+            case(
+                (AsrTask.status == TaskStatus.PROCESSING, 0),
+                (AsrTask.status == TaskStatus.QUEUED, 1),
+                (
+                    AsrTask.status.in_([TaskStatus.FAILED, TaskStatus.CANCELLED]),
+                    2,
+                ),
+                else_=3,
+            ),
             LiveSession.live_start_time.desc(),
             LiveSession.id.desc(),
             AsrTask.id.desc(),
@@ -335,15 +365,83 @@ def list_transcription_tasks(
     # 批量查询分片进度（一次 SQL 查所有任务的分片数，避免 N+1 问题）
     task_ids = [task.id for task, _, _ in rows]
     chunk_counts_map = get_chunk_counts(db, task_ids)
+    queue_order = list_all_queued_task_ids_for_display(db, 10000)
+    queue_positions = {
+        task_id: position for position, task_id in enumerate(queue_order, start=1)
+    }
     return [
         serialize_transcription_task(
             task,
             session,
             segment_count,
             chunk_counts=chunk_counts_map.get(task.id, (0, 0)),
+            queue_position=queue_positions.get(task.id),
         )
         for task, session, segment_count in rows
     ]
+
+
+@rest_router.post(
+    "/tasks/{task_id}/stop", response_model=TranscriptTaskActionResponse
+)
+def stop_transcription_task(task_id: int, db: Session = Depends(get_db)):
+    """停止单个转写任务，已完成分片不会删除。"""
+    try:
+        task = request_stop_asr_task(db, task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "queue_source": task.queue_source,
+        "message": "停止请求已提交，已完成分片会保留",
+    }
+
+
+@rest_router.post(
+    "/tasks/{task_id}/retry", response_model=TranscriptTaskActionResponse
+)
+def retry_transcription_task(task_id: int, db: Session = Depends(get_db)):
+    """把失败或暂停任务从断点重新加入自动队列，并确保 Worker 正常。"""
+    try:
+        task = retry_asr_task(db, task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    from app.services.asr.control import start_asr_runtime
+
+    start_asr_runtime()
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "queue_source": task.queue_source,
+        "message": "任务已从断点重新排队",
+    }
+
+
+@rest_router.post(
+    "/tasks/{task_id}/release-priority",
+    response_model=TranscriptTaskActionResponse,
+)
+def release_transcription_manual_priority(
+    task_id: int, db: Session = Depends(get_db)
+):
+    """取消人工独占，当前任务不断点、不删除，恢复自动排序。"""
+    try:
+        task = release_manual_priority(db, task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "queue_source": task.queue_source,
+        "message": "已取消人工优先，全部任务恢复自动排序",
+    }
 
 
 @rest_router.delete("/tasks/failed", response_model=TranscriptFailedClearResponse)

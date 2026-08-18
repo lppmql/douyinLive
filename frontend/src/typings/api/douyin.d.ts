@@ -752,6 +752,10 @@ declare namespace Api {
       enabled: boolean;
       engine_running: boolean;
       worker_running: boolean;
+      worker_healthy: boolean;
+      worker_status: 'healthy' | 'stale' | 'stopped' | string;
+      worker_heartbeat_at: number | null;
+      worker_heartbeat_age_seconds: number | null;
       queued_count: number;
       processing_count: number;
       postprocess_pending_count: number;
@@ -844,6 +848,8 @@ declare namespace Api {
       task_type: 'realtime' | 'offline';
       queue_source: 'auto' | 'manual';
       priority: number;
+      queue_position: number | null;
+      cancel_requested: boolean;
       anchor_name: string;
       session_title: string;
       live_start_time: string | null;
@@ -868,6 +874,22 @@ declare namespace Api {
       completed_chunks: number;
       /** 转写进度百分比 0-100 */
       progress_percent: number;
+    }
+
+    interface TranscriptTaskSummary {
+      queued: number;
+      processing: number;
+      completed: number;
+      failed: number;
+      cancelled: number;
+      needs_attention: number;
+    }
+
+    interface TranscriptTaskAction {
+      task_id: number;
+      status: TranscriptTask['status'];
+      queue_source: TranscriptTask['queue_source'];
+      message: string;
     }
 
     interface TranscriptDispatchPolicy {

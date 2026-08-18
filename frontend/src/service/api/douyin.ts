@@ -357,7 +357,7 @@ export function queueTranscriptsByAnchor(perAnchor = 1) {
 }
 
 export function fetchTranscriptTaskStatus() {
-  return backendRequest<Record<'queued' | 'processing' | 'completed' | 'failed', number>>({
+  return backendRequest<Api.Douyin.TranscriptTaskSummary>({
     url: `${API_PREFIX}/transcripts/tasks/status`
   });
 }
@@ -383,6 +383,30 @@ export function clearFailedTranscriptTasks() {
   return backendRequest<{ deleted_count: number; message: string }>({
     url: `${API_PREFIX}/transcripts/tasks/failed`,
     method: 'DELETE'
+  });
+}
+
+/** 安全停止转写任务，保留已经完成的分片。 */
+export function stopTranscriptTask(taskId: number) {
+  return backendRequest<Api.Douyin.TranscriptTaskAction>({
+    url: `${API_PREFIX}/transcripts/tasks/${taskId}/stop`,
+    method: 'POST'
+  });
+}
+
+/** 将失败或暂停任务恢复到自动队列，并从断点继续。 */
+export function retryTranscriptTask(taskId: number) {
+  return backendRequest<Api.Douyin.TranscriptTaskAction>({
+    url: `${API_PREFIX}/transcripts/tasks/${taskId}/retry`,
+    method: 'POST'
+  });
+}
+
+/** 取消人工独占，保留当前任务并恢复全局自动排序。 */
+export function releaseTranscriptTaskPriority(taskId: number) {
+  return backendRequest<Api.Douyin.TranscriptTaskAction>({
+    url: `${API_PREFIX}/transcripts/tasks/${taskId}/release-priority`,
+    method: 'POST'
   });
 }
 

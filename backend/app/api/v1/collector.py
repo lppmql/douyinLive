@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal, get_db
 from app.core.config import settings
-from app.models.live_sessions import LiveSession
 from app.models.base import utc_now_naive
 from app.models.scraper_accounts import ScraperAccount
 from app.models.scraper_tasks import ScraperTask
@@ -39,7 +38,7 @@ from app.services.collector.browser import STORAGE_DIR
 from app.services.collector.manual_collect import collect_all
 from app.services.collector.scheduler import scheduler_manager
 from app.services.asr.control import get_asr_runtime_status
-from app.services.asr.queue import queue_session_transcription
+from app.services.asr.task_control import request_stop_asr_task, retry_asr_task
 from app.services.collector.log_service import serialize_collector_logs
 from app.services.tasks.control import collector_task_control
 from app.services.tasks.status import build_control_center
@@ -212,22 +211,12 @@ def stop_queue_task(source: str, task_id: int, db: Session = Depends(get_db)):
 
     if source != "asr":
         raise HTTPException(404, "任务来源不存在")
-    task = db.get(AsrTask, task_id)
-    if not task:
-        raise HTTPException(404, "ASR 任务不存在")
-    if task.status == TaskStatus.QUEUED:
-        task.status = TaskStatus.CANCELLED
-        task.cancel_requested_at = datetime.utcnow()
-        task.completed_at = datetime.utcnow()
-        task.error_message = "用户在执行前停止任务"
-    elif task.status == TaskStatus.PROCESSING:
-        task.cancel_requested_at = datetime.utcnow()
-        task.error_message = "正在等待当前音频处理安全点后停止"
-    else:
-        raise HTTPException(409, "只有排队中或转写中的任务可以停止")
-    touch_task(task)
-    db.commit()
-    publish_task_event("asr", task, "cancel_requested", {})
+    try:
+        task = request_stop_asr_task(db, task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return _task_action_payload(db, source, task.id, "ASR 停止请求已提交")
 
 
@@ -243,21 +232,12 @@ def retry_queue_task(source: str, task_id: int, db: Session = Depends(get_db)):
 
     if source != "asr":
         raise HTTPException(404, "任务来源不存在")
-    task = db.get(AsrTask, task_id)
-    if not task:
-        raise HTTPException(404, "ASR 任务不存在")
-    if task.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED):
-        raise HTTPException(409, "只有失败或已停止的 ASR 任务可以重试")
-    session = db.get(LiveSession, task.session_id)
-    if not session:
-        raise HTTPException(404, "ASR 任务关联的直播场次不存在")
     try:
-        retried_task, _created = queue_session_transcription(db, session)
-        db.commit()
+        retried_task = retry_asr_task(db, task_id)
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
-        db.rollback()
         raise HTTPException(409, str(exc)) from exc
-    publish_task_event("asr", retried_task, "retried", {"session_id": session.id})
     return _task_action_payload(db, source, retried_task.id, "ASR 任务已从断点重新排队")
 
 
@@ -394,13 +374,17 @@ def _asr_control_response(db: Session, runtime: dict, message: str = "") -> AsrC
         enabled=runtime["enabled"],
         engine_running=runtime["engine_running"],
         worker_running=runtime["worker_running"],
+        worker_healthy=runtime.get("worker_healthy", False),
+        worker_status=runtime.get("worker_status", "stopped"),
+        worker_heartbeat_at=runtime.get("worker_heartbeat_at"),
+        worker_heartbeat_age_seconds=runtime.get("worker_heartbeat_age_seconds"),
         queued_count=queued_count,
         processing_count=processing_count,
         postprocess_pending_count=postprocess_counts[TaskStatus.PENDING],
         postprocess_processing_count=postprocess_counts["processing"],
         postprocess_completed_count=postprocess_counts[TaskStatus.COMPLETED],
         postprocess_failed_count=postprocess_counts[TaskStatus.FAILED],
-        message=message,
+        message=message or runtime.get("message", ""),
     )
 
 

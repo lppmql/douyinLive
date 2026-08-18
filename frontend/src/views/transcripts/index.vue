@@ -39,6 +39,9 @@ const {
   wsConnected,
   dispatchPolicy,
   dispatchPolicyLoading,
+  asrRuntime,
+  runtimeActionLoading,
+  taskActionIds,
   // 统计卡片
   readableSegments,
   totalCharacters,
@@ -80,6 +83,10 @@ const {
   openTaskDrawer,
   selectTask,
   retryTask,
+  prioritizeTask,
+  releaseTaskPriority,
+  stopTask,
+  restoreAsrRuntime,
   openSessionDetail,
   changeDispatchOrder
 } = wb;
@@ -113,6 +120,8 @@ const {
       :ws-connected="wsConnected"
       :dispatch-policy="dispatchPolicy"
       :dispatch-policy-loading="dispatchPolicyLoading"
+      :asr-runtime="asrRuntime"
+      :runtime-action-loading="runtimeActionLoading"
       @update:selected-session-id="(val: number) => loadTranscript(val)"
       @start-transcription="startTranscription"
       @run-ai-pipeline="runAiPipeline"
@@ -121,6 +130,9 @@ const {
       @open-task-drawer="(status: any) => openTaskDrawer(status)"
       @open-session-detail="openSessionDetail"
       @change-dispatch-order="changeDispatchOrder"
+      @restore-runtime="restoreAsrRuntime"
+      @release-task-priority="releaseTaskPriority"
+      @stop-task="stopTask"
     />
 
     <!-- 2. 当前场次数据质量 -->
@@ -137,8 +149,11 @@ const {
     <!-- 3. 全局任务队列压缩为一行，不再遮挡当前场次内容。 -->
     <TranscriptTaskCards
       :task-status-cards="taskStatusCards"
-      :failed-count="taskSummary.failed"
+      :attention-count="taskSummary.needs_attention"
+      :asr-runtime="asrRuntime"
+      :runtime-action-loading="runtimeActionLoading"
       @open-drawer="(status: any) => openTaskDrawer(status)"
+      @restore-runtime="restoreAsrRuntime"
     />
 
     <!-- 4. 话术内容工作区（主内容 + 业务结构 + 时间导航） -->
@@ -174,12 +189,18 @@ const {
       :filtered-tasks="filteredTasks"
       :clear-failed-loading="clearFailedLoading"
       :deleting-task-ids="deletingTaskIds"
+      :task-action-ids="taskActionIds"
+      :asr-runtime="asrRuntime"
+      :dispatch-policy="dispatchPolicy"
       @update:visible="taskDrawerVisible = $event"
       @update:task-filter="taskFilter = $event"
       @select-task="selectTask"
       @open-session-detail="openSessionDetail"
       @delete-task="deleteTask"
       @retry-task="retryTask"
+      @prioritize-task="prioritizeTask"
+      @release-task-priority="releaseTaskPriority"
+      @stop-task="stopTask"
       @clear-failed-tasks="clearFailedTasks"
     />
   </NSpace>

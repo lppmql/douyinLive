@@ -245,6 +245,12 @@ def list_queued_task_ids_latest_first(db: Session, limit: int) -> list[int]:
     if active_manual:
         return [active_manual.id] if active_manual.status == TaskStatus.QUEUED else []
 
+    return list_all_queued_task_ids_for_display(db, limit)
+
+
+def list_all_queued_task_ids_for_display(db: Session, limit: int) -> list[int]:
+    """返回完整排队顺序；页面可展示被人工独占暂时阻塞的自动任务。"""
+
     order_mode = get_dispatch_policy(db).order_mode
     if order_mode == "fifo":
         secondary_order = (AsrTask.created_at.asc(), AsrTask.id.asc())
@@ -272,6 +278,7 @@ def list_queued_task_ids_latest_first(db: Session, limit: int) -> list[int]:
             )
             .with_entities(AsrTask.id)
             .order_by(
+                case((AsrTask.queue_source == "manual", 0), else_=1),
                 case((LiveSession.live_status == "live", 0), else_=1),
                 *secondary_order,
             )
