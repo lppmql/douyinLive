@@ -36,6 +36,14 @@ def replay_path(session_id: int) -> Path:
     return session_video_dir(session_id) / "replay.mp4"
 
 
+def replay_file_is_usable(path: Path) -> bool:
+    """与下载完成校验使用同一标准，拒绝空文件和小于 1MB 的残缺回放。"""
+    try:
+        return path.is_file() and path.stat().st_size > MIN_REPLAY_BYTES
+    except OSError:
+        return False
+
+
 def _safe_ffmpeg_headers(headers: dict | None) -> list[str]:
     return [
         f"{key}: {value}"
@@ -45,12 +53,16 @@ def _safe_ffmpeg_headers(headers: dict | None) -> list[str]:
 
 
 def build_replay_download_command(
-    stream_url: str, headers: dict | None = None, output: str = ""
+    stream_url: str,
+    headers: dict | None = None,
+    output: str = "",
+    *,
+    ffmpeg_binary: str = "ffmpeg",
 ) -> list[str]:
     """构建回放下载 ffmpeg 命令：流拷贝（不重编码），HLS AAC 转 MP4 兼容。"""
     safe_headers = _safe_ffmpeg_headers(headers)
     command = [
-        "ffmpeg",
+        ffmpeg_binary,
         "-y",
         "-hide_banner",
         "-loglevel",
@@ -87,7 +99,17 @@ def build_replay_download_command(
 def _download_replay(stream_url: str, headers: dict | None, output_path: Path) -> None:
     """执行 ffmpeg 下载，超时或失败抛异常由调用方兜底。"""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    command = build_replay_download_command(stream_url, headers, str(output_path))
+    # 延迟导入避免 ffmpeg_clipper -> replay_downloader 的模块循环；下载和渲染
+    # 统一使用刚通过 libass 能力检查的项目内/配置 ffmpeg，不再依赖系统 PATH。
+    from app.services.clips.ffmpeg_clipper import require_clip_ffmpeg
+
+    binary = require_clip_ffmpeg()
+    command = build_replay_download_command(
+        stream_url,
+        headers,
+        str(output_path),
+        ffmpeg_binary=str(binary),
+    )
     try:
         result = subprocess.run(
             command,
@@ -116,11 +138,18 @@ def _pick_stream_source(db: Session, session_id: int) -> StreamSource | None:
     return (
         db.query(StreamSource)
         .filter(
-            StreamSource.session_id == session_id, StreamSource.m3u8_url.isnot(None)
+            StreamSource.session_id == session_id,
+            StreamSource.m3u8_url.isnot(None),
+            StreamSource.m3u8_url != "",
         )
         .order_by(status_rank, StreamSource.fetched_at.desc())
         .first()
     )
+
+
+def has_replay_source(db: Session, session_id: int) -> bool:
+    """判断数据库中是否存在非空的真实回放流源。"""
+    return _pick_stream_source(db, session_id) is not None
 
 
 def ensure_replay_file(db: Session, session_id: int) -> Path:
@@ -129,7 +158,7 @@ def ensure_replay_file(db: Session, session_id: int) -> Path:
     幂等：文件已存在且大于 1MB 直接复用（手动重剪不重复下载）。
     """
     existing = replay_path(session_id)
-    if existing.exists() and existing.stat().st_size > MIN_REPLAY_BYTES:
+    if replay_file_is_usable(existing):
         return existing
 
     source = _pick_stream_source(db, session_id)
@@ -160,7 +189,7 @@ def ensure_replay_file(db: Session, session_id: int) -> Path:
                 ) from exc
             _download_replay(refreshed["stream_url"], headers, existing)
 
-    if not existing.exists() or existing.stat().st_size <= MIN_REPLAY_BYTES:
+    if not replay_file_is_usable(existing):
         raise RuntimeError("回放下载完成但文件不完整（小于 1MB）")
     logger.info(
         "回放就绪 session=%s size=%.1fMB",

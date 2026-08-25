@@ -395,6 +395,7 @@ def test_manual_retry_resets_failed_task_and_keeps_completed_chunks():
     assert task.retry_count == 0
     assert task.stream_id == 9
     assert task.error_message is None
+    assert task.postprocess_status == "skipped"
     assert failed_chunk.status == "pending"
     assert failed_chunk.retry_count == 0
     assert completed_chunk.status == "completed"

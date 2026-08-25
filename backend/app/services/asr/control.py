@@ -172,6 +172,11 @@ def _engine_running() -> bool:
         return False
 
 
+def is_asr_engine_running() -> bool:
+    """供剪辑前置检查复用实际端口探测，不触发 Docker 启停操作。"""
+    return _engine_running()
+
+
 def get_asr_runtime_status() -> dict:
     worker_pids = _worker_pids()
     engine_running = _engine_running()

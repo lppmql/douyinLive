@@ -61,8 +61,13 @@ def _supports_subtitles(binary: Path) -> bool:
         return False
 
 
-def _require_ffmpeg() -> Path:
+def require_clip_ffmpeg() -> Path:
+    """返回支持 libass 的 ffmpeg；首次失败时清缓存重查，兼容运行中安装。"""
     binary = resolve_clip_ffmpeg()
+    if not binary:
+        resolve_clip_ffmpeg.cache_clear()
+        _supports_subtitles.cache_clear()
+        binary = resolve_clip_ffmpeg()
     if not binary:
         raise RuntimeError(
             "找不到支持字幕烧录的 ffmpeg（需要 libass）。"
@@ -70,6 +75,11 @@ def _require_ffmpeg() -> Path:
             "或设置环境变量 CLIP_FFMPEG_BIN 指向带字幕支持的 ffmpeg"
         )
     return binary
+
+
+def _require_ffmpeg() -> Path:
+    """保留模块内部旧调用名，统一走公开的前置检查。"""
+    return require_clip_ffmpeg()
 
 
 def _escape_filter_path(path: Path) -> str:

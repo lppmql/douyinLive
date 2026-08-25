@@ -28,6 +28,22 @@ for command_name in docker python3 node pnpm ffmpeg curl; do
   has_command "$command_name"
 done
 
+# 剪辑烧录字幕不只需要 ffmpeg 命令，还必须编译 subtitles/ass（libass）滤镜。
+CLIP_FFMPEG_VALUE="$(env_value CLIP_FFMPEG_BIN)"
+CLIP_FFMPEG_CANDIDATE=""
+if [ -n "$CLIP_FFMPEG_VALUE" ] && [ -x "$CLIP_FFMPEG_VALUE" ]; then
+  CLIP_FFMPEG_CANDIDATE="$CLIP_FFMPEG_VALUE"
+elif [ -x "$ROOT_DIR/.runtime/ffmpeg/ffmpeg" ]; then
+  CLIP_FFMPEG_CANDIDATE="$ROOT_DIR/.runtime/ffmpeg/ffmpeg"
+elif command -v ffmpeg >/dev/null 2>&1; then
+  CLIP_FFMPEG_CANDIDATE="$(command -v ffmpeg)"
+fi
+if [ -n "$CLIP_FFMPEG_CANDIDATE" ] && "$CLIP_FFMPEG_CANDIDATE" -hide_banner -filters 2>/dev/null | grep -Eq '(^|[[:space:]])(subtitles|ass)([[:space:]]|$)'; then
+  pass "AI 剪辑 ffmpeg 支持 libass 字幕烧录"
+else
+  warn "AI 剪辑缺少支持 libass 的 ffmpeg；生成剪辑会在调用 AI 前停止"
+fi
+
 if [ -f "$ROOT_DIR/.env" ]; then
   pass ".env 已存在"
   DB_USER_VALUE="$(env_value DB_USER)"

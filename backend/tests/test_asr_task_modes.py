@@ -211,10 +211,10 @@ def test_offline_segments_use_hidden_staging_type():
     assert segment_type_for_task("offline") == "asr_offline_pending"
 
 
-def test_only_offline_final_enters_ai_postprocess():
-    """实时初稿只供直播观察，评分、复盘和知识库必须等待下播终稿。"""
+def test_asr_tasks_skip_retired_postprocess_state():
+    """ASR 只负责转写，实时初稿和离线终稿都不再进入旧自动后处理。"""
     assert postprocess_status_for_task("realtime") == "skipped"
-    assert postprocess_status_for_task("offline") == "pending"
+    assert postprocess_status_for_task("offline") == "skipped"
 
 
 def test_offline_prepare_keeps_old_full_text_until_atomic_switch(db):

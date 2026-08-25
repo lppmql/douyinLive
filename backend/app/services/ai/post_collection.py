@@ -1,14 +1,11 @@
-"""采集后处理编排：真实话术 -> AI 复盘 -> 知识库 -> DataEase -> AI 自动剪辑。"""
+"""人工复盘编排：真实话术 -> 评分 -> AI 复盘 -> 知识库 -> DataEase。"""
 
 import logging
 from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
-from app.core.logger import logger as core_logger
 from app.models.live_sessions import LiveSession
-from app.models.stream_sources import StreamSource
 from app.models.transcript_segments import TranscriptSegment
 from app.services.ai.kb_service import sync_session_to_kb
 from app.services.ai.review_service import generate_findings
@@ -17,38 +14,6 @@ from app.services.ai.unified_review import generate_unified_review
 from app.services.sync import sync_session
 
 logger = logging.getLogger(__name__)
-
-
-def _queue_clip_automatically(session_id: int) -> None:
-    """离线终稿完成后自动排队 AI 剪辑（仅当场次有回放流源，且开关开启）。"""
-    if not settings.CLIP_AUTO_GENERATE:
-        return
-    from app.core.database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        has_source = (
-            db.query(StreamSource.id)
-            .filter(StreamSource.session_id == session_id)
-            .first()
-            is not None
-        )
-        if not has_source:
-            logger.info("场次 %s 无回放流源，跳过自动剪辑", session_id)
-            return
-        from app.services.tasks.control import collector_task_control
-
-        task, created = collector_task_control.enqueue(
-            "clip", {"session_id": session_id}
-        )
-        if created:
-            core_logger.info(
-                "离线终稿完成，自动排队 AI 剪辑 session=%s task=%s", session_id, task.id
-            )
-    except Exception as exc:  # noqa: BLE001 - 自动剪辑失败不应阻断主后处理链
-        logger.warning("自动排队 AI 剪辑失败 session=%s: %s", session_id, exc)
-    finally:
-        db.close()
 
 
 def _run_stage(
@@ -67,7 +32,7 @@ def _run_stage(
 
 
 def process_session_post_collection(db: Session, session_id: int) -> dict[str, Any]:
-    """幂等处理单场直播；复盘或知识库失败时返回可重试状态。"""
+    """人工触发并幂等处理单场直播；本函数不会自动创建剪辑任务。"""
     session = db.get(LiveSession, session_id)
     if not session:
         raise ValueError("直播场次不存在")
@@ -132,7 +97,4 @@ def process_session_post_collection(db: Session, session_id: int) -> dict[str, A
         knowledge,
         errors,
     )
-    # 后处理链全部完成（或至少复盘与知识库成功）后，自动触发 AI 剪辑。
-    if not critical_errors:
-        _queue_clip_automatically(session_id)
     return result

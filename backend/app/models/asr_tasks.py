@@ -72,7 +72,9 @@ class AsrTask(Base, TimestampMixin):
     postprocess_status = Column(
         String(20),
         nullable=False,
-        default="pending",
+        default="skipped",
+        # 数据库列注释保留历史状态枚举，避免为兼容字段获取元数据锁；
+        # 应用层新建任务仍通过 client default 固定写入 skipped。
         comment="后处理状态: pending/processing/completed/failed/skipped",
     )
     postprocess_started_at = Column(

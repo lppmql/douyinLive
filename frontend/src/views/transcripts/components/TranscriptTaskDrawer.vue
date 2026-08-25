@@ -9,8 +9,6 @@
 import {
   getStatusLabel,
   getStatusType,
-  getPostprocessLabel,
-  getPostprocessType,
   formatDate,
   formatDuration,
   getTranscriptFailureInfo
@@ -134,14 +132,6 @@ function blockedReason(task: Api.Douyin.TranscriptTask): string {
                 <NTag v-if="task.status === 'queued' && task.queue_position" size="tiny" :bordered="false">
                   排队第 {{ task.queue_position }} 位
                 </NTag>
-                <NTag
-                  v-if="task.status === 'completed'"
-                  size="tiny"
-                  :type="getPostprocessType(task.postprocess_status)"
-                  :bordered="false"
-                >
-                  {{ getPostprocessLabel(task.postprocess_status) }}
-                </NTag>
                 <span class="text-11px text-gray-400">任务 #{{ task.id }}</span>
               </div>
               <!-- 场次标题 -->
@@ -257,10 +247,6 @@ function blockedReason(task: Api.Douyin.TranscriptTask): string {
               </details>
               <NButton text type="error" @click="$emit('openSessionDetail', task.session_id)">检查场次回放</NButton>
             </div>
-          </NAlert>
-          <!-- 复盘入库错误 -->
-          <NAlert v-if="task.postprocess_error" type="warning" :bordered="false" class="mt-10px">
-            {{ task.postprocess_error }}
           </NAlert>
         </NCard>
       </div>

@@ -86,7 +86,7 @@ class TranscriptTaskOut(BaseModel):
     live_duration_seconds: int = 0
     segment_count: int = 0
     error_message: str | None = None
-    postprocess_status: str = TaskStatus.PENDING
+    postprocess_status: str = "skipped"
     postprocess_error: str | None = None
     postprocess_result: Any | None = None
     postprocess_attempt_count: int = 0

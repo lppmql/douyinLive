@@ -24,7 +24,7 @@ class TaskStatus(str, Enum):
     - ScraperTask.status:            PENDING / RUNNING / COMPLETED / FAILED
     - ScraperTask.detail (via LiveSession): PENDING / RETRYABLE / COMPLETED / FAILED
     - AsrTask.status:                QUEUED / PROCESSING / COMPLETED / FAILED
-    - AsrTask.postprocess_status:    PENDING / PROCESSING / COMPLETED / FAILED
+    - AsrTask.postprocess_status:    SKIPPED（旧状态仍兼容历史记录）
     - AsrAudioChunk.status:          PENDING / PROCESSING / COMPLETED / FAILED
     - TranscriptSegment.asr_status:  PENDING / PROCESSING / COMPLETED / FAILED
     - LiveSession.detail_collection_status: PENDING / RETRYABLE（也在历史查询中使用）

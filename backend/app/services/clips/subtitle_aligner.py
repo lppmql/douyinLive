@@ -209,11 +209,15 @@ def enrich_records_with_precise_subtitles(
     records: list[ClipClip],
     *,
     should_cancel: CancellationChecker | None = None,
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """补齐记录的逐字字幕并写回源话术；失败片段保留可见的估算降级标记。"""
-    cache: dict[tuple[int | None, float, float], dict[str, Any] | None] = {}
+    cache: dict[
+        tuple[int | None, float, float],
+        tuple[dict[str, Any] | None, dict[str, Any] | None],
+    ] = {}
     aligned_count = 0
     fallback_count = 0
+    fallback_warnings: list[dict[str, Any]] = []
     for record in records:
         _ensure_running(should_cancel)
         updated_segments: list[dict[str, Any]] = []
@@ -233,9 +237,11 @@ def enrich_records_with_precise_subtitles(
                     "words": list(source.word_timestamps_json),
                     "subtitle_precision": source.timestamp_source or "funasr_exact",
                 }
+                warning = None
             elif key in cache:
-                aligned = cache[key]
+                aligned, warning = cache[key]
             else:
+                warning = None
                 try:
                     aligned = align_replay_segment(
                         record.session_id,
@@ -248,6 +254,13 @@ def enrich_records_with_precise_subtitles(
                     raise
                 except Exception as exc:  # noqa: BLE001 - 单段失败需降级，其它成片继续
                     aligned = None
+                    warning = {
+                        "transcript_segment_id": segment_id,
+                        "start": round(start, 3),
+                        "end": round(end, 3),
+                        "error_code": type(exc).__name__,
+                        "message": str(exc)[:200],
+                    }
                     logger.warning(
                         "成片 #%s 片段 %.1f-%.1f 秒精确字幕对齐失败，保留估算字幕: %s",
                         record.id,
@@ -255,7 +268,23 @@ def enrich_records_with_precise_subtitles(
                         end,
                         exc,
                     )
-                cache[key] = aligned
+                if aligned is None and warning is None:
+                    warning = {
+                        "transcript_segment_id": segment_id,
+                        "start": round(start, 3),
+                        "end": round(end, 3),
+                        "error_code": "empty_alignment_result",
+                        "message": "FunASR 未返回对齐结果",
+                    }
+                elif aligned and not aligned.get("words"):
+                    warning = {
+                        "transcript_segment_id": segment_id,
+                        "start": round(start, 3),
+                        "end": round(end, 3),
+                        "error_code": "missing_word_timestamps",
+                        "message": "FunASR 未返回逐字时间戳",
+                    }
+                cache[key] = (aligned, warning)
             _ensure_running(should_cancel)
             if aligned and aligned.get("words"):
                 # 剪辑任务不能静默改写已经参与 AI 复盘、知识库和全文缓存的权威话术。
@@ -292,6 +321,8 @@ def enrich_records_with_precise_subtitles(
                 updated_segments.append(merged)
                 aligned_count += 1
             else:
+                if warning:
+                    fallback_warnings.append({"clip_id": record.id, **warning})
                 updated_segments.append(
                     {
                         **segment,
@@ -306,4 +337,5 @@ def enrich_records_with_precise_subtitles(
     return {
         "aligned_segment_count": aligned_count,
         "fallback_segment_count": fallback_count,
+        "fallback_warnings": fallback_warnings,
     }

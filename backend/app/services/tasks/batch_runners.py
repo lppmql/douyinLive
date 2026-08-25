@@ -579,6 +579,10 @@ def run_clip_batch(
     completed = 0
     failed = 0
     rendered_total = 0
+    selected_clip_total = 0
+    failed_clip_total = 0
+    warning_total = 0
+    subtitle_alignment_warning_total = 0
     errors: list[dict[str, Any]] = []
     report("clip", 0, 0, total, f"发现 {total} 场待剪辑", {"pending_count": total})
 
@@ -601,22 +605,56 @@ def run_clip_batch(
                 if options.get("clip_order")
                 else None,
             )
-            completed += 1
-            rendered_total += int(result.get("rendered_count") or 0)
-            add_collector_log(
-                db,
-                task_id=task_id,
-                session=session,
-                level="info",
-                stage="clip",
-                event_type="session_clip_completed",
-                message=(
-                    f"主播 {session.anchor_name or session.anchor_nickname or '未知主播'}，"
-                    f"场次 #{session.id} AI 剪辑完成，成功 {result.get('rendered_count')} 条"
-                ),
-                details=result,
+            rendered_count = int(result.get("rendered_count") or 0)
+            selected_clip_count = int(result.get("selected_count") or 0)
+            failed_clip_count = int(result.get("failed_count") or 0)
+            alignment_warning_count = int(
+                result.get("subtitle_alignment_warning_count") or 0
             )
-            db.commit()
+            selected_clip_total += selected_clip_count
+            rendered_total += rendered_count
+            failed_clip_total += failed_clip_count
+            subtitle_alignment_warning_total += alignment_warning_count
+            has_warning = failed_clip_count > 0 or alignment_warning_count > 0
+            if not clip_session_render_succeeded(result):
+                failed += 1
+                message = (
+                    f"AI 已选出 {selected_clip_count} 条候选，但没有任何成片渲染成功"
+                )
+                errors.append({"session_id": session_id, "message": message})
+                add_collector_log(
+                    db,
+                    task_id=task_id,
+                    session=session,
+                    level="error",
+                    stage="clip",
+                    event_type="session_clip_failed",
+                    message=f"场次 #{session_id} AI 剪辑失败：{message}",
+                    details=result,
+                )
+                db.commit()
+            else:
+                completed += 1
+                warning_total += int(has_warning)
+                add_collector_log(
+                    db,
+                    task_id=task_id,
+                    session=session,
+                    level="warning" if has_warning else "info",
+                    stage="clip",
+                    event_type=(
+                        "session_clip_completed_with_warnings"
+                        if has_warning
+                        else "session_clip_completed"
+                    ),
+                    message=(
+                        f"主播 {session.anchor_name or session.anchor_nickname or '未知主播'}，"
+                        f"场次 #{session.id} AI 剪辑完成，成功 {rendered_count} 条，"
+                        f"成片失败 {failed_clip_count} 条，字幕降级 {alignment_warning_count} 段"
+                    ),
+                    details=result,
+                )
+                db.commit()
         except TaskCancellationRequested:
             # 用户取消/安全关机：交给 control.py 统一标记 CANCELLED，不记失败
             db.rollback()
@@ -651,6 +689,8 @@ def run_clip_batch(
                 "completed_count": completed,
                 "failed_count": failed,
                 "rendered_count": rendered_total,
+                "failed_clip_count": failed_clip_total,
+                "warning_count": warning_total,
             },
         )
 
@@ -659,9 +699,18 @@ def run_clip_batch(
         "completed_count": completed,
         "failed_count": failed,
         "rendered_count": rendered_total,
+        "selected_clip_count": selected_clip_total,
+        "failed_clip_count": failed_clip_total,
+        "warning_count": warning_total,
+        "subtitle_alignment_warning_count": subtitle_alignment_warning_total,
         "errors": errors[:20],
         "storage_cleanup": storage_cleanup,
     }
     if total and completed == 0:
         raise TaskBatchFailed("待处理场次的 AI 剪辑全部失败", result)
     return result
+
+
+def clip_session_render_succeeded(result: dict[str, Any]) -> bool:
+    """只有至少一条真实成片完成渲染，场次级剪辑才算成功。"""
+    return int(result.get("rendered_count") or 0) > 0

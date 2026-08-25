@@ -13,6 +13,7 @@ from app.models.leads import Lead
 from app.models.live_metrics import LiveMetric
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
+from app.models.stream_sources import StreamSource
 from app.models.transcript_segments import TranscriptSegment
 from app.services.clips import clip_service, ffmpeg_clipper
 from app.services.clips.multisignal import build_multisignal_map
@@ -124,6 +125,79 @@ def test_multisignal_score_uses_real_comments_metrics_hooks_and_attributed_lead(
     assert evidence["hook_strength"] == "strong"
     assert evidence["related_lead_count"] == 1
     assert evidence["metric_deltas"]["like_count"] == 80
+
+
+def test_clip_preflight_stops_before_ai_when_funasr_is_required(
+    db, tmp_path, monkeypatch
+):
+    """历史话术缺逐字时间戳且 FunASR 未启动时，应在 AI 选段前停止。"""
+    session = _session(db)
+    db.add(
+        TranscriptSegment(
+            session_id=session.id,
+            segment_start=10,
+            segment_end=20,
+            text_content="真实终稿话术",
+            asr_status="completed",
+            segment_type="asr_offline",
+            word_timestamps_json=None,
+        )
+    )
+    db.add(
+        StreamSource(
+            session_id=session.id,
+            m3u8_url="https://example.invalid/real-replay.m3u8",
+            status="active",
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(clip_service, "require_clip_ffmpeg", lambda: tmp_path / "ffmpeg")
+    monkeypatch.setattr(clip_service, "replay_path", lambda _session_id: tmp_path / "missing.mp4")
+    monkeypatch.setattr(clip_service, "is_asr_engine_running", lambda: False)
+
+    with pytest.raises(RuntimeError, match="请先启动 FunASR"):
+        clip_service._preflight_clip_generation(db, session.id)
+
+
+def test_clip_preflight_accepts_real_transcript_and_stream_without_funasr(
+    db, tmp_path, monkeypatch
+):
+    """已有逐字时间戳时无需二次识别引擎，也能使用真实流源进入 AI 阶段。"""
+    session = _session(db)
+    db.add(
+        TranscriptSegment(
+            session_id=session.id,
+            segment_start=10,
+            segment_end=20,
+            text_content="真实终稿话术",
+            asr_status="completed",
+            segment_type="asr_offline",
+            word_timestamps_json=[{"text": "真", "start": 10.0, "end": 10.2}],
+        )
+    )
+    db.add(
+        StreamSource(
+            session_id=session.id,
+            m3u8_url="https://example.invalid/real-replay.m3u8",
+            status="active",
+        )
+    )
+    db.commit()
+    monkeypatch.setattr(clip_service, "require_clip_ffmpeg", lambda: tmp_path / "ffmpeg")
+    monkeypatch.setattr(clip_service, "replay_path", lambda _session_id: tmp_path / "missing.mp4")
+    monkeypatch.setattr(
+        clip_service,
+        "is_asr_engine_running",
+        lambda: (_ for _ in ()).throw(AssertionError("不应检查 FunASR")),
+    )
+
+    result = clip_service._preflight_clip_generation(db, session.id)
+
+    assert result == {
+        "transcript_count": 1,
+        "missing_word_timestamp_count": 0,
+        "replay_source": "stream",
+    }
 
 
 def test_time_nearby_lead_without_formal_hook_is_visible_but_does_not_add_score(db):
@@ -493,7 +567,11 @@ def test_second_pass_alignment_keeps_authoritative_transcript_text(
     db.refresh(source)
     db.refresh(record)
 
-    assert result == {"aligned_segment_count": 1, "fallback_segment_count": 0}
+    assert result == {
+        "aligned_segment_count": 1,
+        "fallback_segment_count": 0,
+        "fallback_warnings": [],
+    }
     assert source.text_content == "这是已经审核过的权威话术终稿"
     assert source.raw_text_content == "这是二次识别文字"
     assert record.segments_json[0]["text"] == source.text_content
@@ -535,3 +613,49 @@ def test_second_pass_alignment_propagates_task_cancellation(db, tmp_path, monkey
             [record],
             should_cancel=lambda: next(checks),
         )
+
+
+def test_second_pass_alignment_records_fallback_reason(db, tmp_path, monkeypatch):
+    """精确对齐失败必须保留结构化原因，不能只留下一个降级数量。"""
+    session = _session(db)
+    record = ClipClip(
+        session_id=session.id,
+        clip_order=1,
+        status="draft",
+        segments_json=[
+            {
+                "start": 10.0,
+                "end": 20.0,
+                "text": "待对齐话术",
+                "words": [],
+            }
+        ],
+    )
+    db.add(record)
+    db.commit()
+
+    def fail_alignment(*_args, **_kwargs):
+        raise RuntimeError("FunASR 暂时不可用")
+
+    monkeypatch.setattr(
+        "app.services.clips.subtitle_aligner.align_replay_segment",
+        fail_alignment,
+    )
+
+    result = enrich_records_with_precise_subtitles(
+        db,
+        tmp_path / "replay.mp4",
+        [record],
+    )
+
+    assert result["fallback_segment_count"] == 1
+    assert result["fallback_warnings"] == [
+        {
+            "clip_id": record.id,
+            "transcript_segment_id": None,
+            "start": 10.0,
+            "end": 20.0,
+            "error_code": "RuntimeError",
+            "message": "FunASR 暂时不可用",
+        }
+    ]

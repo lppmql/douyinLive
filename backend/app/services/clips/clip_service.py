@@ -18,14 +18,24 @@ from app.core.logger import logger
 from app.models.clip_clips import ClipClip
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
+from app.services.asr.control import is_asr_engine_running
 from app.services.asr.timestamp_alignment import (
     aggregate_timestamp_precision,
     remap_corrected_text,
 )
 from app.services.clips.ass_subtitle import build_subtitle_cues
 from app.services.clips.copywriter import normalize_clip, save_clip_records
-from app.services.clips.ffmpeg_clipper import render_clip, rerender_subtitles
-from app.services.clips.replay_downloader import ensure_replay_file
+from app.services.clips.ffmpeg_clipper import (
+    render_clip,
+    require_clip_ffmpeg,
+    rerender_subtitles,
+)
+from app.services.clips.replay_downloader import (
+    ensure_replay_file,
+    has_replay_source,
+    replay_file_is_usable,
+    replay_path,
+)
 from app.services.clips.segment_selector import select_clips
 from app.services.clips.subtitle_aligner import enrich_records_with_precise_subtitles
 from app.services.tasks.exceptions import TaskCancellationRequested
@@ -167,7 +177,10 @@ def _subtitle_precision(segments: list[dict[str, Any]]) -> str:
 
 
 def _render_qc(
-    paths: dict[str, Path], segments: list[dict[str, Any]]
+    paths: dict[str, Path],
+    segments: list[dict[str, Any]],
+    *,
+    alignment_warnings: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """记录可复核的基础质检事实，不用猜测视频内容质量。"""
     cues = build_subtitle_cues(segments)
@@ -178,6 +191,42 @@ def _render_qc(
         "clean_video_available": paths["clean_video"].exists(),
         "ass_available": paths["subtitle"].exists(),
         "srt_available": paths["subtitle_srt"].exists(),
+        "subtitle_alignment_warnings": alignment_warnings or [],
+    }
+
+
+def _preflight_clip_generation(db: Session, session_id: int) -> dict[str, Any]:
+    """在产生 AI 费用前验证真实话术、回放来源和本机媒体依赖。"""
+    require_clip_ffmpeg()
+    transcripts = (
+        db.query(TranscriptSegment)
+        .filter(
+            TranscriptSegment.session_id == session_id,
+            TranscriptSegment.asr_status == "completed",
+        )
+        .all()
+    )
+    if not transcripts:
+        raise ValueError("场次没有已完成的真实话术，不能生成 AI 剪辑")
+
+    local_replay = replay_path(session_id)
+    local_replay_usable = replay_file_is_usable(local_replay)
+    has_source = has_replay_source(db, session_id)
+    if not local_replay_usable and not has_source:
+        raise ValueError("场次没有真实回放文件或流地址，不能生成 AI 剪辑")
+
+    missing_word_timestamps = sum(
+        1 for item in transcripts if not item.word_timestamps_json
+    )
+    if missing_word_timestamps and not is_asr_engine_running():
+        raise RuntimeError(
+            f"场次有 {missing_word_timestamps} 段话术缺少逐字时间戳，"
+            "请先启动 FunASR，再生成剪辑"
+        )
+    return {
+        "transcript_count": len(transcripts),
+        "missing_word_timestamp_count": missing_word_timestamps,
+        "replay_source": "local" if local_replay_usable else "stream",
     }
 
 
@@ -227,6 +276,8 @@ def generate_and_render_session(
     if not session:
         raise ValueError(f"直播场次不存在: session_id={session_id}")
 
+    preflight = _preflight_clip_generation(db, session_id)
+
     # ── 1. AI 选段 ──
     report(
         "clip_select",
@@ -234,7 +285,7 @@ def generate_and_render_session(
         0,
         5,
         "正在让 AI 从整场话术中挑选短视频片段",
-        {"session_id": session_id},
+        {"session_id": session_id, "preflight": preflight},
     )
     result = select_clips(
         db,
@@ -309,6 +360,10 @@ def generate_and_render_session(
         ),
         {"session_id": session_id, **alignment},
     )
+    warnings_by_clip: dict[int, list[dict[str, Any]]] = {}
+    for warning in alignment.get("fallback_warnings", []):
+        clip_id = int(warning.get("clip_id") or 0)
+        warnings_by_clip.setdefault(clip_id, []).append(warning)
 
     # ── 3. 逐条渲染 ──
     rendered = 0
@@ -340,7 +395,11 @@ def generate_and_render_session(
                 record.subtitle_path = _relative_storage_path(paths["subtitle"])
                 record.subtitle_srt_path = _relative_storage_path(paths["subtitle_srt"])
                 record.subtitle_precision = _subtitle_precision(record.segments_json)
-                record.qc_json = _render_qc(paths, record.segments_json)
+                record.qc_json = _render_qc(
+                    paths,
+                    record.segments_json,
+                    alignment_warnings=warnings_by_clip.get(record.id, []),
+                )
                 record.status = "draft"
                 record.error_message = None
                 db.commit()
@@ -379,6 +438,11 @@ def generate_and_render_session(
         "selected_count": len(normalized),
         "rendered_count": rendered,
         "failed_count": len(failed),
+        "subtitle_alignment_warning_count": len(
+            alignment.get("fallback_warnings", [])
+        ),
+        "subtitle_alignment_warnings": alignment.get("fallback_warnings", [])[:20],
+        "preflight": preflight,
         "errors": failed[:10],
     }
     report(

@@ -60,30 +60,6 @@ export function getStatusType(status?: string): 'success' | 'warning' | 'error' 
   return map[status] || 'default';
 }
 
-/** 后处理状态 → 展示文案 */
-export function getPostprocessLabel(status: string): string {
-  const map: Record<string, string> = {
-    pending: '待复盘',
-    processing: '复盘入库中',
-    completed: '已复盘入库',
-    failed: '复盘入库失败',
-    skipped: '初稿无需复盘'
-  };
-  return map[status] || status;
-}
-
-/** 后处理状态 → NaiveUI Tag type */
-export function getPostprocessType(status: string): 'info' | 'warning' | 'success' | 'error' {
-  const map: Record<string, 'info' | 'warning' | 'success' | 'error'> = {
-    pending: 'info',
-    processing: 'warning',
-    completed: 'success',
-    failed: 'error',
-    skipped: 'info'
-  };
-  return map[status] || 'info';
-}
-
 export interface TranscriptFailureInfo {
   category: 'stream' | 'engine' | 'live-ended' | 'duration' | 'unknown';
   title: string;

@@ -747,9 +747,7 @@ export {
   formatDuration,
   formatDate,
   getStatusLabel,
-  getStatusType,
-  getPostprocessLabel,
-  getPostprocessType
+  getStatusType
 } from '@/utils/transcriptHelpers';
 
 // 从 adapter 重导出类型

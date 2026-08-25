@@ -155,7 +155,7 @@ def reset_failed_task_for_retry(
     task.worker_id = None
     task.heartbeat_at = None
     task.cancel_requested_at = None
-    task.postprocess_status = TaskStatus.PENDING
+    task.postprocess_status = "skipped"
     task.postprocess_started_at = None
     task.postprocess_completed_at = None
     task.postprocess_error = None
@@ -229,6 +229,7 @@ def queue_session_transcription(
         task_type=expected_task_type,
         queue_source=queue_source,
         priority=0 if queue_source == "manual" else 50,
+        postprocess_status="skipped",
     )
     ensure_task_identity(task, "asr", f"asr:{expected_task_type}:session:{session.id}")
     db.add(task)

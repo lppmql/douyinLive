@@ -35,7 +35,6 @@ from app.models.transcript_segments import TranscriptSegment
 from app.models.transcript_full_texts import TranscriptFullText
 from app.models.stream_sources import StreamSource
 from app.models.live_sessions import LiveSession
-from app.models.scraper_logs import ScraperLog
 from app.services.asr.chunks import (
     build_chunk_ranges,
     next_live_chunk_range,
@@ -70,7 +69,7 @@ from app.services.asr.control import (
     clear_asr_worker_heartbeat,
     write_asr_worker_heartbeat,
 )
-from app.services.ai.post_collection import process_session_post_collection
+from app.services.clips.auto_queue import queue_clip_after_offline_final
 from app.services.collector.stream_health import probe_stream_url
 from app.services.resources.asr_policy import AsrResourcePlan, build_asr_resource_plan
 from app.services.resources.system_usage import get_system_usage
@@ -156,8 +155,8 @@ def should_handoff_realtime_failure(
 
 
 def postprocess_status_for_task(task_type: str) -> str:
-    """直播初稿不生成最终复盘，只有下播终稿进入 AI 后处理。"""
-    return TaskStatus.PENDING if task_type == "offline" else "skipped"
+    """ASR 只负责转写；AI 复盘已改为人工生成，旧后处理状态统一跳过。"""
+    return "skipped"
 
 
 def build_chunk_failure_message(error: Exception, pipe: object | None = None) -> str:
@@ -220,8 +219,6 @@ class AsrWorker:
             Path(__file__).resolve().parents[2] / "data" / "asr-buffer"
         )
         self._last_resource_message = ""
-        self._active_postprocess_tasks: set[asyncio.Task] = set()
-        self._active_postprocess_ids: set[int] = set()
         self._running = False
         self._poll_interval = 5  # 秒
         self._worker_id = current_worker_id("asr")
@@ -252,11 +249,7 @@ class AsrWorker:
     async def shutdown(self) -> None:
         """停止领取任务，并尽量在外部强制清理期限前结束全部子协程。"""
         self._running = False
-        pending_tasks = [
-            task
-            for task in (*self._active_tasks, *self._active_postprocess_tasks)
-            if not task.done()
-        ]
+        pending_tasks = [task for task in self._active_tasks if not task.done()]
         for task in pending_tasks:
             task.cancel()
         if pending_tasks:
@@ -312,34 +305,6 @@ class AsrWorker:
                     )
                 logger.warning("Worker 从断点回收 %s 个遗留 ASR 任务", len(stale))
 
-            postprocess_query = db.query(AsrTask).filter(
-                AsrTask.postprocess_status == "processing"
-            )
-            if not recover_all:
-                cutoff = datetime.utcnow() - timedelta(
-                    seconds=max(60, settings.TASK_HEARTBEAT_TIMEOUT_SECONDS)
-                )
-                postprocess_query = postprocess_query.filter(
-                    AsrTask.postprocess_started_at < cutoff
-                )
-                if self._active_postprocess_ids:
-                    postprocess_query = postprocess_query.filter(
-                        ~AsrTask.id.in_(self._active_postprocess_ids)
-                    )
-            stale_postprocess = postprocess_query.all()
-            for task in stale_postprocess:
-                task.postprocess_status = (
-                    "pending"
-                    if (task.postprocess_attempt_count or 0) < (task.max_retries or 3)
-                    else "failed"
-                )
-                task.postprocess_error = "Worker 重启，采集后处理将从幂等阶段继续"
-                task.postprocess_started_at = None
-            if stale_postprocess:
-                db.commit()
-                logger.warning(
-                    "Worker 从断点回收 %s 个采集后处理任务", len(stale_postprocess)
-                )
         finally:
             db.close()
 
@@ -417,145 +382,6 @@ class AsrWorker:
                     self._active_task_ids.discard(claimed_task_id)
 
                 worker_task.add_done_callback(discard_finished)
-        finally:
-            db.close()
-
-    async def _poll_postprocess_tasks(self):
-        """单并发执行话术评分、AI复盘和知识库同步，避免挤占本机资源。"""
-        if self._active_postprocess_tasks:
-            return
-        db = SessionLocal()
-        try:
-            row = (
-                db.query(AsrTask)
-                .filter(
-                    AsrTask.status == "completed",
-                    AsrTask.task_type == "offline",
-                    AsrTask.postprocess_status.in_(["pending", "failed"]),
-                    AsrTask.postprocess_attempt_count < AsrTask.max_retries,
-                )
-                .order_by(AsrTask.completed_at.asc(), AsrTask.id.asc())
-                .first()
-            )
-            if not row:
-                return
-            now = datetime.utcnow()
-            claimed = (
-                db.query(AsrTask)
-                .filter(
-                    AsrTask.id == row.id,
-                    AsrTask.postprocess_status.in_(["pending", "failed"]),
-                )
-                .update(
-                    {
-                        AsrTask.postprocess_status: "processing",
-                        AsrTask.postprocess_started_at: now,
-                        AsrTask.postprocess_completed_at: None,
-                        AsrTask.postprocess_error: None,
-                        AsrTask.postprocess_attempt_count: AsrTask.postprocess_attempt_count
-                        + 1,
-                        AsrTask.heartbeat_at: now,
-                        AsrTask.worker_id: self._worker_id,
-                    },
-                    synchronize_session=False,
-                )
-            )
-            db.commit()
-            if not claimed:
-                return
-            postprocess_task = asyncio.create_task(
-                self._process_postprocess_task(row.id)
-            )
-            self._active_postprocess_tasks.add(postprocess_task)
-            self._active_postprocess_ids.add(row.id)
-
-            def discard_finished(done_task, claimed_task_id=row.id):
-                self._active_postprocess_tasks.discard(done_task)
-                self._active_postprocess_ids.discard(claimed_task_id)
-
-            postprocess_task.add_done_callback(discard_finished)
-        finally:
-            db.close()
-
-    async def _process_postprocess_task(self, task_id: int) -> None:
-        await asyncio.to_thread(self._process_postprocess_task_sync, task_id)
-
-    def _process_postprocess_task_sync(self, task_id: int) -> None:
-        db = SessionLocal()
-        try:
-            task = db.get(AsrTask, task_id)
-            if (
-                not task
-                or task.status != "completed"
-                or task.postprocess_status != "processing"
-            ):
-                return
-            publish_task_event(
-                "asr", task, "postprocess_started", {"session_id": task.session_id}
-            )
-            result = process_session_post_collection(db, task.session_id)
-            task = db.get(AsrTask, task_id)
-            task.postprocess_result = result
-            task.postprocess_completed_at = datetime.utcnow()
-            task.postprocess_status = "completed" if result["success"] else "failed"
-            task.postprocess_error = (
-                "; ".join(
-                    f"{stage}: {error}"
-                    for stage, error in result.get("errors", {}).items()
-                )[:2000]
-                or None
-            )
-            touch_task(task, self._worker_id)
-            db.add(
-                ScraperLog(
-                    level="info" if result["success"] else "error",
-                    message=(
-                        f"场次 #{task.session_id} 话术、AI复盘与知识库处理"
-                        f"{'完成' if result['success'] else '失败'}：话术 {result['transcript_count']} 段，"
-                        f"复盘 {result['review_finding_count']} 条"
-                    ),
-                    raw_json={
-                        "stage": "post_collection",
-                        "event": "postprocess_completed"
-                        if result["success"]
-                        else "postprocess_failed",
-                        "session_id": task.session_id,
-                        "details": result,
-                    },
-                )
-            )
-            db.commit()
-            publish_task_event(
-                "asr",
-                task,
-                "postprocess_completed" if result["success"] else "postprocess_failed",
-                result,
-            )
-        except Exception as exc:
-            db.rollback()
-            task = db.get(AsrTask, task_id)
-            if task:
-                task.postprocess_status = "failed"
-                task.postprocess_error = str(exc)[:2000]
-                task.postprocess_completed_at = datetime.utcnow()
-                touch_task(task, self._worker_id)
-                db.add(
-                    ScraperLog(
-                        level="error",
-                        message=f"场次 #{task.session_id} 采集后处理失败: {str(exc)[:500]}",
-                        raw_json={
-                            "stage": "post_collection",
-                            "event": "postprocess_failed",
-                            "session_id": task.session_id,
-                            "error": str(exc)[:500],
-                        },
-                    )
-                )
-                db.commit()
-                publish_task_event(
-                    "asr", task, "postprocess_failed", {"error": task.postprocess_error}
-                )
-            logger.exception("任务 %s 采集后处理失败: %s", task_id, exc)
         finally:
             db.close()
 
@@ -1093,6 +919,12 @@ class AsrWorker:
                     len(chunks),
                     segment_count,
                 )
+                if task.task_type == "offline":
+                    # 只响应本次新完成的离线终稿事件，不扫描历史任务，也不触发 AI 复盘。
+                    queue_clip_after_offline_final(
+                        task.session_id,
+                        asr_task_id=task.id,
+                    )
 
             except _YieldToLiveTask:
                 db.rollback()
