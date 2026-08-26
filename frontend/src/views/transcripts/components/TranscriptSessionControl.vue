@@ -107,7 +107,7 @@ const dispatchOrderOptions = [
 ];
 
 const moreActionOptions = computed(() => [
-  { label: '补排今日自动任务', key: 'batch' },
+  { label: '补排昨日与今日自动任务', key: 'batch' },
   { label: '查看全部任务', key: 'tasks' },
   { label: '打开场次详情', key: 'detail', disabled: !props.selectedSessionId },
   {
@@ -275,7 +275,7 @@ function renderSessionLabel(option: SelectOption) {
     >
       <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-8px text-13px font-600">
-          <span>自动转写：全部直播中场次 + 当天已下播场次</span>
+          <span>自动转写：{{ dispatchPolicy?.auto_scope_description || '正在读取自动范围' }}</span>
           <NTag v-if="dispatchPolicy?.manual_active" size="tiny" type="warning" :bordered="false">
             人工场次 #{{ dispatchPolicy.manual_session_id }} 独占中
           </NTag>

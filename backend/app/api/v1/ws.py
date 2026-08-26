@@ -24,6 +24,7 @@ from app.core.status import TaskStatus
 from app.models.asr_tasks import AsrTask
 from app.models.user import User
 from app.services.asr.queue import (
+    AUTO_SCOPE_DESCRIPTION,
     AUTO_SCOPE_TIMEZONE,
     automatic_session_scope_clause,
     get_active_manual_task,
@@ -160,7 +161,7 @@ def serialize_dispatch_policy(db: Session) -> dict:
         "manual_task_id": manual.id if manual else None,
         "manual_session_id": manual.session_id if manual else None,
         "auto_scope_timezone": AUTO_SCOPE_TIMEZONE,
-        "auto_scope_description": "全部直播中场次 + 当天已下播场次",
+        "auto_scope_description": AUTO_SCOPE_DESCRIPTION,
     }
 
 

@@ -34,7 +34,7 @@ class TranscriptDispatchPolicyOut(BaseModel):
     manual_task_id: int | None = None
     manual_session_id: int | None = None
     auto_scope_timezone: str = "Asia/Shanghai"
-    auto_scope_description: str = "全部直播中场次 + 当天已下播场次"
+    auto_scope_description: str
 
 
 class TranscriptBatchResult(BaseModel):

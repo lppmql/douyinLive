@@ -56,9 +56,9 @@ services:
     container_name: douyin_live_funasr
     restart: unless-stopped
     # 同一个服务进程同时支持直播 online 初稿和下播 offline 最终稿。
-    # 业务层仍严格串行使用模型，避免 8GB Mac 同时处理多路音频。
-    cpus: 2.0
-    mem_limit: 1800m
+    # 业务层仍严格串行使用模型；容器资源和内部线程可按宿主机配置调优。
+    cpus: ${FUNASR_CPU_LIMIT:-2.0}
+    mem_limit: ${FUNASR_MEMORY_LIMIT:-1800m}
     ports:
       - "127.0.0.1:10096:10095"
     volumes:
@@ -66,7 +66,7 @@ services:
     working_dir: /workspace/FunASR/runtime
     entrypoint: ["/bin/bash", "-lc"]
     command:
-      - "bash run_server_2pass.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --lm-dir '' --hotword /workspace/models/hotwords.txt; while pgrep funasr-wss-serv >/dev/null; do sleep 5; done; exit 1"
+      - "bash run_server_2pass.sh --certfile 0 --download-model-dir /workspace/models --vad-dir damo/speech_fsmn_vad_zh-cn-16k-common-onnx --model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-onnx --online-model-dir damo/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online-onnx --punc-dir damo/punc_ct-transformer_zh-cn-common-vad_realtime-vocab272727-onnx --itn-dir thuduj12/fst_itn_zh --lm-dir '' --hotword /workspace/models/hotwords.txt --decoder-thread-num ${FUNASR_DECODER_THREAD_NUM:-10} --model-thread-num ${FUNASR_MODEL_THREAD_NUM:-1} --io-thread-num ${FUNASR_IO_THREAD_NUM:-1}; while pgrep funasr-wss-serv >/dev/null; do sleep 5; done; exit 1"
     profiles:
       - funasr
 

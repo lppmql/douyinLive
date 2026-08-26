@@ -249,8 +249,8 @@ def test_finished_live_creates_separate_offline_final_task():
     db.close()
 
 
-def test_auto_scope_only_queues_today_ended_but_keeps_all_live_sessions():
-    """历史下播不再自动转写，但历史时间开播且仍在直播的场次必须入队。"""
+def test_auto_scope_queues_yesterday_and_today_but_keeps_all_live_sessions():
+    """前天下播不自动转写；昨天、今天下播和全部直播中场次必须入队。"""
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
@@ -272,11 +272,19 @@ def test_auto_scope_only_queues_today_ended_but_keeps_all_live_sessions():
     today = datetime.now(ZoneInfo("Asia/Shanghai")).replace(
         tzinfo=None, hour=0, minute=0, second=0, microsecond=0
     )
-    old_ended = LiveSession(
+    day_before_yesterday = LiveSession(
         room_id=room.id,
-        anchor_name="历史下播",
+        anchor_name="前天下播",
         live_start_time=today - timedelta(days=2),
         live_end_time=today - timedelta(days=2, hours=-1),
+        live_status="ended",
+        detail_collection_status="complete",
+    )
+    yesterday_ended = LiveSession(
+        room_id=room.id,
+        anchor_name="昨天下播",
+        live_start_time=today - timedelta(days=1) + timedelta(hours=9),
+        live_end_time=today - timedelta(days=1) + timedelta(hours=10),
         live_status="ended",
         detail_collection_status="complete",
     )
@@ -295,9 +303,9 @@ def test_auto_scope_only_queues_today_ended_but_keeps_all_live_sessions():
         live_status="live",
         detail_collection_status="pending",
     )
-    db.add_all([old_ended, today_ended, live])
+    db.add_all([day_before_yesterday, yesterday_ended, today_ended, live])
     db.flush()
-    for session in (old_ended, today_ended, live):
+    for session in (day_before_yesterday, yesterday_ended, today_ended, live):
         db.add(
             StreamSource(
                 session_id=session.id,
@@ -310,8 +318,17 @@ def test_auto_scope_only_queues_today_ended_but_keeps_all_live_sessions():
 
     result = queue_auto_transcriptions(db, limit=10, queue_capacity=10)
 
-    assert set(result["session_ids"]) == {today_ended.id, live.id}
-    assert db.query(AsrTask).filter(AsrTask.session_id == old_ended.id).count() == 0
+    assert set(result["session_ids"]) == {
+        yesterday_ended.id,
+        today_ended.id,
+        live.id,
+    }
+    assert (
+        db.query(AsrTask)
+        .filter(AsrTask.session_id == day_before_yesterday.id)
+        .count()
+        == 0
+    )
     db.close()
 
 

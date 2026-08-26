@@ -363,13 +363,13 @@ export function useTranscriptWorkbench() {
     }
   }
 
-  /** 补排今日自动转写范围内的场次。 */
+  /** 补排上海时区昨天与今天自动转写范围内的场次。 */
   async function queueAnchorBatch() {
     batchLoading.value = true;
     try {
       const response = await queueTranscriptsByAnchor(1);
       const data = unwrapServiceData(response, '批量任务响应为空');
-      message.success(`已检查今日 ${data.anchor_count} 位主播，新建 ${data.created_count} 个自动任务`);
+      message.success(`已检查昨日与今日 ${data.anchor_count} 位主播，新建 ${data.created_count} 个自动任务`);
       await loadTaskData();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '增量转写失败，请确认已采集真实回放');

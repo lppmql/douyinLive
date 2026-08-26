@@ -1859,7 +1859,7 @@ export interface paths {
         put?: never;
         /**
          * Run Transcript Ai Pipeline
-         * @description 手动重跑与自动链路相同的评分、复盘、知识库和 DataEase 后处理。
+         * @description 人工生成评分与 AI 复盘，并同步知识库和 DataEase；不会创建剪辑任务。
          */
         post: operations["run_transcript_ai_pipeline_api_v1_ai_pipeline__session_id__post"];
         delete?: never;
@@ -7105,10 +7105,7 @@ export interface components {
              * @default Asia/Shanghai
              */
             auto_scope_timezone: string;
-            /**
-             * Auto Scope Description
-             * @default 全部直播中场次 + 当天已下播场次
-             */
+            /** Auto Scope Description */
             auto_scope_description: string;
         };
         /**
@@ -7441,7 +7438,7 @@ export interface components {
             error_message?: string | null;
             /**
              * Postprocess Status
-             * @default pending
+             * @default skipped
              */
             postprocess_status: string;
             /** Postprocess Error */

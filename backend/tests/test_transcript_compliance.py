@@ -92,6 +92,9 @@ def test_dispatch_policy_api_persists_order_mode(client, auth_headers):
     assert response.status_code == 200
     assert response.json()["order_mode"] == "smart"
     assert response.json()["auto_scope_timezone"] == "Asia/Shanghai"
+    assert response.json()["auto_scope_description"] == (
+        "全部直播中场次 + 昨天与今天已下播场次"
+    )
 
     updated = client.put(
         "/api/v1/transcripts/dispatch-policy",

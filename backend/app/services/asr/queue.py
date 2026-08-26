@@ -18,11 +18,12 @@ from app.core.status import TaskStatus
 
 
 AUTO_SCOPE_TIMEZONE = "Asia/Shanghai"
+AUTO_SCOPE_DESCRIPTION = "全部直播中场次 + 昨天与今天已下播场次"
 ASR_ORDER_MODES = {"smart", "latest", "fifo"}
 
 
 def automatic_session_scope_clause(now: datetime | None = None):
-    """自动转写范围：全部直播中场次，以及上海自然日内结束的场次。"""
+    """自动转写范围：全部直播中场次，以及上海时区昨天或今天结束的场次。"""
     local_now = now or datetime.now(ZoneInfo(AUTO_SCOPE_TIMEZONE))
     if local_now.tzinfo is None:
         local_now = local_now.replace(tzinfo=ZoneInfo(AUTO_SCOPE_TIMEZONE))
@@ -31,13 +32,14 @@ def automatic_session_scope_clause(now: datetime | None = None):
     today_start = local_now.replace(hour=0, minute=0, second=0, microsecond=0).replace(
         tzinfo=None
     )
+    yesterday_start = today_start - timedelta(days=1)
     tomorrow_start = today_start + timedelta(days=1)
     ended_at = func.coalesce(LiveSession.live_end_time, LiveSession.live_start_time)
     return or_(
         LiveSession.live_status == "live",
         and_(
             LiveSession.live_status != "live",
-            ended_at >= today_start,
+            ended_at >= yesterday_start,
             ended_at < tomorrow_start,
         ),
     )
@@ -87,7 +89,7 @@ def activate_manual_exclusive_task(db: Session, task: AsrTask) -> None:
 
 
 def stop_auto_tasks_outside_scope(db: Session) -> int:
-    """停止超出今日范围的自动任务；已完成分片保留，可再次手动转写。"""
+    """停止超出昨日与今日范围的自动任务；已完成分片保留，可再次手动转写。"""
     rows = (
         db.query(AsrTask)
         .join(LiveSession, LiveSession.id == AsrTask.session_id)
@@ -100,7 +102,7 @@ def stop_auto_tasks_outside_scope(db: Session) -> int:
     )
     now = utc_now_naive()
     for task in rows:
-        message = "超出今日自动转写范围，已保留断点；如需继续请手动选择该场次"
+        message = "超出昨日与今日自动转写范围，已保留断点；如需继续请手动选择该场次"
         task.error_message = message
         if task.status == TaskStatus.PROCESSING:
             task.cancel_requested_at = now
@@ -327,7 +329,7 @@ def queue_auto_transcriptions(
     session_ids: list[int] | None = None,
     queue_capacity: int | None = None,
 ) -> dict:
-    """自动排队全部直播场次和上海自然日内已经下播的场次。"""
+    """自动排队全部直播场次和上海时区昨天、今天已经下播的场次。"""
     stopped_count = stop_auto_tasks_outside_scope(db)
     if stopped_count:
         db.flush()
@@ -380,7 +382,7 @@ def queue_auto_transcriptions(
     if session_ids is not None:
         resumable_query = resumable_query.filter(LiveSession.id.in_(session_ids))
 
-    # 所有正在直播的场次都必须进入等待队列。容量和页面 limit 只约束今日已下播场次，
+    # 所有正在直播的场次都必须进入等待队列。容量和页面 limit 只约束昨日、今日下播场次，
     # 否则单并发或多主播同时开播时，未排队的直播永远无法触发 Worker 礼让。
     created_session_ids: list[int] = []
     live_resumable = resumable_query.filter(LiveSession.live_status == "live").all()
