@@ -24,7 +24,7 @@ from app.models.lead_conversion_pairs import LeadConversionPair
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
 from app.models.unified_ai_review import AudienceInteractionAnalysis, UnifiedAiReviewRun
-from app.services.ai.deepseek_client import chat
+from app.services.ai.llm_client import chat
 from app.services.analysis.session_conversion import build_session_conversion_analysis
 
 
@@ -554,7 +554,7 @@ def _generate_unified_review(db: Session, session_id: int, *, force: bool = Fals
         UnifiedAiReviewRun.status: "running",
         UnifiedAiReviewRun.input_hash: fingerprint,
         UnifiedAiReviewRun.analysis_version: ANALYSIS_VERSION,
-        UnifiedAiReviewRun.model_name: settings.DEEPSEEK_MODEL,
+        UnifiedAiReviewRun.model_name: settings.OLLAMA_MODEL,
         UnifiedAiReviewRun.error_message: None,
         UnifiedAiReviewRun.generation_token: lease_token,
         UnifiedAiReviewRun.lease_expires_at: now + timedelta(hours=2),

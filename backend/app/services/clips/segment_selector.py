@@ -1,7 +1,7 @@
-"""AI 自动剪辑 - 选段服务。
+"""AI 手动剪辑 - 选段服务。
 
 从一场直播的完整话术（transcript_segments，含句子级秒级时间戳）中，
-由 DeepSeek 挑选出适合做成短视频的片段方案。参考 FunClip 的
+由本地 Ollama 挑选出适合做成短视频的片段方案。参考 FunClip 的
 "LLM 输出 `N. [start-end] text` 契约、程序解析执行" 与 AutoCut 的
 "保留句即剪辑单" 思路：LLM 只负责决策（选哪些时间片段、起什么标题），
 真正的 ffmpeg 剪辑由剪辑引擎按返回的时间戳执行，不依赖 AI 输出视频。
@@ -22,17 +22,17 @@ from sqlalchemy.orm import Session
 
 from app.core.logger import logger
 from app.models.transcript_segments import TranscriptSegment
-from app.services.ai.deepseek_client import chat
+from app.services.ai.llm_client import chat
 from app.services.clips.multisignal import build_multisignal_map
 
-# 输入压缩上限：中文 1 字约 1 token，320 段 * 120 字 ≈ 4 万字符量级，Flash 模型可承受。
+# 最多 500 段真实话术，除正文外还有信号和行号；项目本地模型使用 64K 上下文。
 MAX_UNITS = 500
 MAX_UNIT_CHARS = 120
 # 单条方案输出时长约束（秒）
 MIN_CLIP_SECONDS = 30
 MAX_CLIP_SECONDS = 90
 MAX_SEGMENTS_PER_CLIP = 3
-# 输出上限：推理模型会先消耗 reasoning token，5 条方案 JSON 需要充足预算。
+# 保留 5 条方案 JSON 的输出预算；本地客户端已关闭额外思考内容。
 MAX_OUTPUT_TOKENS = 12000
 # 时间戳映射容差（秒）：AI 返回的 start/end 必须能在输入话术中精确找到
 TIMESTAMP_TOLERANCE = 1.0
@@ -178,7 +178,7 @@ def select_clips(
     count: int = 5,
     user_hint: str | None = None,
 ) -> dict:
-    """调用 DeepSeek 生成短视频方案，返回 {"units": [...], "clips": [...]}。
+    """调用本地 Ollama 生成短视频方案，返回 {"units": [...], "clips": [...]}。
 
     返回的 clips 是 AI 原始输出（未校验），由 copywriter 统一校验落库。
     解析失败时重试一次（temperature 降低），仍失败抛异常交由任务层记录。

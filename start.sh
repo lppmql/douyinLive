@@ -47,6 +47,11 @@ acquire_start_lock() {
 }
 
 release_start_lock() {
+  # 启动中途失败时，也只停止本次脚本创建的 Ollama；绝不碰用户已有服务。
+  if [ -n "${OLLAMA_PID:-}" ]; then
+    kill "$OLLAMA_PID" 2>/dev/null || true
+    wait "$OLLAMA_PID" 2>/dev/null || true
+  fi
   find "$START_LOCK_DIR" -maxdepth 1 -type f -name pid -delete 2>/dev/null || true
   rmdir "$START_LOCK_DIR" 2>/dev/null || true
 }
@@ -71,7 +76,7 @@ echo "========================================"
 # 0. 快速环境自检。首次安装与大体积下载统一由 setup.sh 负责。
 echo ""
 echo "  🔍 环境快速自检..."
-for REQUIRED in node ffmpeg docker; do
+for REQUIRED in node ffmpeg docker curl ollama; do
   if ! command -v "$REQUIRED" >/dev/null 2>&1; then
     echo "  ❌ 缺少 $REQUIRED，请先运行 ./setup.sh"
     exit 1
@@ -110,6 +115,39 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 echo "  ✅ Docker 已运行"
+
+# 本地 AI 不依赖云端密钥。若 Ollama 应用尚未启动，则由本次编排器启动服务；
+# 已由用户或 Ollama 应用管理的服务只做复用，退出项目时不会误停。
+OLLAMA_PID=""
+OLLAMA_SERVICE_URL="$(cd "$BACKEND_DIR" && .venv/bin/python -m scripts.check_local_ai --service-url)"
+if ! curl --noproxy '*' -fsS --max-time 3 "$OLLAMA_SERVICE_URL/api/tags" >/dev/null 2>&1; then
+  echo "  ⏳ 正在启动本地 Ollama 服务..."
+  OLLAMA_HOST="${OLLAMA_SERVICE_URL#http://}" OLLAMA_NO_CLOUD=1 OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NUM_PARALLEL=1 \
+    start_in_own_session "$(command -v ollama)" serve
+  OLLAMA_PID=$DETACHED_PID
+  for ((i = 1; i <= 30; i++)); do
+    if curl --noproxy '*' -fsS --max-time 2 "$OLLAMA_SERVICE_URL/api/tags" >/dev/null 2>&1; then
+      break
+    fi
+    if ! kill -0 "$OLLAMA_PID" 2>/dev/null; then
+      echo "  ❌ Ollama 服务启动失败，请打开 Ollama 应用后重试"
+      exit 1
+    fi
+    sleep 1
+  done
+fi
+if ! curl --noproxy '*' -fsS --max-time 3 "$OLLAMA_SERVICE_URL/api/tags" >/dev/null 2>&1; then
+  echo "  ❌ Ollama 服务 30 秒内未就绪"
+  exit 1
+fi
+OLLAMA_MODEL_VALUE="$(env_value OLLAMA_MODEL)"
+OLLAMA_MODEL_VALUE="${OLLAMA_MODEL_VALUE:-douyin-live-qwen}"
+if ! (cd "$BACKEND_DIR" && .venv/bin/python -m scripts.check_local_ai); then
+  echo "  ❌ 缺少本地模型 $OLLAMA_MODEL_VALUE"
+  echo "     首次使用请执行：./scripts/setup_ollama_model.sh"
+  exit 1
+fi
+echo "  ✅ 本地 Ollama 模型已就绪：$OLLAMA_MODEL_VALUE"
 
 echo "  🎉 环境自检通过"
 
@@ -433,6 +471,7 @@ cleanup() {
     [ -z "$WORKER_PID" ] || kill "$WORKER_PID" 2>/dev/null || true
     [ -z "$ASR_PID" ] || kill "$ASR_PID" 2>/dev/null || true
     [ -z "$FRONTEND_PID" ] || kill "$FRONTEND_PID" 2>/dev/null || true
+    [ -z "$OLLAMA_PID" ] || kill "$OLLAMA_PID" 2>/dev/null || true
     wait 2>/dev/null || true
     echo "已停止"
     exit 0

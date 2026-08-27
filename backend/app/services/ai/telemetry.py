@@ -30,7 +30,7 @@ class AiCallObservation:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
-    provider: str = "deepseek"
+    provider: str = "ollama"
     response_mode: str = "text"
     session_id: int | None = None
     prompt_name: str | None = None
@@ -49,7 +49,7 @@ def _safe_error_message(message: str | None) -> str | None:
     if not message:
         return None
     sanitized = str(message)
-    for secret in (settings.DEEPSEEK_API_KEY, settings.DB_PASSWORD, settings.JWT_SECRET_KEY):
+    for secret in (settings.DB_PASSWORD, settings.JWT_SECRET_KEY):
         if secret:
             sanitized = sanitized.replace(secret, "[REDACTED]")
     return sanitized[:500]

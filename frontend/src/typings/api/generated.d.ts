@@ -1819,7 +1819,7 @@ export interface paths {
         put?: never;
         /**
          * Test Connection
-         * @description 测试 DeepSeek API 连通性
+         * @description 测试本地 Ollama 模型连通性。
          */
         post: operations["test_connection_api_v1_ai_test_post"];
         delete?: never;
@@ -3143,7 +3143,7 @@ export interface components {
         };
         /**
          * AiTestResponse
-         * @description POST /ai/test — 测试 DeepSeek 连通性
+         * @description POST /ai/test — 测试本地 Ollama 模型连通性。
          */
         AiTestResponse: {
             /** Status */

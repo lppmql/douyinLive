@@ -36,7 +36,7 @@ from app.services.clips.clip_service import prune_discarded_clips
 from app.services.tasks.control import collector_task_control
 from app.services.tasks.views import serialize_scraper_task
 
-router = APIRouter(prefix="/clip", tags=["AI自动剪辑"])
+router = APIRouter(prefix="/clip", tags=["AI手动剪辑"])
 
 CLIP_TASK_TYPE = "clip_task"
 

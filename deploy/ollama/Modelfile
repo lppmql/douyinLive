@@ -1,0 +1,5 @@
+# 项目专用模型基于 Ollama 官方 qwen3.5:9b，不使用社区修改版模型。
+FROM qwen3.5:9b
+
+# 长场直播话术和剪辑选段的输入可能超过 4 万 Token，统一扩展到 64K 上下文。
+PARAMETER num_ctx 65536

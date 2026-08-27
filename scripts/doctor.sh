@@ -24,9 +24,15 @@ env_value() {
 
 printf "零食店避坑直播运营复盘系统 - 环境自检\n\n"
 
-for command_name in docker python3 node pnpm ffmpeg curl; do
+for command_name in docker python3 node pnpm ffmpeg curl ollama; do
   has_command "$command_name"
 done
+
+if (cd "$ROOT_DIR/backend" && .venv/bin/python -m scripts.check_local_ai); then
+  pass "本地 Ollama 服务和项目配置的模型已就绪"
+else
+  fail "本地 AI 不可用，请打开 Ollama 并执行 ./scripts/setup_ollama_model.sh"
+fi
 
 # 剪辑烧录字幕不只需要 ffmpeg 命令，还必须编译 subtitles/ass（libass）滤镜。
 CLIP_FFMPEG_VALUE="$(env_value CLIP_FFMPEG_BIN)"

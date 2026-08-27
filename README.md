@@ -11,7 +11,7 @@
 | 前端 | Vue 3、TypeScript、Vite、SoybeanAdmin、Naive UI、ECharts |
 | 后端 | FastAPI、SQLAlchemy、APScheduler、Playwright |
 | 数据 | MySQL 8、Redis 7 |
-| AI | DeepSeek API、FunASR、ffmpeg |
+| AI | 本地 Ollama（Qwen3.5 9B）、FunASR、ffmpeg |
 | 可视化 | DataEase（可选） |
 | 监控 | Prometheus、Grafana（可选） |
 

@@ -10,17 +10,16 @@
 cp .env.example .env
 ```
 
-然后打开 `.env`，至少填写这些值：
+然后打开 `.env`，至少填写这些值。AI 使用电脑上的 Ollama，不需要购买或填写云端 API Key：
 
 ```text
-DEEPSEEK_API_KEY        DeepSeek 的接口密钥，用来做 AI 复盘和知识库问答
 JWT_SECRET_KEY          登录令牌密钥，至少 32 位随机字符串
 DB_PASSWORD             MySQL 密码，建议至少 16 位随机字符串
 REDIS_PASSWORD          Redis 密码，要和 REDIS_URL 里的密码一致
 GRAFANA_ADMIN_PASSWORD  Grafana 管理员密码
 ```
 
-接口密钥的大白话解释：它像一把只给服务器用的钥匙。谁拿着这把钥匙，谁就能调用对应服务，所以不要放进前端，也不要提交到 Git。
+首次使用 AI 前先打开 Ollama 应用，再执行 `./scripts/setup_ollama_model.sh`。脚本会下载官方 `qwen3.5:9b`，并创建支持 64K 长话术的项目模型 `douyin-live-qwen`。模型文件约占 7GB，只在本机运行。
 
 ## 2. 首次安装与日常启动
 

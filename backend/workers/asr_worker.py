@@ -69,7 +69,6 @@ from app.services.asr.control import (
     clear_asr_worker_heartbeat,
     write_asr_worker_heartbeat,
 )
-from app.services.clips.auto_queue import queue_clip_after_offline_final
 from app.services.collector.stream_health import probe_stream_url
 from app.services.resources.asr_policy import AsrResourcePlan, build_asr_resource_plan
 from app.services.resources.system_usage import get_system_usage
@@ -919,12 +918,6 @@ class AsrWorker:
                     len(chunks),
                     segment_count,
                 )
-                if task.task_type == "offline":
-                    # 只响应本次新完成的离线终稿事件，不扫描历史任务，也不触发 AI 复盘。
-                    queue_clip_after_offline_final(
-                        task.session_id,
-                        asr_task_id=task.id,
-                    )
 
             except _YieldToLiveTask:
                 db.rollback()

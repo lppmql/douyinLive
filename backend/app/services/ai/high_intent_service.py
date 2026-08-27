@@ -8,7 +8,7 @@ from app.core.database import SessionLocal
 from app.models.comments import Comment
 from app.models.high_intent_users import HighIntentUser
 from app.prompts import get_system_prompt
-from app.services.ai.deepseek_client import chat_json
+from app.services.ai.llm_client import chat_json
 from app.services.ai.prompt_service import get_prompt_template
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def identify_high_intent(session_id: int, db: Session | None = None) -> list[dic
                 prompt_version=prompt_template.version,
             )
         except Exception as e:
-            logger.error("DeepSeek 高意向用户识别失败: %s", e)
+            logger.error("本地模型高意向用户识别失败: %s", e)
             return []
 
         # 解析结果并入库

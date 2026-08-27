@@ -18,7 +18,7 @@ class AiTestErrorResponse(BaseModel):
 
 
 class AiTestResponse(BaseModel):
-    """POST /ai/test — 测试 DeepSeek 连通性"""
+    """POST /ai/test — 测试本地 Ollama 模型连通性。"""
     status: str
     reply: str | None = None
     message: str | None = None

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from app.core.config import Settings
 
 
@@ -72,6 +74,35 @@ def test_redis_url_is_redacted_for_logs():
     assert "do-not-log" not in settings.redacted_redis_url
 
 
+@pytest.mark.parametrize("url", [
+    "https://remote-model.example/v1",
+    "http://127.0.0.1:11434/not-v1",
+    "http://user:password@localhost:11434/v1",
+    "http://localhost:11434/v1?redirect=remote",
+    "http://localhost:99999/v1",
+    "http://[invalid/v1",
+])
+def test_ollama_must_use_local_loopback_address(url):
+    errors, _ = make_settings(OLLAMA_BASE_URL=url).runtime_configuration_issues()
+
+    assert "OLLAMA_BASE_URL_NOT_LOCAL" in errors
+
+
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:11434/v1", "http://localhost:11434/v1/", "http://[::1]:11434/v1",
+])
+def test_valid_local_ollama_addresses(url):
+    errors, _ = make_settings(OLLAMA_BASE_URL=url).runtime_configuration_issues()
+    assert "OLLAMA_BASE_URL_NOT_LOCAL" not in errors
+
+
+def test_ollama_model_and_timeout_are_validated():
+    errors, _ = make_settings(OLLAMA_MODEL="", OLLAMA_REQUEST_TIMEOUT_SECONDS=10).runtime_configuration_issues()
+
+    assert "OLLAMA_MODEL_MISSING" in errors
+    assert "OLLAMA_TIMEOUT_INVALID" in errors
+
+
 def test_alembic_uses_runtime_database_configuration_without_stored_password():
     env_source = (BACKEND_ROOT / "alembic" / "env.py").read_text(encoding="utf-8")
     ini_source = (BACKEND_ROOT / "alembic.ini").read_text(encoding="utf-8")
@@ -83,6 +114,11 @@ def test_alembic_uses_runtime_database_configuration_without_stored_password():
 
 def test_one_click_start_requires_core_health_and_keeps_optional_services_optional():
     start_source = (BACKEND_ROOT.parent / "start.sh").read_text(encoding="utf-8")
+
+    assert "scripts.check_local_ai --service-url" in start_source
+    assert "OLLAMA_NO_CLOUD=1" in start_source
+    assert "OLLAMA_NUM_PARALLEL=1" in start_source
+    assert "ollama pull" not in start_source
 
     assert "docker compose up -d mysql redis qdrant" in start_source
     assert 'if [ "$RUN_MODE" = "full" ] && [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then' in start_source

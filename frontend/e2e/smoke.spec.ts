@@ -3,7 +3,7 @@
  *
  * 覆盖 11 个核心页面的基本可用性检查：
  *   登录 → 首页 → DataEase → 采集 → 场次列表 → 场次详情
- *   → 话术 → AI复盘 → AI自动剪辑 → 知识库 → 主播排班 → 用户管理
+ *   → 话术 → AI复盘 → AI手动剪辑 → 知识库 → 主播排班 → 用户管理
  *
  * 每页检查：
  *   1. 页面主标题存在（无白屏）
@@ -185,7 +185,7 @@ test.describe('核心页面冒烟', () => {
     await checkNotBlank(page);
 
     // 页面标题存在
-    await expect(page.locator('text=AI自动剪辑').first()).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('text=AI手动剪辑').first()).toBeVisible({ timeout: 5000 });
 
     // 场次下拉与生成按钮存在（naive-ui NSelect 的 placeholder 是自绘文本，非 input 属性）
     await expect(page.getByRole('button', { name: '生成/重新生成 5 条成片' })).toBeVisible({ timeout: 5000 });

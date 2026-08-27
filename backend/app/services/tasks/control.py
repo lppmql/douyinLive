@@ -56,7 +56,7 @@ TASK_LABELS = {
     "ai_review": "AI 复盘",
     "knowledge_sync": "存入知识库",
     "dataease_sync": "DataEase 数据库同步",
-    "clip_task": "AI 自动剪辑",
+    "clip_task": "AI 手动剪辑",
 }
 
 

@@ -6,6 +6,24 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
 
+def is_local_ollama_url(value: str) -> bool:
+    """只接受无认证信息、无重定向参数的本机 OpenAI 兼容地址。"""
+    try:
+        parsed = urlparse(value)
+        return (
+            parsed.scheme == "http"
+            and parsed.hostname in {"127.0.0.1", "localhost", "::1"}
+            and parsed.path.rstrip("/") == "/v1"
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+            and (parsed.port is None or 1 <= parsed.port <= 65535)
+        )
+    except ValueError:
+        return False
+
+
 def is_valid_kezi_api_key(value: str) -> bool:
     """外部请求头密钥必须是无空格 ASCII，中文占位词不能冒充真实配置。"""
     return (
@@ -52,10 +70,11 @@ class Settings(BaseSettings):
     TASK_EVENT_STREAM_MAXLEN: int = 10000
     TASK_HEARTBEAT_TIMEOUT_SECONDS: int = 180
 
-    # DeepSeek
-    DEEPSEEK_API_KEY: str = ""
-    DEEPSEEK_API_URL: str = "https://api.deepseek.com"
-    DEEPSEEK_MODEL: str = "deepseek-v4-flash"
+    # 本地 Ollama 大模型。只允许回环地址，避免把未鉴权的模型接口暴露到局域网。
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434/v1"
+    OLLAMA_MODEL: str = "douyin-live-qwen"
+    # 长场话术和剪辑选段可能使用 4 万以上 Token；本地模型需要更长超时。
+    OLLAMA_REQUEST_TIMEOUT_SECONDS: int = 900
 
     # ASR 并发。旧固定值仅保留环境兼容，真实 Worker 使用资源自适应上限。
     MAX_REALTIME_ASR_TASKS: int = 1
@@ -189,8 +208,7 @@ class Settings(BaseSettings):
     CLIP_REPLAY_MAX_GB: float = 20.0
     # 估算时间轴容易出现字幕提前/滞后，默认禁止确认成可发布成片。
     CLIP_ALLOW_ESTIMATED_SUBTITLE_APPROVAL: bool = False
-    # 离线终稿完成后是否自动触发 AI 剪辑（每场消耗 1 次 DeepSeek 调用 + 剪辑资源）。
-    CLIP_AUTO_GENERATE: bool = True
+    # 剪辑只允许运营在页面人工触发，离线终稿完成不再自动创建 AI 任务。
 
     # 跨域与部署
     CORS_ORIGINS: str = "http://localhost:9527,http://127.0.0.1:9527"
@@ -263,6 +281,12 @@ class Settings(BaseSettings):
             errors.append("DOUYIN_PROFILE_CACHE_DAYS_INVALID")
         if self.CONTINUOUS_TASK_BATCH_SIZE < 0:
             errors.append("CONTINUOUS_TASK_BATCH_INVALID")
+        if not is_local_ollama_url(self.OLLAMA_BASE_URL):
+            errors.append("OLLAMA_BASE_URL_NOT_LOCAL")
+        if not self.OLLAMA_MODEL.strip():
+            errors.append("OLLAMA_MODEL_MISSING")
+        if not 30 <= self.OLLAMA_REQUEST_TIMEOUT_SECONDS <= 3600:
+            errors.append("OLLAMA_TIMEOUT_INVALID")
         if not 1 <= self.CLIP_REPLAY_RETENTION_DAYS <= 365:
             errors.append("CLIP_REPLAY_RETENTION_INVALID")
         if not 1 <= self.CLIP_REPLAY_MAX_GB <= 1000:

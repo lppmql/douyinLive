@@ -1,15 +1,15 @@
-"""AI 分析 API（DeepSeek）"""
+"""AI 分析 API（本地 Ollama）。"""
 import json
 import logging
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
 from app.core.database import get_db
+from app.core.streaming import ClosingStreamingResponse
 from app.prompts import get_system_prompt
-from app.services.ai.deepseek_client import chat
+from app.services.ai.llm_client import chat
 from app.services.ai.prompt_service import get_prompt_template
 from app.services.ai.scoring import score_session_transcript, batch_score_recent
 from app.services.ai.analysis import analyze_trend, detect_anomalies
@@ -82,7 +82,7 @@ def ai_chat(req: ChatRequest, db: Session = Depends(get_db)):
 
 @router.post("/test", response_model=AiTestResponse)
 def test_connection():
-    """测试 DeepSeek API 连通性"""
+    """测试本地 Ollama 模型连通性。"""
     try:
         reply = chat(
             system_prompt=get_system_prompt("connection_test"),
@@ -92,7 +92,7 @@ def test_connection():
         )
         return {"status": "ok", "reply": reply}
     except Exception as e:
-        logger.exception("DeepSeek 连接测试失败")
+        logger.exception("本地 Ollama 连接测试失败")
         return {"status": "error", "message": str(e)}
 
 
@@ -219,7 +219,7 @@ def optimize_session(session_id: int, db: Session = Depends(get_db)):
         str(score_report.report_content if score_report else "暂无话术评分数据"),
     )
 
-    from app.services.ai.deepseek_client import chat_json
+    from app.services.ai.llm_client import chat_json
     result = chat_json(
         system_prompt=get_system_prompt("optimization"),
         user_message=user_message,
@@ -314,7 +314,7 @@ def knowledge_qa_stream(req: QaRequest, db: Session = Depends(get_db)):
     """
     history = [item.model_dump() for item in req.history[-8:]]
 
-    return StreamingResponse(
+    return ClosingStreamingResponse(
         qa_search_stream(
             db,
             question=req.question,

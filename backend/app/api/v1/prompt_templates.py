@@ -45,7 +45,7 @@ def test_prompt(
     from app.models.transcript_segments import TranscriptSegment
     from app.models.comments import Comment
     from app.prompts import get_system_prompt
-    from app.services.ai.deepseek_client import chat_json
+    from app.services.ai.llm_client import chat_json
 
     # 找最近一场有完整数据的已结束场次
     recent = (

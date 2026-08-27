@@ -637,7 +637,7 @@ export function collectAllData() {
 
 /* ---------- AI 分析 ---------- */
 
-/** 测试 DeepSeek 连通 */
+/** 测试本地 Ollama 模型连通 */
 export function testAiConnection() {
   return backendRequest<{ status: string; reply: string }>({ url: `${API_PREFIX}/ai/test`, method: 'POST' });
 }

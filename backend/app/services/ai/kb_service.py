@@ -1,4 +1,6 @@
-"""知识库问答服务 — 搜索 + DeepSeek 回答"""
+"""知识库问答服务 — 搜索 + 本地 Ollama 回答。"""
+from contextlib import aclosing
+from starlette.concurrency import run_in_threadpool
 import json
 import logging
 import re
@@ -16,7 +18,7 @@ from app.models.comments import Comment
 from app.models.live_audience_profiles import LiveAudienceProfile
 from app.models.review import ReviewFinding
 from app.prompts import get_system_prompt
-from app.services.ai.deepseek_client import chat, chat_stream
+from app.services.ai.llm_client import chat, chat_stream
 from app.services.ai.prompt_service import get_prompt_template
 from app.services.ai.time_slice_service import search_time_slices, sync_session_time_slices, format_offset
 
@@ -232,13 +234,13 @@ def qa_search(
     category: str | None = None,
     history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    """知识库问答（一次性返回） — 混合搜索 → 拼接上下文 → DeepSeek → 回答 + 引用来源
+    """知识库问答（一次性返回） — 混合搜索 → 拼接上下文 → 本地模型 → 回答 + 引用来源
 
     Phase 36 升级：
     1. 向量搜索（Qdrant 语义相似度）+ 关键词搜索（MySQL LIKE）并行
     2. RRF 融合两路结果
     3. 格式化 Top 5 结果为上下文
-    4. 调用 DeepSeek QA 提示词
+    4. 调用本地模型 QA 提示词
     5. 返回回答 + 引用来源
     """
     ctx = _prepare_qa_context(db, question, category, history)
@@ -260,7 +262,7 @@ def qa_search(
             prompt_version=ctx["prompt_template"].version,
         )
     except Exception as e:
-        logger.error("DeepSeek QA 回答失败: %s", e)
+        logger.error("本地模型 QA 回答失败: %s", e)
         return {"answer": "AI 回答失败，请稍后重试", "sources": ctx["sources"], "has_result": False}
 
     return {
@@ -270,7 +272,7 @@ def qa_search(
     }
 
 
-def qa_search_stream(
+async def qa_search_stream(
     db: Session,
     question: str,
     category: str | None = None,
@@ -293,29 +295,31 @@ def qa_search_stream(
             media_type="text/event-stream",
         )
     """
-    ctx = _prepare_qa_context(db, question, category, history)
+    # 现有数据库和向量检索为同步实现，放入线程池避免阻塞事件循环。
+    ctx = await run_in_threadpool(_prepare_qa_context, db, question, category, history)
     if ctx is None:
         # 没有找到相关知识
         yield f"data: {json.dumps({'type': 'done', 'sources': [], 'has_result': False}, ensure_ascii=False)}\n\n"
         return
 
     try:
-        # 流式调用 DeepSeek，每收到一个 token 就推给前端
-        for token in chat_stream(
+        # 流式调用本地模型，每收到一个 token 就推给前端
+        async with aclosing(chat_stream(
             system_prompt=ctx["system_prompt"],
             user_message=ctx["user_message"],
             temperature=0.5,
             operation="knowledge_qa",
             prompt_name=ctx["prompt_template"].type,
             prompt_version=ctx["prompt_template"].version,
-        ):
-            yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
+        )) as stream:
+            async for token in stream:
+                yield f"data: {json.dumps({'type': 'token', 'content': token}, ensure_ascii=False)}\n\n"
 
         # 流结束后发送引用来源
         yield f"data: {json.dumps({'type': 'done', 'sources': ctx['sources'], 'has_result': True}, ensure_ascii=False)}\n\n"
 
     except Exception as e:
-        logger.error("DeepSeek QA 流式回答失败: %s", e)
+        logger.error("本地模型 QA 流式回答失败: %s", e)
         yield f"data: {json.dumps({'type': 'error', 'message': 'AI 回答失败，请稍后重试'}, ensure_ascii=False)}\n\n"
 
 

@@ -197,6 +197,9 @@ def root():
 @app.get("/health")
 def health():
     configuration_errors, configuration_warnings = settings.runtime_configuration_issues()
+    from app.services.ai.llm_client import get_local_ai_runtime_status
+
+    local_ai = get_local_ai_runtime_status()
     database_ok = False
     redis_ok = False
     try:
@@ -222,6 +225,9 @@ def health():
         "status": "ok" if healthy else "degraded",
         "database": "ok" if database_ok else "error",
         "redis": "ok" if redis_ok else "error",
+        "local_ai": "ok" if local_ai["model_available"] else "error",
+        "local_ai_model": local_ai["model"],
+        "local_ai_message": local_ai["message"],
         "monitor": TaskStatus.RUNNING if scheduler_manager.running else "stopped",
         "configuration": "error" if configuration_errors else "warning" if configuration_warnings else "ok",
         "configuration_issues": configuration_errors + configuration_warnings,
