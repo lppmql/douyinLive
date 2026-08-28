@@ -5,6 +5,7 @@
 """
 import asyncio
 import json
+from datetime import datetime, timedelta
 from typing import Callable, Optional
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -26,7 +27,12 @@ from app.services.collector.browser import browser_manager
 from app.services.collector.comments import _replace_session_comments, _save_comments
 from app.services.collector.metrics import _apply_overview_to_session, _save_profiles, _save_stream_source, _save_trend_metrics
 from app.services.collector.room import _scrape_history_session_detail
-from app.services.collector.session import _apply_session_anchor_profile, _needs_history_enrichment
+from app.services.collector.session import (
+    HISTORY_VALIDATION_ERROR,
+    _apply_session_anchor_profile,
+    _is_history_detail_retry,
+    _needs_history_enrichment,
+)
 from app.services.collector.utils import (
     _extract_room_id_from_dashboard_url,
     _is_context_closed_message,
@@ -42,6 +48,9 @@ HISTORY_API_URL = "https://leads.cluerich.com/live_console/history"
 HISTORY_DETAIL_TIMEOUT_SECONDS = 45
 HISTORY_DETAIL_CONCURRENCY = 1
 CONTEXT_RECOVERY_ATTEMPTS = 2
+# 失败队列不能挤占新场次，也不能在升级后同时重采上千条旧误分类记录。
+HISTORY_RETRY_BATCH_SIZE = 10
+HISTORY_RETRY_COOLDOWN = timedelta(minutes=30)
 
 
 def _fetch_history_payload(req: Request) -> dict:
@@ -148,16 +157,34 @@ async def _sync_history_sessions(db: Session, account: ScraperAccount, room: Liv
     return synced
 
 
-def _order_history_enrichment_targets(pending_sessions: list[LiveSession]) -> list[LiveSession]:
-    """返回本次要处理的全部待补场次，并优先覆盖从未尝试过的最新场次。"""
-    return sorted(
-        pending_sessions,
-        key=lambda session: (
-            session.detail_collection_status == TaskStatus.RETRYABLE,
+def _order_history_enrichment_targets(
+    pending_sessions: list[LiveSession], *, targeted: bool = False,
+) -> list[LiveSession]:
+    """首次采集不减量；失败分批轮转，避免最新失败一直占着队头。
+
+    updated_at 使用数据库已有的 UTC 更新时间；其他更新只会延后重试，
+    不会提前突破冷却时间。明确指定场次的运维补采不受自动限速影响。
+    """
+    def first_attempt_key(session):
+        return (
             not bool(session.anchor_name),
             -(session.live_start_time.timestamp() if session.live_start_time else 0),
-        ),
+        )
+
+    fresh = sorted(
+        (session for session in pending_sessions if not _is_history_detail_retry(session)),
+        key=first_attempt_key,
     )
+    retry_before = datetime.utcnow() - HISTORY_RETRY_COOLDOWN
+    retries = sorted(
+        (
+            session for session in pending_sessions
+            if _is_history_detail_retry(session)
+            and (targeted or not session.updated_at or session.updated_at <= retry_before)
+        ),
+        key=lambda session: (session.updated_at or datetime.min, *first_attempt_key(session), session.id),
+    )
+    return fresh + (retries if targeted else retries[:HISTORY_RETRY_BATCH_SIZE])
 
 
 async def _enrich_history_sessions(
@@ -168,20 +195,24 @@ async def _enrich_history_sessions(
     progress_callback: Optional[Callable[[int, int, int, int], None]] = None,
     cancellation_callback: Optional[Callable[[], bool]] = None,
     sanitize_error=None,
+    *,
+    session_ids: Optional[set[int]] = None,
 ) -> dict:
-    """尝试补齐全部历史场次的大屏详情、回放流和评论。"""
+    """补齐历史详情；运维验收可限定场次，不必触发整个账号历史重采。"""
     del account
     current_context = context
-    all_sessions = (
+    session_query = (
         db.query(LiveSession)
         .filter(
             LiveSession.room_id == room.id,
             LiveSession.live_start_time.isnot(None),
             LiveSession.live_end_time.isnot(None),
         )
-        .order_by(LiveSession.live_start_time.desc())
-        .all()
     )
+    # 空集合表示不处理任何场次，不能误当成 None 而退回全量采集。
+    if session_ids is not None:
+        session_query = session_query.filter(LiveSession.id.in_(session_ids))
+    all_sessions = session_query.order_by(LiveSession.live_start_time.desc()).all()
 
     metric_session_ids = {row[0] for row in db.query(LiveMetric.session_id).distinct().all()}
     comment_session_ids = {row[0] for row in db.query(Comment.session_id).distinct().all()}
@@ -192,8 +223,9 @@ async def _enrich_history_sessions(
         session for session in all_sessions
         if _needs_history_enrichment(session, session.id in asset_session_ids)
     ]
+    target_sessions = _order_history_enrichment_targets(pending_sessions, targeted=session_ids is not None)
     repaired_false_complete = 0
-    for session in pending_sessions:
+    for session in target_sessions:
         if session.detail_collection_status == "complete":
             session.detail_collection_status = TaskStatus.RETRYABLE
             session.detail_collection_error = "此前未采到有效详情数据，已重新加入补齐队列"
@@ -201,8 +233,7 @@ async def _enrich_history_sessions(
     if repaired_false_complete:
         db.commit()
         logger.warning("已修复 %s 场无数据但标记完整的历史场次", repaired_false_complete)
-    # 全部待补场次都进入本次任务；单浏览器并发仍为 1，避免放开总量后挤爆电脑资源。
-    target_sessions = _order_history_enrichment_targets(pending_sessions)
+    # 新场次全部处理；失败场次有限重试。浏览器并发仍为 1。
     enriched = 0
     checked = 0
     failed = 0
@@ -262,6 +293,8 @@ async def _enrich_history_sessions(
             failed += 1
             session.detail_collection_status = TaskStatus.RETRYABLE
             session.detail_collection_error = error
+            # 相同错误重复出现时 ORM 可能不产生字段变更，仍需记录本次尝试时间。
+            session.updated_at = datetime.utcnow()
             db.commit()
             logger.warning("历史场次详情采集失败: session_id=%s error=%s", session.id, error)
             if progress_callback:
@@ -269,8 +302,11 @@ async def _enrich_history_sessions(
             continue
 
         if detail.get("validation_failed"):
-            session.detail_collection_status = "unavailable"
-            session.detail_collection_error = "平台详情页未回显该场次时间，无法安全确认主播归属"
+            # 校验失败只能说明本次不能安全写入，不代表平台没有回放。
+            # 同一场次本轮只尝试一次，后续刷新按冷却时间与批次上限重试。
+            session.detail_collection_status = TaskStatus.RETRYABLE
+            session.detail_collection_error = HISTORY_VALIDATION_ERROR
+            session.updated_at = datetime.utcnow()
             db.commit()
             failed += 1
             if progress_callback:
@@ -292,12 +328,9 @@ async def _enrich_history_sessions(
             or replay_url
         )
         if not has_detail_data:
-            if not session.anchor_name:
-                session.detail_collection_status = "unavailable"
-                session.detail_collection_error = "平台未提供主播映射且详情接口为空，无法安全补齐"
-            else:
-                session.detail_collection_status = TaskStatus.RETRYABLE
-                session.detail_collection_error = "平台详情接口本次返回空数据，将在下次刷新时重试"
+            session.detail_collection_status = TaskStatus.RETRYABLE
+            session.detail_collection_error = "平台详情接口本次返回空数据，将在下次刷新时重试"
+            session.updated_at = datetime.utcnow()
             db.commit()
             failed += 1
             if progress_callback:
@@ -332,8 +365,8 @@ async def _enrich_history_sessions(
             db.query(LiveAudienceProfile).filter(LiveAudienceProfile.session_id == session.id).delete()
             _save_profiles(db, session.id, profiles)
 
-        if changed or metrics_count or comments_count:
-            db.commit()
+        # 即使仅恢复了状态、返回的业务数据与旧值相同，也必须清除旧错误。
+        db.commit()
         enriched += 1
         if progress_callback:
             progress_callback(checked, len(target_sessions), enriched, failed)
@@ -347,8 +380,8 @@ async def _enrich_history_sessions(
         )
 
     remaining = sum(
-        session.detail_collection_status in (None, "", "pending", TaskStatus.RETRYABLE)
-        for session in target_sessions
+        session.detail_collection_status in (None, "", "pending") or _is_history_detail_retry(session)
+        for session in pending_sessions
     )
     progress = {
         "enriched_count": enriched,

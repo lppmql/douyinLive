@@ -25,6 +25,20 @@ from app.services.collector.utils import (
 # 大屏页地址（与 manual_collect 共享常量）
 from app.services.collector.constants import LIVE_SCREEN_URL
 
+# 旧版把这两种暂时失败误记为 unavailable。只恢复明确已知的误分类，
+# 不把其他未知/人工保留的不可用状态一律加入自动队列。
+HISTORY_VALIDATION_ERROR = "平台详情页未回显该场次时间，无法安全确认主播归属"
+HISTORY_EMPTY_DETAIL_ERROR = "平台未提供主播映射且详情接口为空，无法安全补齐"
+LEGACY_RETRYABLE_DETAIL_ERRORS = frozenset({HISTORY_VALIDATION_ERROR, HISTORY_EMPTY_DETAIL_ERROR})
+
+
+def _is_history_detail_retry(session: LiveSession) -> bool:
+    """识别本次需要限速的失败重试，包括旧版误分类的历史记录。"""
+    return session.detail_collection_status == TaskStatus.RETRYABLE or (
+        session.detail_collection_status == "unavailable"
+        and getattr(session, "detail_collection_error", None) in LEGACY_RETRYABLE_DETAIL_ERRORS
+    )
+
 
 def _get_or_create_session(
     db: Session,
@@ -113,6 +127,12 @@ def _apply_session_anchor_profile(session: LiveSession, profile: dict) -> bool:
     changed = False
     for field in ("anchor_name", "anchor_nickname", "anchor_avatar_url", "douyin_id", "douyin_uid"):
         value = profile.get(field)
+        # 大屏顶部即使点了小眼睛，也可能只返回“零食赛道严...-文豪”这类
+        # 截断文本。它不是新的真实名称，不能覆盖企业列表已保存的完整资料。
+        if field in {"anchor_name", "anchor_nickname"} and any(
+            marker in str(value or "") for marker in ("...", "…", "***")
+        ):
+            continue
         if value and getattr(session, field) != value:
             setattr(session, field, str(value)[:500])
             changed = True
@@ -121,7 +141,7 @@ def _apply_session_anchor_profile(session: LiveSession, profile: dict) -> bool:
 
 def _needs_history_enrichment(session: LiveSession, has_related_assets: bool = False) -> bool:
     """判断历史场次是否还需要继续补齐详情。"""
-    if session.detail_collection_status in (None, "", TaskStatus.PENDING, TaskStatus.RETRYABLE):
+    if session.detail_collection_status in (None, "", TaskStatus.PENDING) or _is_history_detail_retry(session):
         return True
     if session.detail_collection_status != "complete":
         return False

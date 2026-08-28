@@ -56,8 +56,9 @@ function fmtDateTime(val: string | null): string {
 
 const detailStatusMap: Record<string, { type: 'success' | 'warning' | 'info' | 'error'; label: string }> = {
   complete: { type: 'success', label: '详情完整' },
-  retryable: { type: 'warning', label: '待重试' },
-  unavailable: { type: 'error', label: '平台不可回放' },
+  retryable: { type: 'warning', label: '详情待重试' },
+  // 详情采集与视频是否可播放是两回事，不能用详情失败推断回放不存在。
+  unavailable: { type: 'error', label: '详情暂不可用' },
   pending: { type: 'info', label: '待采集' }
 };
 
@@ -298,8 +299,8 @@ async function handleReset() {
             :options="[
               { label: '详情完整', value: 'complete' },
               { label: '待采集', value: 'pending' },
-              { label: '待重试', value: 'retryable' },
-              { label: '不可回放', value: 'unavailable' }
+              { label: '详情待重试', value: 'retryable' },
+              { label: '详情暂不可用', value: 'unavailable' }
             ]"
           />
           <NButton type="primary" @click="handleSearch">查询</NButton>

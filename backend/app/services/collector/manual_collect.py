@@ -632,8 +632,9 @@ async def collect_all(
             94,
             history_detail_progress["checked_count"],
             history_detail_progress["batch_size"],
-            f"全部场次已检查，本次补齐 {history_detail_progress['enriched_count']} 场，"
-            f"失败 {history_detail_progress['failed_count']} 场",
+            f"本轮详情采集完成，补齐 {history_detail_progress['enriched_count']} 场，"
+            f"失败 {history_detail_progress['failed_count']} 场，"
+            f"剩余 {history_detail_progress['remaining_count']} 场等待后续刷新重试",
             history_detail_progress,
         )
 

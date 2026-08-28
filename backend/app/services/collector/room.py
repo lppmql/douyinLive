@@ -539,6 +539,15 @@ async def _scrape_history_session_detail(
 
         body_text = await page.evaluate("document.body?.innerText || ''")
         await _drain_response_tasks(response_tasks)
+        if validate_history:
+            # 页面可能先显示骨架、再异步补上场次时间。仅在尚未匹配时有限等待，
+            # 正常场次不增加延迟；不能因已拿到回放/指标就跳过防串场校验。
+            for _ in range(3):
+                if _is_expected_history_session(body_text, session):
+                    break
+                await asyncio.sleep(1)
+                body_text = await page.evaluate("document.body?.innerText || ''")
+            await _drain_response_tasks(response_tasks)
         if validate_history and not _is_expected_history_session(body_text, session):
             logger.warning(
                 "历史场次详情页校验失败，跳过写入: session_id=%s room_id=%s",
