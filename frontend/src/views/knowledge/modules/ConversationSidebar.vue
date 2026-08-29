@@ -59,6 +59,8 @@ const emit = defineEmits<{
                   {{ conv.title || '新对话' }}
                 </div>
                 <div class="conversation-item__meta">
+                  <span>{{ conv.session_id ? `场次 #${conv.session_id}` : '全部场次' }}</span>
+                  <span class="mx-1">·</span>
                   <span>{{ conv.message_count || 0 }} 条消息</span>
                   <span class="mx-1">·</span>
                   <span>{{ formatRelativeTime(conv.updated_at) }}</span>

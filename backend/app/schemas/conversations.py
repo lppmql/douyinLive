@@ -29,6 +29,7 @@ class ConversationListItem(BaseModel):
     """对话列表项（不含消息内容，只含摘要信息）"""
     model_config = ConfigDict(from_attributes=True)
     id: int
+    session_id: int | None = None
     title: str | None = None
     message_count: int = 0
     created_at: datetime | None = None
@@ -38,6 +39,7 @@ class ConversationDetail(BaseModel):
     """对话详情（含消息列表）"""
     model_config = ConfigDict(from_attributes=True)
     id: int
+    session_id: int | None = None
     title: str | None = None
     messages: list[ConversationMessageOut] = Field(default_factory=list)
     created_at: datetime | None = None
@@ -46,6 +48,7 @@ class ConversationDetail(BaseModel):
 class ConversationCreateRequest(BaseModel):
     """新建对话请求 — 可带首条消息"""
     title: str | None = None
+    session_id: int | None = Field(default=None, gt=0)
     first_message: str | None = Field(None, max_length=2000)
 
 

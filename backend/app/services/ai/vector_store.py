@@ -13,6 +13,9 @@ from typing import Any
 
 from qdrant_client.models import (
     Distance,
+    FieldCondition,
+    Filter,
+    MatchValue,
     PointStruct,
     VectorParams,
     ScoredPoint,
@@ -78,6 +81,7 @@ def ensure_collections() -> dict[str, bool]:
 
 def upsert_knowledge_item(
     kb_id: int,
+    session_id: int,
     title: str,
     content: str,
     source_type: str,
@@ -113,6 +117,7 @@ def upsert_knowledge_item(
                     vector=vector,
                     payload={
                         "kb_id": kb_id,
+                        "session_id": session_id,
                         "title": title,
                         "content": content[:2000],  # payload 存摘要，完整内容在 MySQL
                         "source_type": source_type,
@@ -217,7 +222,11 @@ def delete_time_slice(slice_id: int) -> bool:
 # ── 向量搜索 ──
 
 
-def search_knowledge_vectors(query_vector: list[float], limit: int = 10) -> list[dict[str, Any]]:
+def search_knowledge_vectors(
+    query_vector: list[float],
+    limit: int = 10,
+    session_id: int | None = None,
+) -> list[dict[str, Any]]:
     """在知识条目集合中做向量相似度搜索。
 
     Args:
@@ -236,10 +245,12 @@ def search_knowledge_vectors(query_vector: list[float], limit: int = 10) -> list
             collection_name=settings.QDRANT_COLLECTION_KB,
             query_vector=query_vector,
             limit=limit,
+            query_filter=_session_filter(session_id),
         )
         return [
             {
                 "kb_id": int(point.id),
+                "session_id": point.payload.get("session_id"),
                 "title": point.payload.get("title", ""),
                 "content": point.payload.get("content", ""),
                 "source_type": point.payload.get("source_type", ""),
@@ -253,7 +264,11 @@ def search_knowledge_vectors(query_vector: list[float], limit: int = 10) -> list
         return []
 
 
-def search_time_slice_vectors(query_vector: list[float], limit: int = 10) -> list[dict[str, Any]]:
+def search_time_slice_vectors(
+    query_vector: list[float],
+    limit: int = 10,
+    session_id: int | None = None,
+) -> list[dict[str, Any]]:
     """在时间片集合中做向量相似度搜索。
 
     Args:
@@ -272,6 +287,7 @@ def search_time_slice_vectors(query_vector: list[float], limit: int = 10) -> lis
             collection_name=settings.QDRANT_COLLECTION_SLICES,
             query_vector=query_vector,
             limit=limit,
+            query_filter=_session_filter(session_id),
         )
         return [
             {
@@ -287,6 +303,13 @@ def search_time_slice_vectors(query_vector: list[float], limit: int = 10) -> lis
     except Exception as exc:
         logger.warning("时间片向量搜索失败: %s", exc)
         return []
+
+
+def _session_filter(session_id: int | None) -> Filter | None:
+    """为场次级问答构造 Qdrant 过滤器；全知识库模式不限制。"""
+    if session_id is None:
+        return None
+    return Filter(must=[FieldCondition(key="session_id", match=MatchValue(value=session_id))])
 
 
 # ── 混合检索（RRF 倒数排名融合） ──

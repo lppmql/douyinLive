@@ -4,20 +4,13 @@
  * 把原始 API 数据转换成前端展示需要的格式。
  * 所有函数都是纯函数，不依赖响应式状态。
  */
-import type { SelectOption } from 'naive-ui';
 import { formatDate, formatDuration, getStatusLabel } from '@/utils/transcriptHelpers';
+import type { SessionSelectorOption } from '@/adapters/session-selector-adapter';
 
 // ========== 类型定义 ==========
 
 /** 场次下拉选项（扩展 SelectOption，带主播头像信息） */
-export interface SessionSelectOption extends SelectOption {
-  sessionId: number;
-  anchorName: string;
-  anchorNickname: string | null;
-  douyinId: string | null;
-  avatarUrl: string | null;
-  metaLabel: string;
-}
+export type SessionSelectOption = SessionSelectorOption;
 
 /** 话术分类统计项 */
 export interface CategoryStat {
@@ -205,7 +198,7 @@ export function buildTaskStatusCards(
  * 把场次列表 + 任务映射表合并成 NSelect 需要的选项格式
  */
 export function buildSessionOptions(
-  sessions: Api.Douyin.LiveSession[],
+  sessions: Api.Douyin.LiveSessionListItem[],
   taskBySession: Map<number, Api.Douyin.TranscriptTask>
 ): SessionSelectOption[] {
   return sessions.map(session => {

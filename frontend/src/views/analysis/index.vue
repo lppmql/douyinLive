@@ -49,6 +49,9 @@ const {
   latestReport,
   actionBusy,
   sessionOptions,
+  selectorAnchorKey,
+  selectorDateRange,
+  selectorAnchorOptions,
   scoreMetrics,
   improvementSuggestions,
   nextLivePlan,
@@ -59,7 +62,11 @@ const {
   runFullReview,
   runScore,
   runOptimize,
-  openTranscripts
+  openTranscripts,
+  updateSelectorAnchor,
+  updateSelectorDateRange,
+  searchSelectorSessions,
+  resetSelectorFilters
 } = useReviewWorkbench();
 
 onMounted(initializePage);
@@ -100,6 +107,9 @@ function updateUnifiedReview(review: Api.Douyin.UnifiedAiReview) {
         :selected-session-id="selectedSessionId"
         :loading="loading"
         :session-options="sessionOptions"
+        :anchor-options="selectorAnchorOptions"
+        :anchor-key="selectorAnchorKey"
+        :date-range="selectorDateRange"
         :selected-session="selectedSession"
         :action-busy="actionBusy"
         :action-stage="actionStage"
@@ -107,6 +117,10 @@ function updateUnifiedReview(review: Api.Douyin.UnifiedAiReview) {
         :analysis-ready="analysisReady"
         :workbench="workbench"
         @update:selected-session-id="changeSession"
+        @update:anchor-key="updateSelectorAnchor"
+        @update:date-range="updateSelectorDateRange"
+        @search-sessions="searchSelectorSessions"
+        @reset-filters="resetSelectorFilters"
         @run-full-review="runFullReview"
       />
 

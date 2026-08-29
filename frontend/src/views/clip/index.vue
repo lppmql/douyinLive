@@ -7,7 +7,6 @@ import {
   NInput,
   NModal,
   NProgress,
-  NSelect,
   NSpace,
   NSpin,
   NTag,
@@ -16,6 +15,7 @@ import {
 } from 'naive-ui';
 import { clipSubtitleSrtUrl, clipVideoUrl, useClipData } from './composables/useClipData';
 import AnchorIdentity from '@/components/business/anchor-identity.vue';
+import SessionSelector from '@/components/business/session-selector.vue';
 import ClipCard from './modules/ClipCard.vue';
 import ClipEvidencePanel from './modules/ClipEvidencePanel.vue';
 
@@ -24,7 +24,18 @@ defineOptions({ name: 'Clip' });
 const message = useMessage();
 
 const clipData = useClipData(message);
-const { loading, overview, sessionOptions, actionLoading, errorMessage, selectedSessionId } = clipData;
+const {
+  loading,
+  sessionLoading,
+  overview,
+  sessionOptions,
+  actionLoading,
+  errorMessage,
+  selectedSessionId,
+  selectorAnchorKey,
+  selectorDateRange,
+  selectorAnchorOptions
+} = clipData;
 const generateButtonText = computed(() =>
   overview.value?.clips.length ? '重新生成本场成片' : '生成本场成片'
 );
@@ -123,18 +134,19 @@ function fmtDateTime(val: string | null): string {
     </NAlert>
 
     <div class="clip-page__toolbar">
-      <NSelect
-        v-model:value="selectedSessionId"
+      <SessionSelector
+        :model-value="selectedSessionId"
         class="clip-page__session-select"
-        placeholder="搜索主播或场次"
-        filterable
-        remote
-        clearable
         :options="sessionOptions"
-        :render-label="clipData.renderSessionLabel"
-        :loading="loading"
+        :anchor-options="selectorAnchorOptions"
+        :anchor-key="selectorAnchorKey"
+        :date-range="selectorDateRange"
+        :loading="sessionLoading"
         @search="clipData.searchSessionOptions"
-        @update:value="value => clipData.loadOverview(value as number)"
+        @update:model-value="value => clipData.loadOverview(value)"
+        @update:anchor-key="clipData.updateSelectorAnchor"
+        @update:date-range="clipData.updateSelectorDateRange"
+        @reset="clipData.resetSelectorFilters"
       />
       <NButton type="primary" :loading="actionLoading" :disabled="!selectedSessionId" @click="openGenerateAll">
         {{ generateButtonText }}
@@ -342,7 +354,7 @@ function fmtDateTime(val: string | null): string {
 }
 
 .clip-page__session-select {
-  width: min(480px, 100%);
+  width: min(760px, 100%);
 }
 
 .clip-page__video-error {

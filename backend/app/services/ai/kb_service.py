@@ -30,9 +30,12 @@ def search_knowledge(
     keyword: str | None = None,
     category: str | None = None,
     limit: int = 10,
+    session_id: int | None = None,
 ) -> list[KnowledgeBase]:
     """搜索知识库"""
     q = db.query(KnowledgeBase)
+    if session_id is not None:
+        q = q.filter(KnowledgeBase.session_id == session_id)
     if category:
         q = q.filter(KnowledgeBase.category == category)
     if not keyword:
@@ -137,6 +140,7 @@ def _prepare_qa_context(
     question: str,
     category: str | None = None,
     history: list[dict[str, str]] | None = None,
+    session_id: int | None = None,
 ) -> dict[str, Any] | None:
     """准备问答上下文：混合搜索 → 拼接上下文 → 构建提示词。
 
@@ -156,15 +160,31 @@ def _prepare_qa_context(
     retrieval_question = _contextual_question(question, history)
 
     # 关键词搜索（保留作为兜底）
-    time_slices_keyword = search_time_slices(db, question=retrieval_question, limit=10)
-    items_keyword = search_knowledge(db, keyword=retrieval_question, category=category, limit=10)
+    time_slices_keyword = search_time_slices(
+        db,
+        question=retrieval_question,
+        limit=10,
+        session_id=session_id,
+    )
+    items_keyword = search_knowledge(
+        db,
+        keyword=retrieval_question,
+        category=category,
+        limit=10,
+        session_id=session_id,
+    )
 
     # 向量搜索（Qdrant 语义相似度）
-    time_slices_vector, items_vector = _vector_search(retrieval_question)
+    time_slices_vector, items_vector = _vector_search(retrieval_question, session_id=session_id)
 
     # RRF 融合两路结果
     time_slices, items = _hybrid_merge(
-        db, time_slices_vector, time_slices_keyword, items_vector, items_keyword
+        db,
+        time_slices_vector,
+        time_slices_keyword,
+        items_vector,
+        items_keyword,
+        session_id=session_id,
     )
 
     if not time_slices and not items:
@@ -233,6 +253,7 @@ def qa_search(
     question: str,
     category: str | None = None,
     history: list[dict[str, str]] | None = None,
+    session_id: int | None = None,
 ) -> dict[str, Any]:
     """知识库问答（一次性返回） — 混合搜索 → 拼接上下文 → 本地模型 → 回答 + 引用来源
 
@@ -243,7 +264,7 @@ def qa_search(
     4. 调用本地模型 QA 提示词
     5. 返回回答 + 引用来源
     """
-    ctx = _prepare_qa_context(db, question, category, history)
+    ctx = _prepare_qa_context(db, question, category, history, session_id)
     if ctx is None:
         return {
             "answer": "知识库中没有找到相关信息。请尝试其他关键词或稍后再试。",
@@ -277,6 +298,7 @@ async def qa_search_stream(
     question: str,
     category: str | None = None,
     history: list[dict[str, str]] | None = None,
+    session_id: int | None = None,
 ):
     """知识库问答（流式输出） — 和 qa_search 逻辑完全一样，但通过 SSE 逐字推送回答。
 
@@ -296,7 +318,7 @@ async def qa_search_stream(
         )
     """
     # 现有数据库和向量检索为同步实现，放入线程池避免阻塞事件循环。
-    ctx = await run_in_threadpool(_prepare_qa_context, db, question, category, history)
+    ctx = await run_in_threadpool(_prepare_qa_context, db, question, category, history, session_id)
     if ctx is None:
         # 没有找到相关知识
         yield f"data: {json.dumps({'type': 'done', 'sources': [], 'has_result': False}, ensure_ascii=False)}\n\n"
@@ -341,7 +363,7 @@ def _upsert_kb_item(
         existing.content = content
         db.commit()
         # Phase 36: 内容变更后同步向量到 Qdrant
-        _sync_kb_item_to_qdrant(existing.id, title[:200], content, source_type)
+        _sync_kb_item_to_qdrant(existing.id, session_id, title[:200], content, source_type)
         return 0
     kb = KnowledgeBase(
         session_id=session_id,
@@ -354,11 +376,17 @@ def _upsert_kb_item(
     db.commit()
     db.refresh(kb)
     # Phase 36: 新建后同步向量到 Qdrant
-    _sync_kb_item_to_qdrant(kb.id, title[:200], content, source_type)
+    _sync_kb_item_to_qdrant(kb.id, session_id, title[:200], content, source_type)
     return 1
 
 
-def _sync_kb_item_to_qdrant(kb_id: int, title: str, content: str, source_type: str) -> None:
+def _sync_kb_item_to_qdrant(
+    kb_id: int,
+    session_id: int,
+    title: str,
+    content: str,
+    source_type: str,
+) -> None:
     """把一条知识条目的向量写入 Qdrant（独立事务，失败不影响 MySQL）。"""
     try:
         from app.services.ai.embedding_service import embed_text
@@ -370,6 +398,7 @@ def _sync_kb_item_to_qdrant(kb_id: int, title: str, content: str, source_type: s
         if vector:
             upsert_knowledge_item(
                 kb_id=kb_id,
+                session_id=session_id,
                 title=title,
                 content=content,
                 source_type=source_type,
@@ -492,7 +521,13 @@ def save_transcript_to_kb(db: Session, session_id: int) -> int:
         existing.title = f"话术 - 场次{session_id}"
         existing.category = "优质话术"
         db.commit()
-        _sync_kb_item_to_qdrant(existing.id, f"话术 - 场次{session_id}", full_text, "transcript")
+        _sync_kb_item_to_qdrant(
+            existing.id,
+            session_id,
+            f"话术 - 场次{session_id}",
+            full_text,
+            "transcript",
+        )
         return 0
 
     kb = KnowledgeBase(
@@ -505,7 +540,7 @@ def save_transcript_to_kb(db: Session, session_id: int) -> int:
     db.add(kb)
     db.commit()
     db.refresh(kb)
-    _sync_kb_item_to_qdrant(kb.id, f"话术 - 场次{session_id}", full_text, "transcript")
+    _sync_kb_item_to_qdrant(kb.id, session_id, f"话术 - 场次{session_id}", full_text, "transcript")
     logger.info("场次 %d 话术已保存到知识库", session_id)
     return 1
 
@@ -564,7 +599,7 @@ def save_analysis_to_kb(db: Session, session_id: int) -> int:
         db.commit()
         # Phase 36: 新写入和变更的条目同步向量到 Qdrant
         for kb_id, t, c in to_sync:
-            _sync_kb_item_to_qdrant(kb_id, t, c, "ai_analysis")
+            _sync_kb_item_to_qdrant(kb_id, session_id, t, c, "ai_analysis")
         logger.info("场次 %d 的 %d 条分析结果已保存到知识库", session_id, saved)
     return saved
 
@@ -617,7 +652,7 @@ def save_review_findings_to_kb(db: Session, session_id: int) -> int:
         existing.category = "分析结论"
         db.commit()
         if changed:
-            _sync_kb_item_to_qdrant(existing.id, title, content, "ai_analysis")
+            _sync_kb_item_to_qdrant(existing.id, session_id, title, content, "ai_analysis")
         return int(changed)
 
     kb = KnowledgeBase(
@@ -630,7 +665,7 @@ def save_review_findings_to_kb(db: Session, session_id: int) -> int:
     db.add(kb)
     db.commit()
     db.refresh(kb)
-    _sync_kb_item_to_qdrant(kb.id, title, content, "ai_analysis")
+    _sync_kb_item_to_qdrant(kb.id, session_id, title, content, "ai_analysis")
     logger.info("场次 %d 的 %d 条复盘发现已保存到知识库", session_id, len(findings))
     return 1
 
@@ -638,7 +673,10 @@ def save_review_findings_to_kb(db: Session, session_id: int) -> int:
 # ── Phase 36: 混合搜索辅助函数 ──
 
 
-def _vector_search(question: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _vector_search(
+    question: str,
+    session_id: int | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """向量搜索：对问题做 embedding，分别搜索时间片和知识条目两个向量集合。
 
     Qdrant 不可用或 embedding 失败时返回空列表，
@@ -655,8 +693,8 @@ def _vector_search(question: str) -> tuple[list[dict[str, Any]], list[dict[str, 
         if vector is None:
             return [], []
 
-        time_slices = search_time_slice_vectors(vector, limit=10)
-        items = search_knowledge_vectors(vector, limit=10)
+        time_slices = search_time_slice_vectors(vector, limit=10, session_id=session_id)
+        items = search_knowledge_vectors(vector, limit=10, session_id=session_id)
         return time_slices, items
     except Exception as exc:
         logger.debug("向量搜索跳过（Qdrant 不可用或 API 失败）: %s", exc)
@@ -669,6 +707,7 @@ def _hybrid_merge(
     time_slices_keyword: list[dict[str, Any]],
     items_vector: list[dict[str, Any]],
     items_keyword: list[KnowledgeBase],
+    session_id: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[KnowledgeBase]]:
     """混合搜索合并：向量搜 + 关键词搜 → RRF 融合 → 从 MySQL 补齐完整数据。
 
@@ -686,11 +725,16 @@ def _hybrid_merge(
             keyword_id_key="id",
             top_n=8,
         )
-        merged_slices = _resolve_slices_from_fusion(db, fused_slices, time_slices_keyword)
+        merged_slices = _resolve_slices_from_fusion(
+            db,
+            fused_slices,
+            time_slices_keyword,
+            session_id=session_id,
+        )
         logger.info("RRF 融合时间片: 向量%d + 关键词%d → %d",
                       len(time_slices_vector), len(time_slices_keyword), len(merged_slices))
     elif time_slices_vector:
-        merged_slices = _resolve_slices_from_vector(db, time_slices_vector)
+        merged_slices = _resolve_slices_from_vector(db, time_slices_vector, session_id=session_id)
         logger.info("纯向量搜索时间片: %d 条", len(merged_slices))
     else:
         merged_slices = time_slices_keyword
@@ -710,7 +754,10 @@ def _hybrid_merge(
             if kid is not None:
                 kb_ids.add(kid)
         if kb_ids:
-            rows = db.query(KnowledgeBase).filter(KnowledgeBase.id.in_(list(kb_ids))).all()
+            rows_query = db.query(KnowledgeBase).filter(KnowledgeBase.id.in_(list(kb_ids)))
+            if session_id is not None:
+                rows_query = rows_query.filter(KnowledgeBase.session_id == session_id)
+            rows = rows_query.all()
             row_by_id = {row.id: row for row in rows}
             merged_items = [row_by_id[kid] for kid in kb_ids if kid in row_by_id]
         else:
@@ -720,7 +767,10 @@ def _hybrid_merge(
     elif items_vector:
         kb_ids = [v["kb_id"] for v in items_vector if v.get("kb_id")]
         if kb_ids:
-            rows = db.query(KnowledgeBase).filter(KnowledgeBase.id.in_(kb_ids)).all()
+            rows_query = db.query(KnowledgeBase).filter(KnowledgeBase.id.in_(kb_ids))
+            if session_id is not None:
+                rows_query = rows_query.filter(KnowledgeBase.session_id == session_id)
+            rows = rows_query.all()
             row_by_id = {row.id: row for row in rows}
             merged_items = [row_by_id[kb_id] for kb_id in kb_ids if kb_id in row_by_id]
         else:
@@ -737,6 +787,7 @@ def _resolve_slices_from_fusion(
     db: Session,
     fused: list[dict[str, Any]],
     keyword_results: list[dict[str, Any]],
+    session_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """用 RRF 融合结果解析时间片完整数据。
 
@@ -772,7 +823,10 @@ def _resolve_slices_from_fusion(
 
     # 向量搜索结果中不在关键词结果里的，从 MySQL 补齐
     if db_ids_needed:
-        rows = db.query(KnowledgeTimeSlice).filter(KnowledgeTimeSlice.id.in_(list(db_ids_needed))).all()
+        rows_query = db.query(KnowledgeTimeSlice).filter(KnowledgeTimeSlice.id.in_(list(db_ids_needed)))
+        if session_id is not None:
+            rows_query = rows_query.filter(KnowledgeTimeSlice.session_id == session_id)
+        rows = rows_query.all()
         for row in rows:
             source_types = []
             if row.transcript_text:
@@ -805,6 +859,7 @@ def _resolve_slices_from_fusion(
 def _resolve_slices_from_vector(
     db: Session,
     vector_results: list[dict[str, Any]],
+    session_id: int | None = None,
 ) -> list[dict[str, Any]]:
     """纯向量搜索结果：从 MySQL 捞出时间片的完整数据。"""
     if not vector_results:
@@ -815,7 +870,10 @@ def _resolve_slices_from_vector(
     if not slice_ids:
         return []
 
-    rows = db.query(KnowledgeTimeSlice).filter(KnowledgeTimeSlice.id.in_(slice_ids)).all()
+    rows_query = db.query(KnowledgeTimeSlice).filter(KnowledgeTimeSlice.id.in_(slice_ids))
+    if session_id is not None:
+        rows_query = rows_query.filter(KnowledgeTimeSlice.session_id == session_id)
+    rows = rows_query.all()
     row_by_id = {row.id: row for row in rows}
 
     results = []

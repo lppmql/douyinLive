@@ -266,6 +266,16 @@ declare namespace Api {
       | 'leads_count'
     >;
 
+    interface LiveSessionAnchorOption {
+      anchor_key: string;
+      anchor_name: string;
+      anchor_nickname: string | null;
+      anchor_avatar_url: string | null;
+      douyin_id: string | null;
+      douyin_uid: string | null;
+      latest_session_id: number;
+    }
+
     interface LiveMetric {
       metric_time: string;
       exposure_count: number;
@@ -1170,6 +1180,7 @@ declare namespace Api {
     /* ---------- 对话历史 ---------- */
     interface ConversationListItem {
       id: number;
+      session_id: number | null;
       title: string | null;
       message_count: number;
       created_at: string | null;
@@ -1188,6 +1199,7 @@ declare namespace Api {
 
     interface ConversationDetail {
       id: number;
+      session_id: number | null;
       title: string | null;
       messages: ConversationMessage[];
       created_at: string | null;

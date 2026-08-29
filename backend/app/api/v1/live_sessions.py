@@ -1,11 +1,12 @@
 """直播场次 CRUD API"""
 import asyncio
+from datetime import date
 from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import Response, StreamingResponse
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -39,11 +40,16 @@ from app.schemas import (
     LiveSessionCreate,
     LiveSessionDetailResponse,
     LiveSessionListItemResponse,
+    LiveSessionAnchorOptionResponse,
     LiveSessionPageResponse,
     LiveSessionResponse,
     LiveSessionUpdate,
     MessageResponse,
     CommentProfileEnrichmentStatusResponse,
+)
+from app.services.live_session_selector import (
+    build_session_anchor_key_expression,
+    build_session_selector_condition,
 )
 
 router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
@@ -217,6 +223,85 @@ def page_sessions(
         "current": current,
         "size": size,
     }
+
+
+@router.get("/anchors", response_model=list[LiveSessionAnchorOptionResponse])
+def list_session_anchor_options(
+    limit: int = Query(200, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    """返回数据库中真实出现过的主播，并使用该主播最新场次的身份快照。"""
+    anchor_key = build_session_anchor_key_expression()
+    display_name = func.trim(
+        func.coalesce(
+            func.nullif(LiveSession.anchor_name, ""),
+            func.nullif(LiveSession.anchor_nickname, ""),
+        )
+    )
+    ranked_sessions = (
+        db.query(
+            LiveSession.id.label("session_id"),
+            anchor_key.label("anchor_key"),
+            func.row_number().over(
+                partition_by=anchor_key,
+                order_by=(LiveSession.live_start_time.desc(), LiveSession.id.desc()),
+            ).label("snapshot_rank"),
+        )
+        .filter(display_name.is_not(None), display_name != "")
+        .subquery()
+    )
+    rows = (
+        db.query(
+            ranked_sessions.c.anchor_key,
+            display_name.label("anchor_name"),
+            LiveSession.anchor_nickname,
+            LiveSession.anchor_avatar_url,
+            LiveSession.douyin_id,
+            LiveSession.douyin_uid,
+            LiveSession.id.label("latest_session_id"),
+        )
+        .join(ranked_sessions, ranked_sessions.c.session_id == LiveSession.id)
+        .filter(ranked_sessions.c.snapshot_rank == 1)
+        .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .limit(limit)
+        .all()
+    )
+    return [LiveSessionAnchorOptionResponse(**row._mapping) for row in rows]
+
+
+@router.get("/selector-options", response_model=list[LiveSessionListItemResponse])
+def list_session_selector_options(
+    limit: int = Query(50, ge=1, le=200),
+    search: str | None = Query(None, max_length=100),
+    anchor_key: str | None = Query(None, max_length=256),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    include_session_id: int | None = Query(None, ge=1),
+    db: Session = Depends(get_db),
+):
+    """按统一条件返回公共场次候选；指定场次即使较旧也保证回显。"""
+    try:
+        condition = build_session_selector_condition(
+            search=search,
+            anchor_key=anchor_key,
+            start_date=start_date,
+            end_date=end_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    base_query = db.query(*LIVE_SESSION_LIST_COLUMNS)
+    rows = (
+        base_query.filter(condition)
+        .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .limit(limit)
+        .all()
+    )
+    if include_session_id and all(row.id != include_session_id for row in rows):
+        included = base_query.filter(LiveSession.id == include_session_id).first()
+        if included:
+            rows = [included, *rows[: max(0, limit - 1)]]
+    return [LiveSessionListItemResponse(**row._mapping) for row in rows]
 
 
 @router.get("/", response_model=list[LiveSessionResponse])

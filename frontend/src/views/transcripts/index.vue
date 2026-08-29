@@ -22,6 +22,7 @@ const wb = useTranscriptWorkbench();
 const {
   // 状态
   loading,
+  sessionLoading,
   loadError,
   // 任务卡片
   taskStatusCards,
@@ -31,6 +32,9 @@ const {
   sessionOptions,
   selectedSession,
   selectedTask,
+  selectorAnchorKey,
+  selectorDateRange,
+  selectorAnchorOptions,
   hasContent,
   queueLoading,
   batchLoading,
@@ -88,7 +92,11 @@ const {
   stopTask,
   restoreAsrRuntime,
   openSessionDetail,
-  changeDispatchOrder
+  changeDispatchOrder,
+  updateSelectorAnchor,
+  updateSelectorDateRange,
+  searchSelectorSessions,
+  resetSelectorFilters
 } = wb;
 </script>
 
@@ -105,8 +113,11 @@ const {
     <!-- 1. 当前场次工作台：先完成选择、修复和生成终稿等核心任务。 -->
     <TranscriptSessionControl
       :session-options="sessionOptions"
+      :anchor-options="selectorAnchorOptions"
+      :anchor-key="selectorAnchorKey"
+      :date-range="selectorDateRange"
       :selected-session-id="selectedSessionId"
-      :loading="loading"
+      :loading="sessionLoading"
       :selected-session="selectedSession"
       :selected-task="selectedTask"
       :has-content="hasContent"
@@ -122,7 +133,11 @@ const {
       :dispatch-policy-loading="dispatchPolicyLoading"
       :asr-runtime="asrRuntime"
       :runtime-action-loading="runtimeActionLoading"
-      @update:selected-session-id="(val: number) => loadTranscript(val)"
+      @update:selected-session-id="(val: number | null) => val && loadTranscript(val)"
+      @update:anchor-key="updateSelectorAnchor"
+      @update:date-range="updateSelectorDateRange"
+      @search-sessions="searchSelectorSessions"
+      @reset-filters="resetSelectorFilters"
       @start-transcription="startTranscription"
       @run-ai-pipeline="runAiPipeline"
       @copy-full-text="copyFullText"

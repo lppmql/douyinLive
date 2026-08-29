@@ -1,12 +1,12 @@
 import { computed, ref } from 'vue';
-import type { SelectOption } from 'naive-ui';
 import { useMessage } from 'naive-ui';
 import { useRoute, useRouter } from 'vue-router';
 
 import { unwrapServiceData } from '@/utils/service';
 import {
   fetchAnalysisReports,
-  fetchLiveSessions,
+  fetchLiveSessionDetail,
+  fetchSessionSelectorOptions,
   fetchReviewWorkbench,
   generateSessionReview,
   optimizeSession,
@@ -24,21 +24,16 @@ import {
 } from '@/utils/analysisHelpers';
 
 import { restoreReportsFromList } from '@/adapters/review-report-adapter';
+import { buildCommonSessionOptions } from '@/adapters/session-selector-adapter';
+import {
+  useSessionSelectorFilters,
+  type SessionSelectorChangeContext
+} from '@/hooks/business/session-selector';
 
 // ========== 类型定义 ==========
 
 /** 操作阶段：空字符串 = 空闲，其他值为具体阶段 */
 export type ActionStage = '' | 'evidence' | 'score' | 'optimize' | 'score-only' | 'optimize-only';
-
-/** 场次下拉选项（扩展 SelectOption，带主播头像信息） */
-export type SessionSelectOption = SelectOption & {
-  sessionId: number;
-  anchorName: string;
-  anchorNickname: string | null;
-  douyinId: string | null;
-  avatarUrl: string | null;
-  metaLabel: string;
-};
 
 // ========== Composable ==========
 
@@ -61,7 +56,8 @@ export function useReviewWorkbench() {
 
   // ---- 响应式状态 ----
 
-  const sessions = ref<Api.Douyin.LiveSession[]>([]);
+  const sessions = ref<Api.Douyin.LiveSessionListItem[]>([]);
+  const selectedSessionDetail = ref<Api.Douyin.LiveSession | null>(null);
   const selectedSessionId = ref<number | null>(null);
   const workbench = ref<Api.Douyin.ReviewWorkbench | null>(null);
   const sessionReports = ref<Api.Douyin.AnalysisReport[]>([]);
@@ -80,7 +76,7 @@ export function useReviewWorkbench() {
 
   /** 当前选中的场次对象 */
   const selectedSession = computed(() =>
-    sessions.value.find(item => item.id === selectedSessionId.value) || null
+    selectedSessionDetail.value?.id === selectedSessionId.value ? selectedSessionDetail.value : null
   );
 
   /** 数据是否足够支撑 AI 分析 */
@@ -105,21 +101,7 @@ export function useReviewWorkbench() {
   const actionBusy = computed(() => Boolean(actionStage.value));
 
   /** 场次下拉选项列表（含主播头像信息） */
-  const sessionOptions = computed(() =>
-    sessions.value.map<SessionSelectOption>(session => {
-      const metaLabel = `${formatShortDateTime(session.live_start_time)} · ${formatDuration(session.live_duration_seconds)} · ${session.live_status === 'live' ? '直播中' : '已结束'}`;
-      return {
-        value: session.id,
-        label: `${session.anchor_name || '未知主播'} · ${session.douyin_id || '未获取抖音号'} · ${metaLabel}`,
-        sessionId: session.id,
-        anchorName: session.anchor_name || '未知主播',
-        anchorNickname: session.anchor_nickname,
-        douyinId: session.douyin_id,
-        avatarUrl: session.anchor_avatar_url,
-        metaLabel
-      };
-    })
-  );
+  const sessionOptions = computed(() => buildCommonSessionOptions(sessions.value));
 
   /** 五维评分指标列表（已过滤无效值） */
   const scoreMetrics = computed(() => {
@@ -176,17 +158,20 @@ export function useReviewWorkbench() {
     const requestId = ++contextRequestId;
     if (!silent) contextLoading.value = true;
     try {
-      const [workbenchResponse, reportsResponse] = await Promise.all([
+      const [sessionResponse, workbenchResponse, reportsResponse] = await Promise.all([
+        fetchLiveSessionDetail(sessionId),
         fetchReviewWorkbench(sessionId),
         fetchAnalysisReports({ sessionId, limit: 100 })
       ]);
       if (requestId !== contextRequestId) return;
+      selectedSessionDetail.value = unwrapServiceData(sessionResponse, '场次详情读取失败');
       workbench.value = unwrapServiceData(workbenchResponse, '复盘证据读取失败');
       sessionReports.value = unwrapServiceData(reportsResponse, '分析报告读取失败');
       restoreSavedReports(sessionReports.value);
     } catch (error) {
       if (requestId !== contextRequestId) return;
       workbench.value = null;
+      selectedSessionDetail.value = null;
       sessionReports.value = [];
       scoreResult.value = null;
       optimizeResult.value = null;
@@ -196,17 +181,45 @@ export function useReviewWorkbench() {
     }
   }
 
+  async function loadSessionOptions(
+    includeSessionId?: number | null,
+    context?: SessionSelectorChangeContext
+  ) {
+    const response = await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId));
+    if (context && !context.isCurrent()) return;
+    sessions.value = sortSessionsByLatest(unwrapServiceData(response, '直播场次读取失败'));
+  }
+
+  /** 筛选发生变化时，保留仍命中的当前场次，否则打开筛选结果中的最新一场。 */
+  async function reloadFilteredSessions(context: SessionSelectorChangeContext) {
+    loading.value = true;
+    try {
+      await loadSessionOptions(undefined, context);
+      if (!context.isCurrent()) return;
+      const nextSession = sessions.value.find(item => item.id === selectedSessionId.value) || sessions.value[0];
+      await changeSession(nextSession?.id || null);
+    } catch (error) {
+      if (!context.isCurrent()) return;
+      message.error((error as { message?: string }).message || '场次筛选失败');
+    } finally {
+      if (context.isCurrent()) loading.value = false;
+    }
+  }
+
+  const selectorFilters = useSessionSelectorFilters(reloadFilteredSessions);
+
   /** 页面初始化：加载场次列表 + 自动选中最近一场 */
   async function initializePage() {
     loading.value = true;
     loadError.value = '';
     try {
-      const sessionsResponse = await fetchLiveSessions();
-      sessions.value = sortSessionsByLatest(
-        unwrapServiceData(sessionsResponse, '直播场次读取失败')
-      );
       const rawSessionId = Array.isArray(route.query.sessionId) ? route.query.sessionId[0] : route.query.sessionId;
       const requestedSessionId = Number(rawSessionId);
+      selectedSessionId.value = Number.isInteger(requestedSessionId) && requestedSessionId > 0 ? requestedSessionId : null;
+      await Promise.all([
+        loadSessionOptions(selectedSessionId.value),
+        selectorFilters.loadAnchors()
+      ]);
       const initialSession =
         sessions.value.find(item => item.id === requestedSessionId) ||
         sessions.value.find(item => item.live_status !== 'live') ||
@@ -231,8 +244,13 @@ export function useReviewWorkbench() {
     selectedSessionId.value = value;
     if (value && String(route.query.sessionId || '') !== String(value)) {
       void router.replace({ query: { ...route.query, sessionId: String(value) } });
+    } else if (!value && route.query.sessionId) {
+      const nextQuery = { ...route.query };
+      delete nextQuery.sessionId;
+      void router.replace({ query: nextQuery });
     }
     workbench.value = null;
+    selectedSessionDetail.value = null;
     sessionReports.value = [];
     scoreResult.value = null;
     optimizeResult.value = null;
@@ -327,6 +345,9 @@ export function useReviewWorkbench() {
     improvementSuggestions,
     nextLivePlan,
     complianceNotes,
+    selectorAnchorKey: selectorFilters.anchorKey,
+    selectorDateRange: selectorFilters.dateRange,
+    selectorAnchorOptions: selectorFilters.anchorOptions,
     // 操作
     initializePage,
     changeSession,
@@ -334,6 +355,10 @@ export function useReviewWorkbench() {
     runScore,
     runOptimize,
     openTranscripts,
+    updateSelectorAnchor: selectorFilters.updateAnchor,
+    updateSelectorDateRange: selectorFilters.updateDateRange,
+    searchSelectorSessions: selectorFilters.search,
+    resetSelectorFilters: selectorFilters.reset,
     // 工具
     scoreLevel,
     readinessTagType,

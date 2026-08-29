@@ -49,6 +49,7 @@ export function useConversations() {
   const listLoading = ref(false);
   /** 详情加载中 */
   const detailLoading = ref(false);
+  let detailRequestId = 0;
 
   /** 加载对话列表 */
   async function loadConversations() {
@@ -65,24 +66,38 @@ export function useConversations() {
   }
 
   /** 选中一个对话并加载其消息 */
-  async function selectConversation(convId: number): Promise<ChatMessage[]> {
-    activeConvId.value = convId;
+  async function selectConversation(
+    convId: number
+  ): Promise<{ messages: ChatMessage[]; sessionId: number | null } | null> {
+    const requestId = ++detailRequestId;
     detailLoading.value = true;
     try {
       const response = await fetchConversationDetail(convId);
+      if (requestId !== detailRequestId) return null;
       const detail = unwrapServiceData(response, '对话不存在');
-      return (detail.messages || []).map(toChatMessage);
+      return {
+        messages: (detail.messages || []).map(toChatMessage),
+        sessionId: detail.session_id
+      };
     } catch (err) {
+      if (requestId !== detailRequestId) return null;
       console.error('[useConversations] 加载对话详情失败:', err);
       message.error('加载对话失败');
-      return [];
+      return null;
     } finally {
-      detailLoading.value = false;
+      if (requestId === detailRequestId) detailLoading.value = false;
     }
+  }
+
+  /** 详情与页面状态都落稳后才激活，避免失败或过期请求绑错对话。 */
+  function activateConversation(convId: number) {
+    activeConvId.value = convId;
   }
 
   /** 新建对话（不立即发消息，只是切换到新对话状态） */
   function startNewConversation() {
+    detailRequestId += 1;
+    detailLoading.value = false;
     activeConvId.value = null;
   }
 
@@ -105,16 +120,20 @@ export function useConversations() {
   async function createConvWithFirstMsg(
     firstMessage: string,
     aiAnswer: string,
-    sources?: Api.Douyin.KnowledgeSource[]
+    sources?: Api.Douyin.KnowledgeSource[],
+    sessionId?: number | null,
+    shouldActivate: () => boolean = () => true
   ): Promise<{ convId: number; aiMsgId?: number }> {
     try {
       // 1. 先创建空对话并设置标题；问答内容统一交给追加接口保存。
       // 这样可以避免首条用户问题被“创建对话”和“追加消息”各保存一次。
       const raw = await createConversation(
-        firstMessage.slice(0, 50) // 标题 = 前50字
+        firstMessage.slice(0, 50), // 标题 = 前50字
+        undefined,
+        sessionId || undefined
       );
       const conv = unwrapServiceData(raw, '创建对话失败');
-      activeConvId.value = conv.id;
+      if (shouldActivate()) activeConvId.value = conv.id;
       let aiMsgId: number | undefined;
 
       // 2. 追加 AI 回答
@@ -133,6 +152,7 @@ export function useConversations() {
 
       // 3. 刷新列表
       await loadConversations();
+      if (shouldActivate()) activeConvId.value = conv.id;
       return { convId: conv.id, aiMsgId };
     } catch (err) {
       console.error('[useConversations] 创建对话失败:', err);
@@ -168,6 +188,7 @@ export function useConversations() {
     // 方法
     loadConversations,
     selectConversation,
+    activateConversation,
     startNewConversation,
     removeConversation,
     createConvWithFirstMsg,

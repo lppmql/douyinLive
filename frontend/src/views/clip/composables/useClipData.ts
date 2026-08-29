@@ -1,20 +1,24 @@
-import { h, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
-import { useRoute } from 'vue-router';
-import type { SelectOption } from 'naive-ui';
+import { onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useMessage } from 'naive-ui';
-import AnchorIdentity from '@/components/business/anchor-identity.vue';
 import { fetchGetUserInfo } from '@/service/api/auth';
 import {
   approveClip,
   discardClip,
   fetchClipCandidateSessions,
   fetchClipSessionOverview,
-  fetchLiveSessionPage,
+  fetchSessionSelectorOptions,
   generateClipSession,
   regenerateClip,
   rerenderClipSubtitle
 } from '@/service/api/douyin';
 import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
+import type { SessionSelectorOption } from '@/adapters/session-selector-adapter';
+import { buildCommonSessionOptions } from '@/adapters/session-selector-adapter';
+import {
+  useSessionSelectorFilters,
+  type SessionSelectorChangeContext
+} from '@/hooks/business/session-selector';
 
 /** 剪辑任务运行中的状态集合，用于驱动轮询 */
 const RUNNING_STATUSES = new Set(['pending', 'running', 'queued', 'processing']);
@@ -30,12 +34,7 @@ const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === '
 const mediaApiPrefix = isHttpProxy ? '/proxy-default' : '';
 
 /** 下拉选项：与主播话术工作台同款结构（主播身份字段 + 富信息 raw） */
-export interface SessionSelectOption extends SelectOption {
-  sessionId: number;
-  anchorName: string;
-  anchorNickname: string | null;
-  douyinId: string | null;
-  avatarUrl: string | null;
+export interface SessionSelectOption extends SessionSelectorOption {
   raw?: Api.Douyin.ClipCandidateSession;
 }
 
@@ -64,7 +63,9 @@ export function transcriptStatusText(status: string): string {
 
 export function useClipData(message: ReturnType<typeof useMessage>) {
   const route = useRoute();
+  const router = useRouter();
   const loading = ref(false);
+  const sessionLoading = ref(false);
   const overview = ref<Api.Douyin.ClipSessionOverview | null>(null);
   const sessionOptions = ref<SessionSelectOption[]>([]);
   const selectedSessionId = ref<number | null>(null);
@@ -74,7 +75,6 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let mountedFlag = false;
   let requestSeq = 0; // 请求序号：切换场次时丢弃过期响应，防止旧数据覆盖新场次
-  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** 刷新浏览器媒体 Cookie（30 分钟短时效，播放视频前调用续期） */
   async function refreshMediaCookie() {
@@ -85,10 +85,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     }
   }
 
-  /** 下拉选项渲染（与主播话术工作台同款公共模式：主播头像 + 元信息） */
-  function renderSessionLabel(option: SelectOption) {
-    const sessionOption = option as SessionSelectOption;
-    const raw = sessionOption.raw;
+  function buildClipMetaLabel(raw?: Api.Douyin.ClipCandidateSession) {
     const transcript = `${transcriptStatusText(raw?.transcript_status || 'none')}（${raw?.transcript_completed_count || 0}/${raw?.transcript_segment_count || 0}段）`;
     const clips = raw?.clip_available_count ? `已有${raw.clip_available_count}条成片` : '无成片';
     const start = raw?.live_start_time ? new Date(raw.live_start_time) : null;
@@ -96,38 +93,19 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
       start && !Number.isNaN(start.getTime())
         ? `${start.getMonth() + 1}/${start.getDate()} ${String(start.getHours()).padStart(2, '0')}:${String(start.getMinutes()).padStart(2, '0')}`
         : '时间未知';
-    const metaLabel = `${timeText} · ${transcript} · ${clips}`;
-    return h('div', { class: 'flex min-w-0 items-center justify-between gap-12px py-2px' }, [
-      h(AnchorIdentity, {
-        class: 'min-w-0 max-w-200px flex-1',
-        sessionId: sessionOption.sessionId,
-        avatarUrl: sessionOption.avatarUrl,
-        name: sessionOption.anchorName,
-        nickname: sessionOption.anchorNickname,
-        douyinId: sessionOption.douyinId,
-        size: 28,
-        dense: true
-      }),
-      h('span', { class: 'shrink-0 text-11px text-gray-400' }, metaLabel)
-    ]);
+    return `${timeText} · ${transcript} · ${clips}`;
   }
 
   /** 回退数据源：项目公共场次列表接口（主播/标题/时间，无话术统计） */
-  async function loadSessionOptionsFallback() {
+  async function loadSessionOptionsFallback(context?: SessionSelectorChangeContext) {
     try {
-      const { data } = await fetchLiveSessionPage({ current: 1, size: 50 });
-      const records = ((data as Api.Common.PaginatingQueryRecord<Api.Douyin.LiveSessionListItem>)?.records || []).filter(
-        item => item.live_status !== 'live'
-      );
-      sessionOptions.value = records.map(item => ({
-        label: `#${item.id} ${item.anchor_name || item.anchor_nickname || ''} ${item.session_title || ''}`,
-        value: item.id,
-        sessionId: item.id,
-        anchorName: item.anchor_name || item.anchor_nickname || '未知主播',
-        anchorNickname: item.anchor_nickname,
-        douyinId: item.douyin_id,
-        avatarUrl: item.anchor_avatar_url,
-        raw: {
+      const records = unwrapServiceData(
+        await fetchSessionSelectorOptions(selectorFilters.buildQuery(selectedSessionId.value)),
+        '公共场次加载失败'
+      ).filter(item => item.live_status !== 'live');
+      const options = buildCommonSessionOptions(records).map((option, index) => {
+        const item = records[index];
+        const raw: Api.Douyin.ClipCandidateSession = {
           session_id: item.id,
           session_title: item.session_title,
           anchor_name: item.anchor_name || item.anchor_nickname,
@@ -142,20 +120,29 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
           clip_count: 0,
           clip_available_count: 0,
           clip_status: 'none'
-        }
-      }));
+        };
+        return { ...option, metaLabel: buildClipMetaLabel(raw), raw };
+      });
+      if (!context || context.isCurrent()) sessionOptions.value = options;
     } catch (fallbackError) {
-      errorMessage.value = getServiceErrorMessage(fallbackError, '加载失败');
+      if (!context || context.isCurrent()) {
+        errorMessage.value = getServiceErrorMessage(fallbackError, '加载失败');
+      }
     }
   }
 
   /** 场次下拉数据：优先候选场次接口（含主播、话术、成片情况），失败回退公共场次列表接口 */
-  async function loadSessionOptions(search?: string, includeSessionId?: number) {
+  async function loadSessionOptions(
+    includeSessionId?: number | null,
+    context?: SessionSelectorChangeContext
+  ) {
+    sessionLoading.value = true;
     try {
       const data = unwrapServiceData(
-        await fetchClipCandidateSessions(50, search, includeSessionId),
+        await fetchClipCandidateSessions(selectorFilters.buildQuery(includeSessionId)),
         '候选场次加载失败'
       );
+      if (context && !context.isCurrent()) return;
       sessionOptions.value = (data || []).map(item => ({
         label: `#${item.session_id} ${item.anchor_name || ''} ${item.session_title || ''}`,
         value: item.session_id,
@@ -164,29 +151,50 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
         anchorNickname: item.anchor_nickname,
         douyinId: item.douyin_id,
         avatarUrl: item.anchor_avatar_url,
+        metaLabel: buildClipMetaLabel(item),
         raw: item
       }));
     } catch {
       // 新接口不可用（后端未升级）时，回退到项目公共的场次列表接口，保证下拉始终有内容
-      await loadSessionOptionsFallback();
+      if (!context || context.isCurrent()) await loadSessionOptionsFallback(context);
+    } finally {
+      if (!context || context.isCurrent()) sessionLoading.value = false;
     }
   }
 
-  function searchSessionOptions(pattern: string) {
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      void loadSessionOptions(pattern, selectedSessionId.value || undefined);
-    }, 250);
+  async function reloadFilteredSessions(context: SessionSelectorChangeContext) {
+    await loadSessionOptions(undefined, context);
+    if (!context.isCurrent()) return;
+    const nextSessionId = Number(
+      sessionOptions.value.find(item => item.sessionId === selectedSessionId.value)?.sessionId ||
+      sessionOptions.value[0]?.sessionId ||
+      0
+    );
+    selectedSessionId.value = nextSessionId || null;
+    await loadOverview(selectedSessionId.value);
   }
+
+  const selectorFilters = useSessionSelectorFilters(reloadFilteredSessions);
 
   /** 加载选中场次的剪辑总览 */
   async function loadOverview(sessionId?: number | null) {
+    if (sessionId === null) {
+      selectedSessionId.value = null;
+      overview.value = null;
+      const nextQuery = { ...route.query };
+      delete nextQuery.sessionId;
+      await router.replace({ query: nextQuery });
+      return;
+    }
     const target = sessionId ?? selectedSessionId.value;
     if (!target) {
       overview.value = null;
       return;
     }
     selectedSessionId.value = target;
+    if (String(route.query.sessionId || '') !== String(target)) {
+      void router.replace({ query: { ...route.query, sessionId: String(target) } });
+    }
     const seq = ++requestSeq;
     loading.value = true;
     try {
@@ -318,10 +326,11 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     // 支持从场次详情页「AI 剪辑」入口直达：/clip?sessionId=N
     const routeSessionId = Number(route.query.sessionId);
     if (Number.isInteger(routeSessionId) && routeSessionId > 0) {
-      await loadSessionOptions(undefined, routeSessionId);
+      selectedSessionId.value = routeSessionId;
+      await Promise.all([selectorFilters.loadAnchors(), loadSessionOptions(routeSessionId)]);
       await loadOverview(routeSessionId);
     } else {
-      await loadSessionOptions();
+      await Promise.all([selectorFilters.loadAnchors(), loadSessionOptions()]);
       const initialSessionId = Number(sessionOptions.value[0]?.value || 0);
       if (initialSessionId > 0) await loadOverview(initialSessionId);
     }
@@ -329,7 +338,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
 
   onActivated(() => {
     if (mountedFlag) {
-      void loadSessionOptions(undefined, selectedSessionId.value || undefined);
+      void loadSessionOptions(selectedSessionId.value);
       void loadOverview();
       startPolling();
     }
@@ -341,11 +350,11 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
 
   onUnmounted(() => {
     stopPolling();
-    if (searchTimer) clearTimeout(searchTimer);
   });
 
   return {
     loading,
+    sessionLoading,
     overview,
     sessionOptions,
     selectedSessionId,
@@ -362,7 +371,12 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     rerenderSubtitle,
     isTaskRunning,
     refreshMediaCookie,
-    renderSessionLabel,
-    searchSessionOptions
+    selectorAnchorKey: selectorFilters.anchorKey,
+    selectorDateRange: selectorFilters.dateRange,
+    selectorAnchorOptions: selectorFilters.anchorOptions,
+    updateSelectorAnchor: selectorFilters.updateAnchor,
+    updateSelectorDateRange: selectorFilters.updateDateRange,
+    searchSessionOptions: selectorFilters.search,
+    resetSelectorFilters: selectorFilters.reset
   };
 }

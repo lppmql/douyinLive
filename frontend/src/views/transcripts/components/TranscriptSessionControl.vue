@@ -8,9 +8,9 @@
  * - 操作按钮：复制全文 / 开始转写 / AI 分析并入库 / 更多操作
  * - 实时话术预览 + 转写失败提示
  */
-import { computed, h } from 'vue';
-import type { SelectOption } from 'naive-ui';
+import { computed } from 'vue';
 import AnchorIdentity from '@/components/business/anchor-identity.vue';
+import SessionSelector from '@/components/business/session-selector.vue';
 import {
   formatDate,
   formatDuration,
@@ -19,18 +19,22 @@ import {
   getTranscriptFailureInfo
 } from '@/utils/transcriptHelpers';
 import type { SessionSelectOption } from '@/adapters/transcript-adapter';
+import type { AnchorSelectorOption, SessionDateRange } from '@/adapters/session-selector-adapter';
 
 defineOptions({ name: 'TranscriptSessionControl' });
 
 const props = defineProps<{
   /** 场次下拉选项列表 */
   sessionOptions: SessionSelectOption[];
+  anchorOptions: AnchorSelectorOption[];
+  anchorKey: string | null;
+  dateRange: SessionDateRange;
   /** 当前选中场次 ID */
   selectedSessionId: number | null;
   /** 场次列表是否加载中 */
   loading: boolean;
   /** 当前选中场次对象 */
-  selectedSession: Api.Douyin.LiveSession | null;
+  selectedSession: Api.Douyin.LiveSessionListItem | null;
   /** 当前场次对应的转写任务 */
   selectedTask: Api.Douyin.TranscriptTask | null;
   /** 是否有话术内容 */
@@ -60,7 +64,11 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  'update:selectedSessionId': [value: number];
+  'update:selectedSessionId': [value: number | null];
+  'update:anchorKey': [value: string | null];
+  'update:dateRange': [value: SessionDateRange];
+  searchSessions: [keyword: string];
+  resetFilters: [];
   startTranscription: [];
   runAiPipeline: [];
   copyFullText: [];
@@ -125,23 +133,6 @@ function handleMoreAction(key: string) {
   return undefined;
 }
 
-/** 渲染场次下拉选项（带主播头像） */
-function renderSessionLabel(option: SelectOption) {
-  const sessionOption = option as SessionSelectOption;
-  return h('div', { class: 'flex min-w-0 items-center justify-between gap-12px py-2px' }, [
-    h(AnchorIdentity, {
-      class: 'min-w-0 max-w-180px flex-1',
-      sessionId: sessionOption.sessionId,
-      avatarUrl: sessionOption.avatarUrl,
-      name: sessionOption.anchorName,
-      nickname: sessionOption.anchorNickname,
-      douyinId: sessionOption.douyinId,
-      size: 28,
-      dense: true
-    }),
-    h('span', { class: 'shrink-0 text-11px text-gray-400' }, sessionOption.metaLabel)
-  ]);
-}
 </script>
 
 <template>
@@ -161,15 +152,19 @@ function renderSessionLabel(option: SelectOption) {
           <span>选择直播场次</span>
           <NTag size="tiny" type="info" :bordered="false" round>默认最新</NTag>
         </div>
-        <NSelect
-          :value="selectedSessionId"
-          size="large"
-          filterable
+        <SessionSelector
+          :model-value="selectedSessionId"
           :options="sessionOptions"
-          :render-label="renderSessionLabel"
+          :anchor-options="anchorOptions"
+          :anchor-key="anchorKey"
+          :date-range="dateRange"
           :loading="loading"
-          placeholder="搜索主播、日期或场次"
-          @update:value="(val: number) => emit('update:selectedSessionId', val)"
+          :clearable="false"
+          @update:model-value="emit('update:selectedSessionId', $event)"
+          @update:anchor-key="emit('update:anchorKey', $event)"
+          @update:date-range="emit('update:dateRange', $event)"
+          @search="emit('searchSessions', $event)"
+          @reset="emit('resetFilters')"
         />
         <div
           v-if="selectedSession"

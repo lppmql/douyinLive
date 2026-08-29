@@ -345,7 +345,7 @@ function handleFeedback(msg: ChatMessage, type: 'like' | 'dislike') {
           type="textarea"
           maxlength="500"
           placeholder="输入你的问题…"
-          :disabled="chatting"
+          :disabled="chatting || loadingHistory"
           :autosize="{ minRows: 1, maxRows: 4 }"
           round
           size="large"
@@ -358,7 +358,7 @@ function handleFeedback(msg: ChatMessage, type: 'like' | 'dislike') {
           type="primary"
           circle
           size="large"
-          :disabled="!question.trim() || chatting"
+          :disabled="!question.trim() || chatting || loadingHistory"
           :loading="chatting"
           aria-label="发送消息"
           @click="emit('send')"

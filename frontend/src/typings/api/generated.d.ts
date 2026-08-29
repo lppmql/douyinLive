@@ -275,6 +275,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/live-sessions/anchors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Anchor Options
+         * @description 返回数据库中真实出现过的主播，并使用该主播最新场次的身份快照。
+         */
+        get: operations["list_session_anchor_options_api_v1_live_sessions_anchors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/live-sessions/selector-options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Selector Options
+         * @description 按统一条件返回公共场次候选；指定场次即使较旧也保证回显。
+         */
+        get: operations["list_session_selector_options_api_v1_live_sessions_selector_options_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/live-sessions/": {
         parameters: {
             query?: never;
@@ -4302,6 +4342,8 @@ export interface components {
         ConversationCreateRequest: {
             /** Title */
             title?: string | null;
+            /** Session Id */
+            session_id?: number | null;
             /** First Message */
             first_message?: string | null;
         };
@@ -4325,6 +4367,8 @@ export interface components {
         ConversationDetail: {
             /** Id */
             id: number;
+            /** Session Id */
+            session_id?: number | null;
             /** Title */
             title?: string | null;
             /** Messages */
@@ -4341,6 +4385,8 @@ export interface components {
         ConversationListItem: {
             /** Id */
             id: number;
+            /** Session Id */
+            session_id?: number | null;
             /** Title */
             title?: string | null;
             /**
@@ -5496,6 +5542,26 @@ export interface components {
             /** Status */
             status?: boolean | null;
         };
+        /**
+         * LiveSessionAnchorOptionResponse
+         * @description 公共场次选择器中的真实主播选项。
+         */
+        LiveSessionAnchorOptionResponse: {
+            /** Anchor Key */
+            anchor_key: string;
+            /** Anchor Name */
+            anchor_name: string;
+            /** Anchor Nickname */
+            anchor_nickname?: string | null;
+            /** Anchor Avatar Url */
+            anchor_avatar_url?: string | null;
+            /** Douyin Id */
+            douyin_id?: string | null;
+            /** Douyin Uid */
+            douyin_uid?: string | null;
+            /** Latest Session Id */
+            latest_session_id: number;
+        };
         /** LiveSessionCreate */
         LiveSessionCreate: {
             /**
@@ -6248,6 +6314,8 @@ export interface components {
             question: string;
             /** Category */
             category?: string | null;
+            /** Session Id */
+            session_id?: number | null;
             /** History */
             history?: components["schemas"]["QaHistoryMessage"][];
         };
@@ -8243,6 +8311,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LiveSessionPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_anchor_options_api_v1_live_sessions_anchors_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveSessionAnchorOptionResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_selector_options_api_v1_live_sessions_selector_options_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                search?: string | null;
+                anchor_key?: string | null;
+                start_date?: string | null;
+                end_date?: string | null;
+                include_session_id?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LiveSessionListItemResponse"][];
                 };
             };
             /** @description Validation Error */
@@ -12433,6 +12568,9 @@ export interface operations {
             query?: {
                 limit?: number;
                 search?: string | null;
+                anchor_key?: string | null;
+                start_date?: string | null;
+                end_date?: string | null;
                 include_session_id?: number | null;
             };
             header?: never;

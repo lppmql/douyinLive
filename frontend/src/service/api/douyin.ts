@@ -42,6 +42,30 @@ export function fetchLiveSessions() {
   return backendRequest<Api.Douyin.LiveSession[]>({ url: `${API_PREFIX}/live-sessions/`, params: { limit: 1000 } });
 }
 
+export interface SessionSelectorFilters {
+  limit?: number;
+  search?: string;
+  anchor_key?: string;
+  start_date?: string;
+  end_date?: string;
+  include_session_id?: number;
+}
+
+/** 获取真实主播筛选项；头像和抖音号来自该主播最新场次快照。 */
+export function fetchSessionAnchorOptions() {
+  return backendRequest<Api.Douyin.LiveSessionAnchorOption[]>({
+    url: `${API_PREFIX}/live-sessions/anchors`
+  });
+}
+
+/** 公共场次选择器的远程候选列表。 */
+export function fetchSessionSelectorOptions(params: SessionSelectorFilters = {}) {
+  return backendRequest<Api.Douyin.LiveSessionListItem[]>({
+    url: `${API_PREFIX}/live-sessions/selector-options`,
+    params
+  });
+}
+
 export function fetchLiveSessionPage(params: {
   current: number;
   size: number;
@@ -684,11 +708,16 @@ export function detectHighIntent(sessionId: number) {
 }
 
 /** 基于真实知识证据的多轮问答 */
-export function askKnowledge(question: string, category?: string, history: Api.Douyin.KnowledgeChatHistory[] = []) {
+export function askKnowledge(
+  question: string,
+  category?: string,
+  history: Api.Douyin.KnowledgeChatHistory[] = [],
+  sessionId?: number
+) {
   return backendRequest<{ answer: string; sources: Api.Douyin.KnowledgeSource[]; has_result: boolean }>({
     url: `${API_PREFIX}/ai/qa`,
     method: 'POST',
-    data: { question, category, history }
+    data: { question, category, history, session_id: sessionId }
   });
 }
 
@@ -722,7 +751,9 @@ export async function askKnowledgeStream(
     onError: (message: string) => void;
   },
   category?: string,
-  history: Api.Douyin.KnowledgeChatHistory[] = []
+  history: Api.Douyin.KnowledgeChatHistory[] = [],
+  sessionId?: number,
+  signal?: AbortSignal
 ): Promise<void> {
   // 和 backendRequest 用同一套 baseURL 构建逻辑，确保走 Vite 代理
   const isHttpProxy = import.meta.env.DEV && import.meta.env.VITE_HTTP_PROXY === 'Y';
@@ -743,7 +774,8 @@ export async function askKnowledgeStream(
   const response = await fetch(`${baseUrl}${API_PREFIX}/ai/qa/stream`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ question, category, history })
+    body: JSON.stringify({ question, category, history, session_id: sessionId }),
+    signal
   });
 
   console.log('[askKnowledgeStream] 响应状态', response.status, response.headers.get('content-type'));
@@ -828,11 +860,11 @@ export function fetchConversations() {
 }
 
 /** 新建对话 */
-export function createConversation(title?: string, firstMessage?: string) {
+export function createConversation(title?: string, firstMessage?: string, sessionId?: number) {
   return backendRequest<Api.Douyin.ConversationDetail>({
     url: `${API_PREFIX}/ai/conversations`,
     method: 'POST',
-    data: { title, first_message: firstMessage }
+    data: { title, first_message: firstMessage, session_id: sessionId }
   });
 }
 
@@ -1009,10 +1041,10 @@ export function fetchClipStats() {
 }
 
 /** 候选场次列表（含主播、话术转写、成片情况，供下拉展示） */
-export function fetchClipCandidateSessions(limit = 50, search?: string, includeSessionId?: number) {
+export function fetchClipCandidateSessions(params: SessionSelectorFilters = {}) {
   return backendRequest<Api.Douyin.ClipCandidateSession[]>({
     url: `${API_PREFIX}/clip/candidate-sessions`,
-    params: { limit, search: search || undefined, include_session_id: includeSessionId }
+    params
   });
 }
 

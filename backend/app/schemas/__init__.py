@@ -100,6 +100,18 @@ class LiveSessionPageResponse(BaseModel):
     size: int
 
 
+class LiveSessionAnchorOptionResponse(BaseModel):
+    """公共场次选择器中的真实主播选项。"""
+
+    anchor_key: str
+    anchor_name: str
+    anchor_nickname: Optional[str] = None
+    anchor_avatar_url: Optional[str] = None
+    douyin_id: Optional[str] = None
+    douyin_uid: Optional[str] = None
+    latest_session_id: int
+
+
 class LiveSessionResponse(LiveSessionBase):
     model_config = ConfigDict(from_attributes=True)
 

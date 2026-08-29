@@ -289,14 +289,23 @@ class QaHistoryMessage(BaseModel):
 class QaRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     category: str | None = None
+    session_id: int | None = Field(default=None, gt=0)
     history: list[QaHistoryMessage] = Field(default_factory=list, max_length=8)
 
 
 @router.post("/qa", response_model=AiQaResponse)
 def knowledge_qa(req: QaRequest, db: Session = Depends(get_db)):
     """知识库问答"""
+    if req.session_id is not None and not db.get(LiveSession, req.session_id):
+        raise HTTPException(404, "直播场次不存在")
     history = [item.model_dump() for item in req.history[-8:]]
-    result = qa_search(db, question=req.question, category=req.category, history=history)
+    result = qa_search(
+        db,
+        question=req.question,
+        category=req.category,
+        history=history,
+        session_id=req.session_id,
+    )
     return result
 
 
@@ -312,6 +321,8 @@ def knowledge_qa_stream(req: QaRequest, db: Session = Depends(get_db)):
 
     前端用 fetch + ReadableStream 逐字读取并实时显示，像 ChatGPT 一样的打字效果。
     """
+    if req.session_id is not None and not db.get(LiveSession, req.session_id):
+        raise HTTPException(404, "直播场次不存在")
     history = [item.model_dump() for item in req.history[-8:]]
 
     return ClosingStreamingResponse(
@@ -320,6 +331,7 @@ def knowledge_qa_stream(req: QaRequest, db: Session = Depends(get_db)):
             question=req.question,
             category=req.category,
             history=history,
+            session_id=req.session_id,
         ),
         media_type="text/event-stream",
         headers={
@@ -386,7 +398,13 @@ def create_conversation(req: ConversationCreateRequest, db: Session = Depends(ge
     如果 first_message 不为空，会自动创建对话并添加首条用户消息。
     """
     title = req.title or (req.first_message[:50] if req.first_message else "新对话")
-    conv = Conversation(title=title, message_count=1 if req.first_message else 0)
+    if req.session_id is not None and not db.get(LiveSession, req.session_id):
+        raise HTTPException(404, "直播场次不存在")
+    conv = Conversation(
+        title=title,
+        session_id=req.session_id,
+        message_count=1 if req.first_message else 0,
+    )
     db.add(conv)
     db.flush()  # 获取 conv.id
 
@@ -404,6 +422,7 @@ def create_conversation(req: ConversationCreateRequest, db: Session = Depends(ge
     # 返回详情格式
     return ConversationDetail(
         id=conv.id,
+        session_id=conv.session_id,
         title=conv.title,
         messages=[
             {

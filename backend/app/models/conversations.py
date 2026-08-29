@@ -18,6 +18,13 @@ class Conversation(Base, TimestampMixin):
     __tablename__ = "conversations"
 
     id = Column(Integer, primary_key=True, autoincrement=True, comment="对话ID")
+    session_id = Column(
+        Integer,
+        ForeignKey("live_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="知识问答限定场次；空值表示全知识库",
+    )
     title = Column(String(200), nullable=True, comment="对话标题（自动取首条问题前50字）")
     message_count = Column(Integer, default=0, comment="消息条数（冗余字段，方便列表展示）")
 

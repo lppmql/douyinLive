@@ -9,12 +9,13 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
-from sqlalchemy import String, and_, cast, func, or_
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.core.config import PROJECT_ROOT, settings
@@ -33,6 +34,7 @@ from app.schemas.clip import (
     ClipTaskListResponse,
 )
 from app.services.clips.clip_service import prune_discarded_clips
+from app.services.live_session_selector import build_session_selector_condition
 from app.services.tasks.control import collector_task_control
 from app.services.tasks.views import serialize_scraper_task
 
@@ -115,6 +117,9 @@ def _session_overview(db: Session, session_id: int) -> ClipSessionOverview:
 def list_candidate_sessions(
     limit: int = Query(50, ge=1, le=200),
     search: str | None = Query(None, max_length=100),
+    anchor_key: str | None = Query(None, max_length=256),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
     include_session_id: int | None = Query(None, ge=1),
     db: Session = Depends(get_db),
 ):
@@ -169,29 +174,39 @@ def list_candidate_sessions(
         LiveSession.live_status != "live",
         LiveSession.detail_collection_status == "complete",
     )
-    searched = eligibility
-    if search and search.strip():
-        pattern = f"%{search.strip()}%"
-        searched = and_(
-            eligibility,
-            or_(
-                cast(LiveSession.id, String).like(pattern),
-                LiveSession.session_title.like(pattern),
-                LiveSession.anchor_name.like(pattern),
-                LiveSession.anchor_nickname.like(pattern),
-                LiveSession.douyin_id.like(pattern),
-            ),
+    try:
+        selector_condition = build_session_selector_condition(
+            search=search,
+            anchor_key=anchor_key,
+            start_date=start_date,
+            end_date=end_date,
         )
-    if include_session_id:
-        query = query.filter(or_(LiveSession.id == include_session_id, searched))
-    else:
-        query = query.filter(searched)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    searched = and_(eligibility, selector_condition)
+    query = query.filter(searched)
     rows = (
         query
         .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
         .limit(limit)
         .all()
     )
+    if include_session_id and all(row[0].id != include_session_id for row in rows):
+        included = (
+            db.query(
+                LiveSession,
+                transcript_stats.c.segment_count,
+                transcript_stats.c.completed_count,
+                clip_stats.c.clip_count,
+                clip_stats.c.available_count,
+            )
+            .outerjoin(transcript_stats, transcript_stats.c.sid == LiveSession.id)
+            .outerjoin(clip_stats, clip_stats.c.sid == LiveSession.id)
+            .filter(LiveSession.id == include_session_id)
+            .first()
+        )
+        if included:
+            rows = [included, *rows[: max(0, limit - 1)]]
     items: list[dict[str, Any]] = []
     for session, segment_count, completed_count, clip_count, available_count in rows:
         segment_count = int(segment_count or 0)

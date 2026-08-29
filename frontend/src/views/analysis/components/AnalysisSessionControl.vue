@@ -6,9 +6,13 @@
  * 所有业务逻辑已在 composable 中处理，本组件只负责渲染。
  */
 
-import { h } from 'vue';
-import type { SelectOption } from 'naive-ui';
 import AnchorIdentity from '@/components/business/anchor-identity.vue';
+import SessionSelector from '@/components/business/session-selector.vue';
+import type {
+  AnchorSelectorOption,
+  SessionDateRange,
+  SessionSelectorOption
+} from '@/adapters/session-selector-adapter';
 import {
   readinessTagType,
   formatFullDateTime,
@@ -18,20 +22,14 @@ import {
 
 defineOptions({ name: 'AnalysisSessionControl' });
 
-export interface SessionSelectOption extends SelectOption {
-  sessionId: number;
-  anchorName: string;
-  anchorNickname: string | null;
-  douyinId: string | null;
-  avatarUrl: string | null;
-  metaLabel: string;
-}
-
 defineProps<{
-  sessions: Api.Douyin.LiveSession[];
+  sessions: Api.Douyin.LiveSessionListItem[];
   selectedSessionId: number | null;
   loading: boolean;
-  sessionOptions: SessionSelectOption[];
+  sessionOptions: SessionSelectorOption[];
+  anchorOptions: AnchorSelectorOption[];
+  anchorKey: string | null;
+  dateRange: SessionDateRange;
   selectedSession: Api.Douyin.LiveSession | null;
   actionBusy: boolean;
   actionStage: string;
@@ -42,26 +40,13 @@ defineProps<{
 
 defineEmits<{
   'update:selectedSessionId': [value: number | null];
+  'update:anchorKey': [value: string | null];
+  'update:dateRange': [value: SessionDateRange];
+  searchSessions: [keyword: string];
+  resetFilters: [];
   runFullReview: [];
 }>();
 
-/** 渲染场次下拉选项（带主播头像），下拉选项中的 avatarUrl 是 API URL */
-function renderSessionLabel(option: SelectOption) {
-  const sessionOption = option as SessionSelectOption;
-  return h('div', { class: 'flex min-w-0 items-center justify-between gap-12px py-2px' }, [
-    h(AnchorIdentity, {
-      class: 'min-w-0 max-w-180px flex-1',
-      sessionId: sessionOption.sessionId,
-      avatarUrl: sessionOption.avatarUrl,
-      name: sessionOption.anchorName,
-      nickname: sessionOption.anchorNickname,
-      douyinId: sessionOption.douyinId,
-      size: 28,
-      dense: true
-    }),
-    h('span', { class: 'shrink-0 text-11px text-gray-400' }, sessionOption.metaLabel)
-  ]);
-}
 </script>
 
 <template>
@@ -76,16 +61,18 @@ function renderSessionLabel(option: SelectOption) {
           </div>
           <NTag v-if="sessions.length" round :bordered="false" type="info">{{ sessions.length }} 场可选</NTag>
         </div>
-        <NSelect
-          :value="selectedSessionId"
-          size="large"
-          filterable
-          clearable
+        <SessionSelector
+          :model-value="selectedSessionId"
           :options="sessionOptions"
-          :render-label="renderSessionLabel"
-          placeholder="按主播、日期或状态搜索直播场次"
+          :anchor-options="anchorOptions"
+          :anchor-key="anchorKey"
+          :date-range="dateRange"
           :loading="loading"
-          @update:value="(val: number | null) => $emit('update:selectedSessionId', val)"
+          @update:model-value="$emit('update:selectedSessionId', $event)"
+          @update:anchor-key="$emit('update:anchorKey', $event)"
+          @update:date-range="$emit('update:dateRange', $event)"
+          @search="$emit('searchSessions', $event)"
+          @reset="$emit('resetFilters')"
         />
         <div v-if="selectedSession" class="mt-14px flex min-w-0 items-center gap-12px">
           <AnchorIdentity

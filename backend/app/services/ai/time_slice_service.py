@@ -258,12 +258,21 @@ def _query_terms(question: str) -> list[str]:
     return sorted(terms, key=len, reverse=True)[:40]
 
 
-def search_time_slices(db: Session, question: str, limit: int = 8) -> list[dict[str, Any]]:
+def search_time_slices(
+    db: Session,
+    question: str,
+    limit: int = 8,
+    session_id: int | None = None,
+) -> list[dict[str, Any]]:
     """结构化过滤、关键词召回和来源丰富度重排。"""
     query = db.query(KnowledgeTimeSlice)
-    session_matches = re.findall(r"(?:场次|session)\s*#?\s*(\d+)", question, re.IGNORECASE)
-    if session_matches:
-        query = query.filter(KnowledgeTimeSlice.session_id.in_({int(value) for value in session_matches}))
+    if session_id is not None:
+        # 页面选择的场次是正式检索边界，优先级高于问题文本中的自然语言。
+        query = query.filter(KnowledgeTimeSlice.session_id == session_id)
+    else:
+        session_matches = re.findall(r"(?:场次|session)\s*#?\s*(\d+)", question, re.IGNORECASE)
+        if session_matches:
+            query = query.filter(KnowledgeTimeSlice.session_id.in_({int(value) for value in session_matches}))
     candidates = query.order_by(KnowledgeTimeSlice.updated_at.desc()).limit(1000).all()
     terms = _query_terms(question)
     ranked: list[tuple[float, KnowledgeTimeSlice]] = []

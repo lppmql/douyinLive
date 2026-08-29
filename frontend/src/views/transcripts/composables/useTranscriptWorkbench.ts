@@ -16,7 +16,7 @@ import { useIntervalFn } from '@vueuse/core';
 import { useDialog, useMessage } from 'naive-ui';
 
 import {
-  fetchLiveSessions,
+  fetchSessionSelectorOptions,
   fetchTranscriptFullText,
   fetchTranscriptSegments,
   fetchTranscriptTasks,
@@ -47,6 +47,10 @@ import {
 } from '@/adapters/transcript-adapter';
 
 import { useTranscriptRealtime } from '@/hooks/business/transcript-realtime';
+import {
+  useSessionSelectorFilters,
+  type SessionSelectorChangeContext
+} from '@/hooks/business/session-selector';
 
 // ========== 类型别名 ==========
 
@@ -81,10 +85,11 @@ export function useTranscriptWorkbench() {
   const route = useRoute();
   const message = useMessage();
   const dialog = useDialog();
+  let transcriptRequestId = 0;
 
   // ── 响应式状态 ──
 
-  const sessions = ref<Api.Douyin.LiveSession[]>([]);
+  const sessions = ref<Api.Douyin.LiveSessionListItem[]>([]);
   const tasks = ref<Api.Douyin.TranscriptTask[]>([]);
   const segments = ref<Api.Douyin.TranscriptSegment[]>([]);
   const fullText = ref('');
@@ -98,6 +103,7 @@ export function useTranscriptWorkbench() {
     needs_attention: 0
   });
   const loading = ref(true);
+  const sessionLoading = ref(false);
   const refreshing = ref(false);
   const queueLoading = ref(false);
   const batchLoading = ref(false);
@@ -266,10 +272,41 @@ export function useTranscriptWorkbench() {
   // ── 异步操作 ──
 
   /** 加载场次列表（按最新开播排序） */
-  async function loadSessions() {
-    const response = await fetchLiveSessions();
-    sessions.value = sortSessionsByLatest(unwrapServiceData(response, '直播场次读取失败'));
+  async function loadSessions(
+    includeSessionId?: number | null,
+    context?: SessionSelectorChangeContext
+  ) {
+    sessionLoading.value = true;
+    try {
+      const response = await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId));
+      if (context && !context.isCurrent()) return;
+      sessions.value = sortSessionsByLatest(unwrapServiceData(response, '直播场次读取失败'));
+    } finally {
+      if (!context || context.isCurrent()) sessionLoading.value = false;
+    }
   }
+
+  /** 主播、日期或远程搜索变化后，切换到筛选结果中的最新真实场次。 */
+  async function reloadFilteredSessions(context: SessionSelectorChangeContext) {
+    try {
+      await loadSessions(undefined, context);
+      if (!context.isCurrent()) return;
+      const nextSession = sessions.value.find(item => item.id === selectedSessionId.value) || sessions.value[0];
+      if (nextSession && nextSession.id !== selectedSessionId.value) await loadTranscript(nextSession.id);
+      if (!nextSession) {
+        selectedSessionId.value = null;
+        segments.value = [];
+        fullText.value = '';
+      }
+    } catch (error) {
+      if (!context.isCurrent()) return;
+      message.error(error instanceof Error ? error.message : '场次筛选失败');
+    } finally {
+      if (context.isCurrent()) sessionLoading.value = false;
+    }
+  }
+
+  const selectorFilters = useSessionSelectorFilters(reloadFilteredSessions);
 
   /** 加载任务汇总 + 任务列表 */
   async function loadTaskData() {
@@ -287,6 +324,7 @@ export function useTranscriptWorkbench() {
 
   /** 加载单个场次的话术数据（分段 + 全文） */
   async function loadTranscript(sessionId: number, silent = false) {
+    const requestId = ++transcriptRequestId;
     selectedSessionId.value = sessionId;
     if (String(route.query.sessionId || '') !== String(sessionId)) {
       void router.replace({ query: { ...route.query, sessionId: String(sessionId) } });
@@ -298,14 +336,16 @@ export function useTranscriptWorkbench() {
         fetchAllTranscriptSegments(sessionId),
         fetchTranscriptFullText(sessionId).catch(() => ({ data: null }))
       ]);
+      if (requestId !== transcriptRequestId) return;
       segments.value = loadedSegments;
       fullText.value = textResponse.data?.full_text || '';
     } catch (error) {
+      if (requestId !== transcriptRequestId) return;
       segments.value = [];
       fullText.value = '';
       if (!silent) message.error(error instanceof Error ? error.message : '话术数据加载失败，请稍后重试');
     } finally {
-      loading.value = false;
+      if (requestId === transcriptRequestId) loading.value = false;
     }
   }
 
@@ -328,9 +368,14 @@ export function useTranscriptWorkbench() {
     loading.value = true;
     loadError.value = '';
     try {
-      await Promise.all([loadSessions(), loadTaskData()]);
       const rawSessionId = Array.isArray(route.query.sessionId) ? route.query.sessionId[0] : route.query.sessionId;
       const requestedSessionId = Number(rawSessionId);
+      selectedSessionId.value = Number.isInteger(requestedSessionId) && requestedSessionId > 0 ? requestedSessionId : null;
+      await Promise.all([
+        loadSessions(selectedSessionId.value),
+        selectorFilters.loadAnchors(),
+        loadTaskData()
+      ]);
       const requestedSession = sessions.value.find(item => item.id === requestedSessionId);
       const initialSession = requestedSession || sessions.value[0];
       if (initialSession) await loadTranscript(initialSession.id);
@@ -455,9 +500,10 @@ export function useTranscriptWorkbench() {
   }
 
   /** 从任务抽屉中选择一个任务 → 关闭抽屉并加载对应场次 */
-  function selectTask(task: Api.Douyin.TranscriptTask) {
+  async function selectTask(task: Api.Douyin.TranscriptTask) {
     taskDrawerVisible.value = false;
-    void loadTranscript(task.session_id);
+    if (!sessions.value.some(item => item.id === task.session_id)) await loadSessions(task.session_id);
+    await loadTranscript(task.session_id);
   }
 
   /** 从任务抽屉直接断点重试指定失败场次。 */
@@ -674,6 +720,7 @@ export function useTranscriptWorkbench() {
     tasks,
     taskSummary,
     loading,
+    sessionLoading,
     refreshing,
     queueLoading,
     batchLoading,
@@ -714,6 +761,9 @@ export function useTranscriptWorkbench() {
     displayedFullText,
     wsConnected,
     hasContent,
+    selectorAnchorKey: selectorFilters.anchorKey,
+    selectorDateRange: selectorFilters.dateRange,
+    selectorAnchorOptions: selectorFilters.anchorOptions,
     // 操作
     initializePage,
     loadTranscript,
@@ -732,6 +782,10 @@ export function useTranscriptWorkbench() {
     stopTask,
     restoreAsrRuntime,
     openSessionDetail,
+    updateSelectorAnchor: selectorFilters.updateAnchor,
+    updateSelectorDateRange: selectorFilters.updateDateRange,
+    searchSelectorSessions: selectorFilters.search,
+    resetSelectorFilters: selectorFilters.reset,
     // 删除相关
     deletingTaskIds,
     clearFailedLoading,
