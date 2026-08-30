@@ -1,6 +1,6 @@
 """采集控制中心的一次性批处理执行器。
 
-每个执行器只负责一个业务边界：真实数据刷新、AI 复盘、知识库或 DataEase。
+每个执行器只负责一个业务边界：真实数据刷新、AI 复盘、知识库或剪辑。
 任务状态、停止和重试由 control.py 统一管理，避免每个模块各写一套队列逻辑。
 """
 
@@ -9,10 +9,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy import case, exists, func, or_
+from sqlalchemy import and_, case, exists, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.analysis_reports import AnalysisReport
+from app.models.asr_tasks import AsrTask
 from app.models.comments import Comment
 from app.models.knowledge_base import KnowledgeBase
 from app.models.live_audience_profiles import LiveAudienceProfile
@@ -30,12 +31,6 @@ from app.services.collector.comment_profile_enrichment import (
     comment_profile_enrichment_manager,
     profile_configuration_status,
 )
-from app.services.sync.de_sync import (
-    cleanup_stale_dataease_rows,
-    completed_offline_transcript_exists,
-    pending_complete_session_ids,
-    sync_session,
-)
 from app.services.clips.clip_service import (
     generate_and_render_session,
     pending_clip_session_ids,
@@ -46,6 +41,17 @@ from app.services.tasks.exceptions import TaskBatchFailed, TaskCancellationReque
 
 ProgressReporter = Callable[[str, int, int, int, str, dict[str, Any] | None], None]
 CancellationChecker = Callable[[], bool]
+
+
+def completed_offline_transcript_exists():
+    """只有成功完成的下播终稿，才能进入 AI 复盘和知识库。"""
+    return exists().where(
+        and_(
+            AsrTask.session_id == LiveSession.id,
+            AsrTask.task_type == "offline",
+            AsrTask.status == "completed",
+        )
+    )
 
 
 def _ensure_running(should_cancel: CancellationChecker) -> None:
@@ -59,7 +65,7 @@ async def run_data_refresh(
     report: ProgressReporter,
     should_cancel: CancellationChecker,
 ) -> dict[str, Any]:
-    """只刷新采集数据，不再隐式触发 ASR、AI、知识库或 DataEase。"""
+    """只刷新采集数据，不再隐式触发 ASR、AI 或知识库。"""
     result = await collect_all(
         db,
         task_id=task_id,
@@ -410,102 +416,6 @@ def run_knowledge_sync_batch(
     }
     if total and completed == 0:
         raise TaskBatchFailed("待处理场次全部未能存入知识库", result)
-    return result
-
-
-def run_dataease_sync_batch(
-    db: Session,
-    task_id: int,
-    report: ProgressReporter,
-    should_cancel: CancellationChecker,
-    batch_size: int | None = None,
-) -> dict[str, Any]:
-    """逐场同步全部缺失或过期的 DataEase 数据，支持中途安全停止。"""
-    removed = cleanup_stale_dataease_rows(db)
-    session_ids = pending_complete_session_ids(
-        db,
-        limit=batch_size,
-        force=False,
-        include_live=False,
-    )
-    total = len(session_ids)
-    completed = 0
-    failed = 0
-    errors: list[dict[str, Any]] = []
-    report(
-        "dataease_sync",
-        0,
-        0,
-        total,
-        f"发现 {total} 场 DataEase 数据需要同步",
-        {"pending_count": total, "removed_stale_row_count": removed},
-    )
-
-    for index, session_id in enumerate(session_ids, start=1):
-        _ensure_running(should_cancel)
-        session = db.get(LiveSession, session_id)
-        if not session:
-            continue
-        try:
-            sync_session(db, session_id)
-            completed += 1
-            add_collector_log(
-                db,
-                task_id=task_id,
-                session=session,
-                level="info",
-                stage="dataease_sync",
-                event_type="session_dataease_synced",
-                message=(
-                    f"主播 {session.anchor_name or session.anchor_nickname or '未知主播'}，"
-                    f"场次 #{session.id} 已同步到 DataEase 数据库"
-                ),
-                details={"synced_count": 1},
-            )
-            db.commit()
-        except Exception as exc:
-            db.rollback()
-            failed += 1
-            errors.append({"session_id": session_id, "message": str(exc)[:300]})
-            session = db.get(LiveSession, session_id)
-            add_collector_log(
-                db,
-                task_id=task_id,
-                session=session,
-                level="error",
-                stage="dataease_sync",
-                event_type="session_dataease_failed",
-                message=f"场次 #{session_id} 同步 DataEase 失败：{str(exc)[:300]}",
-                details={"error": str(exc)[:500]},
-            )
-            db.commit()
-
-        report(
-            "dataease_sync",
-            int(index / max(total, 1) * 99),
-            index,
-            total,
-            f"DataEase 已同步 {index}/{total} 场，成功 {completed} 场，失败 {failed} 场",
-            {
-                "session_id": session_id,
-                "anchor_name": session.anchor_name or session.anchor_nickname
-                if session
-                else None,
-                "completed_count": completed,
-                "failed_count": failed,
-                "removed_stale_row_count": removed,
-            },
-        )
-
-    result = {
-        "selected_count": total,
-        "synced_count": completed,
-        "failed_count": failed,
-        "removed_stale_row_count": removed,
-        "errors": errors[:20],
-    }
-    if total and completed == 0:
-        raise TaskBatchFailed("待处理场次全部同步 DataEase 失败", result)
     return result
 
 

@@ -3,15 +3,10 @@ from __future__ import annotations
 
 import logging
 import re
-import time
 from dataclasses import dataclass
 
 from app.core.config import settings
 from app.core.observability import (
-    AI_CALL_DURATION,
-    AI_CALLS_TOTAL,
-    AI_LAST_SUCCESS,
-    AI_TOKENS_TOTAL,
     new_trace_id,
     trace_id_var,
 )
@@ -61,24 +56,11 @@ def _current_trace_id(explicit: str | None) -> str:
 
 
 def record_ai_call(observation: AiCallObservation) -> None:
-    """记录低基数指标和数据库元数据；观测失败不能影响业务调用。"""
+    """记录数据库调用元数据；追踪失败不能影响业务调用。"""
     operation = _label(observation.operation, "chat")
     model_name = _label(observation.model_name, "unknown", 100)
     status = _label(observation.status, "failed", 20)
     trace_id = _current_trace_id(observation.trace_id)
-    latency_seconds = max(0, observation.latency_ms) / 1000
-
-    AI_CALLS_TOTAL.labels(operation=operation, model=model_name, status=status).inc()
-    AI_CALL_DURATION.labels(operation=operation, model=model_name).observe(latency_seconds)
-    AI_TOKENS_TOTAL.labels(operation=operation, model=model_name, direction="prompt").inc(
-        max(0, observation.prompt_tokens)
-    )
-    AI_TOKENS_TOTAL.labels(operation=operation, model=model_name, direction="completion").inc(
-        max(0, observation.completion_tokens)
-    )
-    if status == "success":
-        AI_LAST_SUCCESS.set(time.time())
-
     try:
         from app.core.database import SessionLocal
         from app.models.ai_call_traces import AiCallTrace

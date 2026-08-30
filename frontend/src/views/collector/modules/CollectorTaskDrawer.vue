@@ -152,7 +152,7 @@ const taskColumns = [
   >
     <NDrawerContent title="采集任务队列" closable>
       <NAlert class="mb-14px" type="info" :bordered="false" show-icon>
-        补齐刷新优先执行，ASR 按电脑资源处理最新场次，知识库与 DataEase 自动同步。“停止”只结束当前任务，关闭监控或 ASR 开关才会释放对应资源。
+        补齐刷新优先执行，ASR 按电脑资源处理最新场次，知识库自动同步。“停止”只结束当前任务，关闭监控或 ASR 开关才会释放对应资源。
       </NAlert>
       <div class="business-table-shell">
         <NDataTable

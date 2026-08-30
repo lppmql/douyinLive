@@ -237,7 +237,7 @@ class AsrWorker:
                 write_asr_worker_heartbeat(self._worker_id)
                 await self._poll_tasks()
                 write_asr_worker_heartbeat(self._worker_id)
-                # AI 复盘由详情页手动生成，知识库和 DataEase 由后台自动同步。
+                # AI 复盘由详情页手动生成，知识库由后台自动同步。
                 await asyncio.sleep(self._poll_interval)
             except asyncio.CancelledError:
                 break

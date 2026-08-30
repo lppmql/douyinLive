@@ -59,8 +59,6 @@ def test_post_collection_pipeline_runs_review_before_knowledge(monkeypatch):
         "sync_session_to_kb",
         lambda *_args: calls.append("knowledge") or {"transcript_saved": 1, "review_saved": 1},
     )
-    monkeypatch.setattr(post_collection, "sync_session", lambda *_args: calls.append("dataease"))
-
     result = post_collection.process_session_post_collection(db, 13254)
 
     assert result["success"] is True
@@ -68,7 +66,7 @@ def test_post_collection_pipeline_runs_review_before_knowledge(monkeypatch):
     assert result["speech_score"] == 86
     assert result["review_finding_count"] == 2
     assert result["audience_analysis_count"] == 3
-    assert calls == ["review", "unified_review", "knowledge", "dataease"]
+    assert calls == ["review", "unified_review", "knowledge"]
 
 
 def test_post_collection_pipeline_keeps_knowledge_stage_after_review_failure(monkeypatch):
@@ -86,13 +84,11 @@ def test_post_collection_pipeline_keeps_knowledge_stage_after_review_failure(mon
         "sync_session_to_kb",
         lambda *_args: calls.append("knowledge") or {"transcript_saved": 1},
     )
-    monkeypatch.setattr(post_collection, "sync_session", lambda *_args: calls.append("dataease"))
-
     result = post_collection.process_session_post_collection(db, 13254)
 
     assert result["success"] is False
     assert result["errors"]["review"] == "真实复盘生成失败"
-    assert calls == ["knowledge", "dataease"]
+    assert calls == ["knowledge"]
     assert db.rollback_count == 1
 
 

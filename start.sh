@@ -1,6 +1,6 @@
 #!/bin/bash
 # 抖音留资直播分析系统 — 一键启动
-# 用法: ./start.sh [lite|standard|full]
+# 用法: ./start.sh [lite|standard]
 
 set -e
 
@@ -10,8 +10,8 @@ FRONTEND_DIR="$ROOT_DIR/frontend"
 START_LOCK_DIR="$ROOT_DIR/.runtime/start.lock"
 RUN_MODE="${1:-standard}"
 case "$RUN_MODE" in
-  lite|standard|full) ;;
-  *) echo "启动模式只能是 lite、standard 或 full"; exit 1 ;;
+  lite|standard) ;;
+  *) echo "启动模式只能是 lite 或 standard"; exit 1 ;;
 esac
 
 env_value() {
@@ -102,11 +102,6 @@ if [ "$(env_value DB_USER)" = "root" ]; then
   echo "  ❌ 旧配置仍使用 DB_USER=root，请按 .env.example 改为 douyin_app，并设置 MYSQL_ROOT_PASSWORD"
   exit 1
 fi
-if [ "$(env_value DATAEASE_DB_USER)" = "root" ]; then
-  echo "  ❌ DATAEASE_DB_USER 不能使用 root，请按 .env.example 改为 dataease_app"
-  exit 1
-fi
-
 # Docker Desktop 是 GUI 应用，不能自动装，只能提示
 if ! docker info >/dev/null 2>&1; then
   echo "  ❌ Docker 未安装或未启动"
@@ -209,28 +204,6 @@ wait_for_backend() {
   return 1
 }
 
-wait_for_dataease() {
-  local ATTEMPTS=600
-  local RUNNING
-  local HEALTH
-  for ((i = 1; i <= ATTEMPTS; i++)); do
-    RUNNING=$(docker inspect -f '{{.State.Running}}' douyin_live_dataease 2>/dev/null || true)
-    HEALTH=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' douyin_live_dataease 2>/dev/null || true)
-    if [ "$HEALTH" = "healthy" ]; then
-      return 0
-    fi
-    if [ "$RUNNING" != "true" ]; then
-      echo "  ❌ DataEase 容器已退出，最近日志如下："
-      docker logs --tail 30 douyin_live_dataease 2>&1 || true
-      return 1
-    fi
-    sleep 1
-  done
-  echo "  ❌ DataEase 600 秒内未通过健康检查，最近日志如下："
-  docker logs --tail 30 douyin_live_dataease 2>&1 || true
-  return 1
-}
-
 wait_for_http() {
   local NAME=$1
   local URL=$2
@@ -254,7 +227,7 @@ wait_for_http() {
   return 1
 }
 
-# 1. 启动基础 Docker 服务与 DataEase（ASR 由后端按安全资源限制自动启动）
+# 1. 启动基础 Docker 服务（ASR 由后端按安全资源限制自动启动）
 echo ""
 echo "[1/6] 启动 MySQL、Redis 与 Qdrant..."
 cd "$ROOT_DIR"
@@ -262,7 +235,7 @@ docker compose up -d mysql redis qdrant
 echo "  ✅ MySQL: localhost:3306"
 echo "  ✅ Redis: localhost:6379"
 # 已有 MySQL 数据卷不会再次执行镜像的 MYSQL_USER 初始化，因此每次启动都用
-# 管理凭据幂等校准一次受限账号。后续 FastAPI 与 DataEase 均不再使用 root。
+# 管理凭据幂等校准一次受限业务账号。后续 FastAPI 不使用 root。
 MYSQL_ROOT_PASSWORD_VALUE="$(env_value MYSQL_ROOT_PASSWORD)"
 MYSQL_ROOT_PASSWORD_VALUE="${MYSQL_ROOT_PASSWORD_VALUE:-$(env_value DB_PASSWORD)}"
 MYSQL_READY=false
@@ -279,72 +252,16 @@ if [ "$MYSQL_READY" != "true" ]; then
   exit 1
 fi
 cd "$BACKEND_DIR"
-if [ "$RUN_MODE" = "full" ] \
-  && [ -f "$ROOT_DIR/dataease/conf/application.yml" ] \
-  && [ -n "$(env_value DATAEASE_DB_PASSWORD)" ]; then
-  "$BACKEND_DIR/.venv/bin/python" -m scripts.configure_database_users --include-dataease
-  echo "  ✅ MySQL 业务账号与 DataEase 账号权限已校准"
-else
-  "$BACKEND_DIR/.venv/bin/python" -m scripts.configure_database_users
-  echo "  ✅ MySQL 业务账号权限已校准（DataEase 未启用或配置不完整，已跳过其账号）"
-fi
+"$BACKEND_DIR/.venv/bin/python" -m scripts.configure_database_users
+echo "  ✅ MySQL 业务账号权限已校准"
 if ! wait_for_http "Qdrant" "http://127.0.0.1:6333/healthz" "douyin_live_qdrant" 60; then
   exit 1
 fi
 echo "  ✅ Qdrant: http://localhost:6333"
 echo "  ℹ️  FunASR 将在第 5 步启动；ASR Worker 由后端按页面开关管理"
-DATAEASE_STARTED=false
-if [ "$RUN_MODE" = "full" ] && [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then
-  echo "  ⏳ 正在准备 DataEase 独立数据库..."
-  DATAEASE_DB_USER_VALUE="$(env_value DATAEASE_DB_USER)"
-  DATAEASE_DB_PASSWORD_VALUE="$(env_value DATAEASE_DB_PASSWORD)"
-  DATAEASE_DB_USER_VALUE="${DATAEASE_DB_USER_VALUE:-dataease_app}"
-  DATAEASE_DB_READY=false
-  if [ -z "$DATAEASE_DB_PASSWORD_VALUE" ]; then
-    echo "  ⚠️  .env 中 DATAEASE_DB_PASSWORD 为空，DataEase 暂不启动"
-  else
-    for ((i = 1; i <= 60; i++)); do
-      if docker exec -e MYSQL_PWD="$DATAEASE_DB_PASSWORD_VALUE" douyin_live_mysql \
-        mysqladmin ping -h 127.0.0.1 -u"$DATAEASE_DB_USER_VALUE" --silent >/dev/null 2>&1; then
-        DATAEASE_DB_READY=true
-        break
-      fi
-      sleep 1
-    done
-  fi
-  if [ "$DATAEASE_DB_READY" != "true" ]; then
-    echo "  ⚠️  DataEase 数据库账号不可用，DataEase 暂不启动"
-  fi
-  echo "  ⏳ DataEase 正在启动，首次初始化可能需要 3-10 分钟"
-  if [ "$DATAEASE_DB_READY" = "true" ]; then
-    docker compose --profile dataease up -d dataease
-  fi
-  if [ "$DATAEASE_DB_READY" = "true" ] && wait_for_dataease \
-    && "$BACKEND_DIR/.venv/bin/python" "$BACKEND_DIR/scripts/check_dataease_crypto.py" --timeout 60 \
-    && curl -fsS --max-time 60 http://127.0.0.1:8100/ | grep -q "douyinLive.dataeaseKeySha256"; then
-    DATAEASE_STARTED=true
-    echo "  ✅ DataEase: http://localhost:8100"
-  else
-    echo "  ⚠️  DataEase 启动失败，主系统继续启动；可稍后单独排查"
-  fi
-elif [ "$RUN_MODE" = "full" ]; then
-  echo "  ⚠️  未找到有效的 dataease/conf/application.yml，已跳过可选的 DataEase"
-else
-  echo "  ℹ️  当前为 $RUN_MODE 模式，已跳过 DataEase"
-fi
-
-# 2. ASR 尚未启动时先准备监控组件，避免首次拉镜像与模型争抢内存。
+# 2. 预留启动阶段编号，保持日志与故障定位步骤稳定。
 echo ""
-echo "[2/6] 启动 Prometheus 与 Grafana..."
-cd "$ROOT_DIR"
-if [ "$RUN_MODE" = "full" ]; then
-  docker compose --profile observability up -d prometheus grafana
-  wait_for_http "Prometheus" "http://127.0.0.1:9090/-/ready" "douyin_live_prometheus" 90 || true
-  wait_for_http "Grafana" "http://127.0.0.1:3000/api/health" "douyin_live_grafana" 90 || true
-  echo "  ✅ 可观测性服务已请求启动（失败不会阻断主系统）"
-else
-  echo "  ℹ️  当前为 $RUN_MODE 模式，已跳过 Prometheus 与 Grafana"
-fi
+echo "[2/6] 基础服务已就绪，准备启动应用..."
 
 # 3. 启动后端（先清理 8000 端口）
 echo ""
@@ -354,10 +271,6 @@ cd "$BACKEND_DIR"
 source .venv/bin/activate
 alembic upgrade head
 echo "  ✅ 数据库迁移已更新到最新版本"
-if [ "$DATAEASE_STARTED" = "true" ]; then
-  python -m scripts.configure_dataease_reader
-  echo "  ✅ DataEase 专用只读账号已配置"
-fi
 if [ "${BACKEND_RELOAD:-false}" = "true" ]; then
   start_in_own_session "$BACKEND_DIR/.venv/bin/uvicorn" app.main:app --reload --port 8000
   echo "  ℹ️  已开启后端开发热更新"
@@ -453,9 +366,6 @@ echo "========================================"
 echo "  启动完成！"
 echo "  前端: http://localhost:9527"
 echo "  后端: http://localhost:8000"
-[ "$DATAEASE_STARTED" = "true" ] && echo "  DataEase: http://localhost:8100"
-[ "$RUN_MODE" = "full" ] && echo "  Prometheus: http://localhost:9090"
-[ "$RUN_MODE" = "full" ] && echo "  Grafana: http://localhost:3000"
 echo "  Swagger: http://localhost:8000/docs"
 echo "========================================"
 echo ""

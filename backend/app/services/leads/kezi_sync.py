@@ -544,7 +544,7 @@ async def sync_kezi_leads(
 
 
 class KeziLeadSyncManager:
-    """独立的小型定时器，不占用浏览器、ASR 或 DataEase 的任务队列。"""
+    """独立的小型定时器，不占用浏览器、ASR 或知识库的任务队列。"""
 
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None

@@ -16,7 +16,6 @@ cp .env.example .env
 JWT_SECRET_KEY          登录令牌密钥，至少 32 位随机字符串
 DB_PASSWORD             MySQL 密码，建议至少 16 位随机字符串
 REDIS_PASSWORD          Redis 密码，要和 REDIS_URL 里的密码一致
-GRAFANA_ADMIN_PASSWORD  Grafana 管理员密码
 ```
 
 首次使用 AI 前先打开 Ollama 应用，再执行 `./scripts/setup_ollama_model.sh`。脚本会下载官方 `qwen3.5:9b`，并创建支持 64K 长话术的项目模型 `douyin-live-qwen`。模型文件约占 7GB，只在本机运行。
@@ -48,7 +47,7 @@ make doctor
 `doctor` 的意思是“环境体检”，会检查 Docker、Python、Node、ffmpeg、数据库和常见弱配置。
 
 `setup.sh` 只在新电脑首次部署或依赖版本升级时运行；`start.sh` 不再临时下载大体积依赖。
-日常模式分为 `lite`、`standard`（推荐）和 `full`，只有 `full` 会启动 DataEase、Prometheus 和 Grafana。
+日常模式分为 `lite` 和 `standard`（推荐）；`lite` 不自动启动 FunASR，适合临时查看数据或低资源电脑。
 
 ## 3. 首次登录和采集账号
 
@@ -68,7 +67,7 @@ Cookie 的大白话解释：它是浏览器保存的登录凭证。浏览器指�
 2. 执行一次全部场次数据补齐刷新。
 3. 打开直播场次列表，确认有真实场次。
 4. 选择一场已结束且有回放的场次，创建话术转写任务。
-5. 等后台知识库和 DataEase 自动同步。
+5. 等后台知识库自动同步。
 6. 到知识库页面问一个和该场直播相关的问题，检查引用来源。
 
 项目规则要求使用真实数据。没有真实账号、真实场次或真实回放时，不要为了“看起来成功”手写假数据。

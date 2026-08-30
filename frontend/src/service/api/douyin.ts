@@ -10,19 +10,30 @@ const API_PREFIX = '/api/v1';
 
 /* ---------- 仪表盘 ---------- */
 
-export function fetchDashboardSummary(startDate?: string, endDate?: string) {
+export function fetchDashboardSummary(startDate?: string, endDate?: string, anchorKey?: string) {
   const params: Record<string, string> = {};
   if (startDate) params.start_date = startDate;
   if (endDate) params.end_date = endDate;
+  if (anchorKey) params.anchor_key = anchorKey;
   return backendRequest<Api.Douyin.DashboardSummary>({ url: `${API_PREFIX}/dashboard/summary`, params });
 }
 
 /** 按主播分组汇总经营指标 */
-export function fetchDashboardSummaryByAnchor(startDate?: string, endDate?: string) {
+export function fetchDashboardSummaryByAnchor(startDate?: string, endDate?: string, anchorKey?: string) {
   const params: Record<string, string> = {};
   if (startDate) params.start_date = startDate;
   if (endDate) params.end_date = endDate;
+  if (anchorKey) params.anchor_key = anchorKey;
   return backendRequest<Api.Douyin.AnchorSummaryResponse>({ url: `${API_PREFIX}/dashboard/summary/by-anchor`, params });
+}
+
+/** 获取 SoybeanAdmin 原生经营大屏的统一真实数据。 */
+export function fetchDashboardOperations(startDate?: string, endDate?: string, anchorKey?: string) {
+  const params: Record<string, string> = {};
+  if (startDate) params.start_date = startDate;
+  if (endDate) params.end_date = endDate;
+  if (anchorKey) params.anchor_key = anchorKey;
+  return backendRequest<Api.Douyin.DashboardOperations>({ url: `${API_PREFIX}/dashboard/operations`, params });
 }
 
 /* ---------- 主播排班 ---------- */
@@ -304,22 +315,6 @@ export function setAsrControl(enabled: boolean) {
   return backendRequest<Api.Douyin.AsrControlStatus>({
     url: `${API_PREFIX}/collector/asr-control/${enabled}`,
     method: 'POST'
-  });
-}
-
-/** 获取 DataEase 宽表同步覆盖情况 */
-export function fetchDataEaseStatus() {
-  return backendRequest<Api.Douyin.DataEaseStatus>({ url: `${API_PREFIX}/dataease/status` });
-}
-
-/** 增量同步缺失或已过期的 DataEase 数据 */
-export function syncDataEase(limit = 100) {
-  // ✨ 参数边界校验
-  const safeLimit = Math.min(500, Math.max(1, limit));
-  return backendRequest<Api.Douyin.DataEaseSyncResult>({
-    url: `${API_PREFIX}/dataease/sync`,
-    method: 'POST',
-    params: { limit: safeLimit }
   });
 }
 

@@ -156,7 +156,7 @@ def get_task_queue(
     limit: int = Query(100, ge=1, le=300),
     db: Session = Depends(get_db),
 ):
-    """返回采集、AI、知识库、DataEase 和逐场 ASR 的统一任务队列。"""
+    """返回采集、AI、知识库和逐场 ASR 的统一任务队列。"""
     return list_unified_tasks(db, limit=limit)
 
 

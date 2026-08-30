@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ALLOW_SYNTHETIC_DATA: bool = False
     LOG_FORMAT: str = "json"
-    OBSERVABILITY_ENABLED: bool = True
 
     # 数据库
     DB_HOST: str = "localhost"
@@ -59,10 +58,6 @@ class Settings(BaseSettings):
     DB_NAME: str = "douyin_live"
     DATABASE_URL: str = ""
     DATABASE_ECHO: bool = False
-    DATAEASE_DB_USER: str = "dataease_app"
-    DATAEASE_DB_PASSWORD: str = ""
-    DATAEASE_READER_USER: str = "dataease_reader"
-    DATAEASE_READER_PASSWORD: str = "dataease_reader_change_me"
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379"
@@ -153,7 +148,6 @@ class Settings(BaseSettings):
     DATA_REFRESH_INTERVAL_SECONDS: int = 600
     AI_REVIEW_INTERVAL_SECONDS: int = 120
     KNOWLEDGE_SYNC_INTERVAL_SECONDS: int = 120
-    DATAEASE_SYNC_INTERVAL_SECONDS: int = 30
     # 客资查询密钥只放后端根目录 .env；前端只看到同步后的脱敏业务数据。
     KEZI_BASE_URL: str = "https://kezi.lpp6.com"
     KEZI_API_KEY: str = ""
@@ -321,17 +315,9 @@ class Settings(BaseSettings):
 
         if self.DB_USER.lower() == "root":
             warnings.append("DATABASE_ROOT_USER")
-        if self.DATAEASE_DB_USER.lower() == "root":
-            warnings.append("DATAEASE_ROOT_USER")
         parsed_redis = urlparse(self.REDIS_URL)
         if not parsed_redis.password:
             warnings.append("REDIS_AUTH_DISABLED")
-        if self.DATAEASE_READER_PASSWORD in {
-            "",
-            "dataease_reader_change_me",
-            "请修改为仅供DataEase使用的强密码",
-        }:
-            warnings.append("DATAEASE_READER_PASSWORD_INSECURE")
         return errors, warnings
 
 

@@ -1,4 +1,4 @@
-"""人工复盘编排：真实话术 -> 评分 -> AI 复盘 -> 知识库 -> DataEase。"""
+"""人工复盘编排：真实话术 -> 评分 -> AI 复盘 -> 知识库。"""
 
 import logging
 from typing import Any, Callable
@@ -11,7 +11,6 @@ from app.services.ai.kb_service import sync_session_to_kb
 from app.services.ai.review_service import generate_findings
 from app.services.ai.scoring import score_session_transcript
 from app.services.ai.unified_review import generate_unified_review
-from app.services.sync import sync_session
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +65,6 @@ def process_session_post_collection(db: Session, session_id: int) -> dict[str, A
     knowledge = _run_stage(
         db, errors, "knowledge", lambda: sync_session_to_kb(db, session_id)
     )
-    dataease = _run_stage(
-        db, errors, "dataease", lambda: (sync_session(db, session_id), True)[1]
-    )
-
     critical_errors = {
         key: value for key, value in errors.items() if key in {"review", "knowledge"}
     }
@@ -85,7 +80,6 @@ def process_session_post_collection(db: Session, session_id: int) -> dict[str, A
             (unified_review or {}).get("analyzed_user_count", 0)
         ),
         "knowledge": knowledge or {},
-        "dataease_synced": dataease is not None,
         "errors": errors,
         "success": not critical_errors,
     }

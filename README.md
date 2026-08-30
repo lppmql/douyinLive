@@ -12,8 +12,8 @@
 | 后端 | FastAPI、SQLAlchemy、APScheduler、Playwright |
 | 数据 | MySQL 8、Redis 7 |
 | AI | 本地 Ollama（Qwen3.5 9B）、FunASR、ffmpeg |
-| 可视化 | DataEase（可选） |
-| 监控 | Prometheus、Grafana（可选） |
+| 可视化 | SoybeanAdmin、Naive UI、ECharts 原生经营大屏 |
+| 可观测性 | Trace ID、结构化日志、健康检查 |
 
 ## 环境要求
 
@@ -36,9 +36,8 @@ docker --version && python3 --version && node --version && pnpm --version && ffm
 # 2. 填写 .env 后，日常启动（推荐模式）
 ./start.sh standard
 
-# 也可以按电脑资源选择：
-# ./start.sh lite      # 核心业务，不启动 FunASR/DataEase/监控面板
-# ./start.sh full      # 全部服务
+# 低资源电脑可使用：
+# ./start.sh lite      # 核心业务，不自动启动 FunASR
 ```
 
 启动后访问：
@@ -48,9 +47,6 @@ docker --version && python3 --version && node --version && pnpm --version && ffm
 | 前端 | http://localhost:9527 |
 | API 文档 | http://localhost:8000/docs |
 | 健康检查 | http://localhost:8000/health |
-| DataEase | http://localhost:8100（可选） |
-| Prometheus | http://localhost:9090（可选） |
-| Grafana | http://localhost:3000（可选） |
 
 > 首次使用建议先看[新手上手指南](docs/beginner-guide.md)。
 
@@ -64,9 +60,8 @@ docker --version && python3 --version && node --version && pnpm --version && ffm
 - **AI 复盘工作台**：可信度评估、五维话术评分、证据提取、下一场动作建议
 - **跨场对比**：同主播不同场次指标对比，曲线对齐开播后分钟
 - **知识库问答**：基于真实话术/评论/指标的 AI 问答，每次回答可追溯到原场次
-- **经营仪表盘**：日期筛选 + 总体指标 + 主播维度明细
+- **经营仪表盘**：复用公共主播和日期筛选，原生展示总体指标、经营趋势、留资漏斗、主播排行和场次明细
 - **主播排班**：从排班表导入，自动匹配实际场次，提示缺场/无效/加场
-- **DataEase 大屏**：iframe 嵌入已发布大屏，通过只读语义视图保护业务数据
 
 详细功能说明见各页面右上角「新手帮助」按钮，技术实现见[开发指南](docs/开发.md)。
 
@@ -79,7 +74,6 @@ douyinLive/
 ├── docs/                  架构、开发、部署、故障排查文档
 ├── scripts/               维护脚本
 ├── data/                  本地数据（不提交 Git）
-├── observability/         Prometheus + Grafana 配置
 ├── .github/               CI/CD 工作流
 ├── Makefile               统一命令入口（make doctor/test/lint/build）
 ├── docker-compose.yml
@@ -105,7 +99,6 @@ douyinLive/
 
 - `.env`、`data/`、`backend/storage_state/*.json` 已在 `.gitignore`，不提交 Git
 - `DEBUG=false` 时，密码缺失/JWT 密钥不足 32 位会阻断启动
-- DataEase 使用只读账号（`SELECT`/`SHOW VIEW`），不能修改业务数据
 - MySQL/Redis/FunASR 端口默认只绑定 `127.0.0.1`
 - 部署前必须替换 `JWT_SECRET_KEY`、数据库密码和所有默认密钥
 
@@ -114,10 +107,6 @@ douyinLive/
 ### 页面显示 500
 
 先访问 http://localhost:8000/health。如果不是 `status: ok`，检查 Docker Desktop 和 MySQL 是否正常运行。
-
-### DataEase 登录报错
-
-通常是浏览器缓存了旧的 RSA 公钥。运行 `./start.sh` 会自动处理公钥兼容层，然后刷新登录页即可。
 
 ### 电脑卡顿
 

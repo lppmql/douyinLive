@@ -291,7 +291,7 @@ const local: App.I18n.Schema = {
       }
     },
     dashboard: {
-      placeholder: 'DataEase dashboard is not configured',
+      placeholder: 'No real live-session data in the selected range',
       placeholderDesc: 'Configure the URL to display live metrics, conversion funnels and audience profiles.',
       todayLeads: 'Today Leads',
       onlineUsers: 'Online Users',

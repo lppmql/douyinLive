@@ -104,7 +104,7 @@ const progressSubItems = [
       >
         <NStep title="账号就绪" description="Cookie 与指纹有效" />
         <NStep title="发现与补齐" description="主播、场次和详情" />
-        <NStep title="独立后台同步" description="话术排队、知识库与 DataEase" />
+        <NStep title="独立后台同步" description="话术排队与知识库" />
       </NSteps>
 
       <!-- ASR 话术开关 -->
@@ -137,7 +137,7 @@ const progressSubItems = [
               <template v-else>服务已关闭；开启后继续完成真实话术转写队列</template>
             </div>
             <div class="mt-3px text-12px text-gray-500">
-              AI 复盘在场次详情或话术页人工生成；知识库与 DataEase 由独立后台服务同步。
+              AI 复盘在场次详情或话术页人工生成；知识库由独立后台服务同步。
             </div>
           </div>
         </div>
@@ -254,9 +254,6 @@ const progressSubItems = [
           <span class="font-600">最近一次采集结果</span>
           <NTag :type="collectAllResult.collected_rooms > 0 ? 'success' : 'warning'" round size="small">
             {{ collectAllResult.collected_rooms }}/{{ collectAllResult.total_rooms }} 个房间成功
-          </NTag>
-          <NTag :type="collectAllResult.dataease_failed_count ? 'warning' : 'success'" round size="small">
-            DataEase 同步 {{ collectAllResult.dataease_synced_count || 0 }} 场
           </NTag>
           <NTag type="info" round size="small">
             话术新增排队 {{ collectAllResult.asr_queued_count || 0 }} 场 · 当前

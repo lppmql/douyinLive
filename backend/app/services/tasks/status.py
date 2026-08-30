@@ -18,7 +18,6 @@ from app.models.collector_module_states import CollectorModuleState
 from app.models.scraper_tasks import ScraperTask
 from app.services.collector.scheduler import scheduler_manager
 from app.services.resources.asr_policy import build_asr_resource_plan
-from app.services.sync.de_sync import pending_complete_session_count
 from app.services.tasks.batch_runners import (
     pending_knowledge_session_count,
 )
@@ -242,19 +241,6 @@ def build_control_center(
             states.get("knowledge"),
             counts.get("knowledge_sync", {}),
             pending_knowledge_session_count(db),
-            ),
-            "mode": "automatic",
-            "enabled": True,
-            "running": True,
-        },
-        {
-            **_persistent_module(
-            "dataease_sync",
-            latest.get("dataease_sync"),
-            active.get("dataease_sync"),
-            states.get("dataease"),
-            counts.get("dataease_sync", {}),
-            pending_complete_session_count(db, force=False, include_live=False),
             ),
             "mode": "automatic",
             "enabled": True,

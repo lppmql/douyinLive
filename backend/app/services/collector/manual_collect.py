@@ -658,9 +658,7 @@ async def collect_all(
             "history_detail_remaining_count": history_detail_progress["remaining_count"],
             "history_detail_batch_size": history_detail_progress["batch_size"],
             "history_detail_failed_count": history_detail_progress["failed_count"],
-            # 补齐刷新不冒充执行下游任务；ASR按开关运行，知识库和DataEase在后台自动同步。
-            "dataease_synced_count": 0,
-            "dataease_failed_count": 0,
+            # 补齐刷新不冒充执行下游任务；ASR按开关运行，知识库在后台自动同步。
             "asr_queued_count": 0,
             "asr_active_count": 0,
             "asr_queue_capacity": 0,
@@ -669,7 +667,7 @@ async def collect_all(
             "postprocess_completed_count": 0,
             "postprocess_failed_count": 0,
             "results": results,
-            "message": "全部场次真实数据已补齐刷新；ASR按开关运行，知识库和DataEase会自动同步，AI复盘请在场次详情手动生成",
+            "message": "全部场次真实数据已补齐刷新；ASR按开关运行，知识库会自动同步，AI复盘请在场次详情手动生成",
         }
         report("completed", 100, collected, len(rooms), "刷新数据采集完成", final_result)
         return final_result

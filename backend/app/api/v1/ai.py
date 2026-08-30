@@ -109,7 +109,7 @@ def score_session(session_id: int, db: Session = Depends(get_db)):
 
 @router.post("/pipeline/{session_id}", response_model=AiPipelineResponse)
 def run_transcript_ai_pipeline(session_id: int, db: Session = Depends(get_db)):
-    """人工生成评分与 AI 复盘，并同步知识库和 DataEase；不会创建剪辑任务。"""
+    """人工生成评分与 AI 复盘，并同步知识库；不会创建剪辑任务。"""
     try:
         result = process_session_post_collection(db, session_id)
     except ValueError as exc:

@@ -83,4 +83,4 @@ fi
 echo ""
 echo "依赖安装完成。首次使用请安装并打开 Ollama：https://ollama.com/download"
 echo "然后执行 ./scripts/setup_ollama_model.sh 创建项目模型。日常推荐：./start.sh standard"
-echo "可选模式：lite（核心服务）/ standard（含 FunASR）/ full（再含 DataEase 与监控面板）"
+echo "可选模式：lite（核心服务）/ standard（含 FunASR，推荐）"

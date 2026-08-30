@@ -316,8 +316,8 @@ const local: App.I18n.Schema = {
       creativity: '创意'
     },
     dashboard: {
-      placeholder: 'DataEase 数据大屏尚未配置',
-      placeholderDesc: '配置地址后可展示零食店避坑直播的留资转化漏斗、线索成本和主播排班等可视化图表',
+      placeholder: '当前筛选范围暂无真实直播数据',
+      placeholderDesc: '完成真实数据采集后，可查看私信留资漏斗、线索成本、主播排行和经营趋势',
       todayLeads: '今日留资',
       onlineUsers: '在线人数',
       validLeadRate: '有效留资率',

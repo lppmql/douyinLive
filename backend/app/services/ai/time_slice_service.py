@@ -19,7 +19,6 @@ from app.models.live_metrics import LiveMetric
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
 from app.core.config import settings
-from app.core.observability import KNOWLEDGE_SEARCH_TOTAL, KNOWLEDGE_SYNC_TOTAL
 
 logger = logging.getLogger(__name__)
 
@@ -236,9 +235,6 @@ def sync_session_time_slices(
     # Phase 36: 同步向量到 Qdrant（新创建或内容变更的时间片）
     _sync_time_slice_vectors(db, session_id, slice_count)
 
-    for result_name in ("created_count", "updated_count", "unchanged_count", "deleted_count"):
-        if counts[result_name]:
-            KNOWLEDGE_SYNC_TOTAL.labels(result=result_name.removesuffix("_count")).inc(counts[result_name])
     return {
         "slice_count": slice_count,
         "created_count": counts["created_count"],
@@ -313,7 +309,6 @@ def search_time_slices(
             "comment_count": row.comment_count,
             "metric_point_count": row.metric_point_count,
         })
-    KNOWLEDGE_SEARCH_TOTAL.labels(result="hit" if results else "miss").inc()
     return results
 
 

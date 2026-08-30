@@ -1000,7 +1000,7 @@ export interface paths {
         };
         /**
          * Get Task Queue
-         * @description 返回采集、AI、知识库、DataEase 和逐场 ASR 的统一任务队列。
+         * @description 返回采集、AI、知识库和逐场 ASR 的统一任务队列。
          */
         get: operations["get_task_queue_api_v1_collector_task_queue_get"];
         put?: never;
@@ -1899,7 +1899,7 @@ export interface paths {
         put?: never;
         /**
          * Run Transcript Ai Pipeline
-         * @description 人工生成评分与 AI 复盘，并同步知识库和 DataEase；不会创建剪辑任务。
+         * @description 人工生成评分与 AI 复盘，并同步知识库；不会创建剪辑任务。
          */
         post: operations["run_transcript_ai_pipeline_api_v1_ai_pipeline__session_id__post"];
         delete?: never;
@@ -2267,7 +2267,7 @@ export interface paths {
         };
         /**
          * Get Dashboard Summary
-         * @description 返回基于真实直播场次的核心经营数据，支持日期范围筛选。
+         * @description 返回真实直播场次核心经营数据，支持日期和主播筛选。
          */
         get: operations["get_dashboard_summary_api_v1_dashboard_summary_get"];
         put?: never;
@@ -2287,7 +2287,7 @@ export interface paths {
         };
         /**
          * Get Dashboard Summary By Anchor
-         * @description 按主播（douyin_id）分组汇总经营指标，用于首页主播明细表。
+         * @description 按稳定主播键分组汇总经营指标。
          */
         get: operations["get_dashboard_summary_by_anchor_api_v1_dashboard_summary_by_anchor_get"];
         put?: never;
@@ -2298,7 +2298,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/dataease/status": {
+    "/api/v1/dashboard/operations": {
         parameters: {
             query?: never;
             header?: never;
@@ -2306,52 +2306,12 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Dataease Status
-         * @description 返回业务完整场次到 DataEase 宽表的真实覆盖情况。
+         * Get Dashboard Operations
+         * @description 一次返回原生大屏所需数据，减少前端重复请求和口径漂移。
          */
-        get: operations["get_dataease_status_api_v1_dataease_status_get"];
+        get: operations["get_dashboard_operations_api_v1_dashboard_operations_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/dataease/semantic-layer": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Semantic Layer
-         * @description 返回 DataEase、前端和 API 共用的指标口径与只读数据集。
-         */
-        get: operations["get_semantic_layer_api_v1_dataease_semantic_layer_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/dataease/sync": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Sync Dataease
-         * @description 增量同步缺失/过期场次；force=true 时强制重建最近完整场次。
-         */
-        post: operations["sync_dataease_api_v1_dataease_sync_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3332,6 +3292,11 @@ export interface components {
          */
         AnchorSummaryItem: {
             /**
+             * Anchor Key
+             * @default
+             */
+            anchor_key: string;
+            /**
              * Douyin Id
              * @default
              */
@@ -3852,16 +3817,6 @@ export interface components {
              * @default 0
              */
             history_detail_failed_count: number;
-            /**
-             * Dataease Synced Count
-             * @default 0
-             */
-            dataease_synced_count: number;
-            /**
-             * Dataease Failed Count
-             * @default 0
-             */
-            dataease_failed_count: number;
             /**
              * Asr Queued Count
              * @default 0
@@ -4471,6 +4426,104 @@ export interface components {
             comment_user_count: number;
         };
         /**
+         * DashboardFunnelStep
+         * @description 从曝光到确认留资的漏斗步骤。
+         */
+        DashboardFunnelStep: {
+            /** Label */
+            label: string;
+            /**
+             * Value
+             * @default 0
+             */
+            value: number;
+            /**
+             * Step Rate
+             * @default 0
+             */
+            step_rate: number;
+        };
+        /**
+         * DashboardOperationsResponse
+         * @description SoybeanAdmin 原生经营大屏的一次性响应。
+         */
+        DashboardOperationsResponse: {
+            summary: components["schemas"]["DashboardSummaryResponse"];
+            /** Anchors */
+            anchors?: components["schemas"]["AnchorSummaryItem"][];
+            /** Trend */
+            trend?: components["schemas"]["DashboardTrendPoint"][];
+            /** Funnel */
+            funnel?: components["schemas"]["DashboardFunnelStep"][];
+            /** Recent Sessions */
+            recent_sessions?: components["schemas"]["DashboardSessionItem"][];
+        };
+        /**
+         * DashboardSessionItem
+         * @description 原生大屏最近场次经营明细。
+         */
+        DashboardSessionItem: {
+            /** Id */
+            id: number;
+            /**
+             * Anchor Name
+             * @default
+             */
+            anchor_name: string;
+            /**
+             * Anchor Avatar Url
+             * @default
+             */
+            anchor_avatar_url: string;
+            /**
+             * Douyin Id
+             * @default
+             */
+            douyin_id: string;
+            /**
+             * Session Title
+             * @default
+             */
+            session_title: string;
+            /** Live Start Time */
+            live_start_time?: string | null;
+            /**
+             * Live Duration Seconds
+             * @default 0
+             */
+            live_duration_seconds: number;
+            /**
+             * Total Viewers
+             * @default 0
+             */
+            total_viewers: number;
+            /**
+             * Total Comments
+             * @default 0
+             */
+            total_comments: number;
+            /**
+             * Total Private Messages
+             * @default 0
+             */
+            total_private_messages: number;
+            /**
+             * Total Leads
+             * @default 0
+             */
+            total_leads: number;
+            /**
+             * Total Ad Cost
+             * @default 0
+             */
+            total_ad_cost: number;
+            /**
+             * Lead Cost
+             * @default 0
+             */
+            lead_cost: number;
+        };
+        /**
          * DashboardSummaryResponse
          * @description GET /dashboard/summary
          */
@@ -4536,139 +4589,73 @@ export interface components {
              */
             average_lead_cost: number;
             /**
+             * Private Message Rate
+             * @default 0
+             */
+            private_message_rate: number;
+            /**
+             * Lead Conversion Rate
+             * @default 0
+             */
+            lead_conversion_rate: number;
+            /**
+             * Total Exposure Users
+             * @default 0
+             */
+            total_exposure_users: number;
+            /**
+             * Total Enter Users
+             * @default 0
+             */
+            total_enter_users: number;
+            /**
+             * Total Card Click Users
+             * @default 0
+             */
+            total_card_click_users: number;
+            /**
              * Open Review Action Count
              * @default 0
              */
             open_review_action_count: number;
         };
         /**
-         * DataEaseSemanticResponse
-         * @description GET /dataease/semantic-layer
+         * DashboardTrendPoint
+         * @description 原生大屏按自然日汇总的趋势点。
          */
-        DataEaseSemanticResponse: {
+        DashboardTrendPoint: {
+            /** Date Key */
+            date_key: string;
             /**
-             * Version
-             * @default semantic-v1
-             */
-            version: string;
-            /**
-             * Metrics
-             * @default []
-             */
-            metrics: {
-                [key: string]: unknown;
-            }[];
-            /**
-             * Datasets
-             * @default []
-             */
-            datasets: {
-                [key: string]: unknown;
-            }[];
-            /**
-             * Time Policy
-             * @default {}
-             */
-            time_policy: {
-                [key: string]: unknown;
-            };
-            /**
-             * Dataease Access
-             * @default
-             */
-            dataease_access: string;
-        };
-        /**
-         * DataEaseStatusResponse
-         * @description GET /dataease/status
-         */
-        DataEaseStatusResponse: {
-            /**
-             * Source Session Count
+             * Session Count
              * @default 0
              */
-            source_session_count: number;
+            session_count: number;
             /**
-             * Synced Session Count
+             * Total Viewers
              * @default 0
              */
-            synced_session_count: number;
+            total_viewers: number;
             /**
-             * Pending Session Count
+             * Total Comments
              * @default 0
              */
-            pending_session_count: number;
+            total_comments: number;
             /**
-             * Outdated Session Count
+             * Total Private Messages
              * @default 0
              */
-            outdated_session_count: number;
+            total_private_messages: number;
             /**
-             * Coverage Rate
-             * @default 100
-             */
-            coverage_rate: number;
-            /**
-             * Metric Row Count
+             * Total Leads
              * @default 0
              */
-            metric_row_count: number;
+            total_leads: number;
             /**
-             * Profile Row Count
+             * Total Ad Cost
              * @default 0
              */
-            profile_row_count: number;
-            /**
-             * Comment Summary Count
-             * @default 0
-             */
-            comment_summary_count: number;
-            /**
-             * Transcript Summary Count
-             * @default 0
-             */
-            transcript_summary_count: number;
-            /**
-             * Ai Summary Count
-             * @default 0
-             */
-            ai_summary_count: number;
-            /** Last Synced At */
-            last_synced_at?: string | null;
-        };
-        /**
-         * DataEaseSyncResponse
-         * @description POST /dataease/sync
-         */
-        DataEaseSyncResponse: {
-            /**
-             * Status
-             * @default ok
-             */
-            status: string;
-            /**
-             * Selected Count
-             * @default 0
-             */
-            selected_count: number;
-            /**
-             * Synced Count
-             * @default 0
-             */
-            synced_count: number;
-            /**
-             * Failed Count
-             * @default 0
-             */
-            failed_count: number;
-            /** Errors */
-            errors?: string[];
-            /**
-             * Removed Stale Row Count
-             * @default 0
-             */
-            removed_stale_row_count: number;
-            dataease?: components["schemas"]["DataEaseStatusResponse"] | null;
+            total_ad_cost: number;
         };
         /**
          * FeedbackRequest
@@ -12035,10 +12022,11 @@ export interface operations {
     get_dashboard_summary_api_v1_dashboard_summary_get: {
         parameters: {
             query?: {
-                /** @description 开始日期（含），如 2026-07-20 */
+                /** @description 开始日期（含） */
                 start_date?: string | null;
-                /** @description 结束日期（含），如 2026-07-20 */
+                /** @description 结束日期（含） */
                 end_date?: string | null;
+                anchor_key?: string | null;
             };
             header?: never;
             path?: never;
@@ -12073,6 +12061,7 @@ export interface operations {
                 start_date?: string | null;
                 /** @description 结束日期（含） */
                 end_date?: string | null;
+                anchor_key?: string | null;
             };
             header?: never;
             path?: never;
@@ -12100,51 +12089,14 @@ export interface operations {
             };
         };
     };
-    get_dataease_status_api_v1_dataease_status_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEaseStatusResponse"];
-                };
-            };
-        };
-    };
-    get_semantic_layer_api_v1_dataease_semantic_layer_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DataEaseSemanticResponse"];
-                };
-            };
-        };
-    };
-    sync_dataease_api_v1_dataease_sync_post: {
+    get_dashboard_operations_api_v1_dashboard_operations_get: {
         parameters: {
             query?: {
-                limit?: number;
-                force?: boolean;
+                /** @description 开始日期（含） */
+                start_date?: string | null;
+                /** @description 结束日期（含） */
+                end_date?: string | null;
+                anchor_key?: string | null;
             };
             header?: never;
             path?: never;
@@ -12158,7 +12110,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DataEaseSyncResponse"];
+                    "application/json": components["schemas"]["DashboardOperationsResponse"];
                 };
             };
             /** @description Validation Error */

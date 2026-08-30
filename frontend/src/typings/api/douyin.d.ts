@@ -24,10 +24,16 @@ declare namespace Api {
       total_leads: number;
       total_ad_cost: number;
       average_lead_cost: number;
+      private_message_rate: number;
+      lead_conversion_rate: number;
+      total_exposure_users: number;
+      total_enter_users: number;
+      total_card_click_users: number;
       open_review_action_count: number;
     }
 
     interface AnchorSummaryItem {
+      anchor_key: string;
       douyin_id: string;
       anchor_name: string;
       anchor_avatar_url: string;
@@ -45,6 +51,46 @@ declare namespace Api {
     interface AnchorSummaryResponse {
       anchors: AnchorSummaryItem[];
       total: Record<string, number>;
+    }
+
+    interface DashboardTrendPoint {
+      date_key: string;
+      session_count: number;
+      total_viewers: number;
+      total_comments: number;
+      total_private_messages: number;
+      total_leads: number;
+      total_ad_cost: number;
+    }
+
+    interface DashboardFunnelStep {
+      label: string;
+      value: number;
+      step_rate: number;
+    }
+
+    interface DashboardSessionItem {
+      id: number;
+      anchor_name: string;
+      anchor_avatar_url: string;
+      douyin_id: string;
+      session_title: string;
+      live_start_time: string | null;
+      live_duration_seconds: number;
+      total_viewers: number;
+      total_comments: number;
+      total_private_messages: number;
+      total_leads: number;
+      total_ad_cost: number;
+      lead_cost: number;
+    }
+
+    interface DashboardOperations {
+      summary: DashboardSummary;
+      anchors: AnchorSummaryItem[];
+      trend: DashboardTrendPoint[];
+      funnel: DashboardFunnelStep[];
+      recent_sessions: DashboardSessionItem[];
     }
 
     /* ---------- 主播排班 ---------- */
@@ -635,7 +681,7 @@ declare namespace Api {
       message: string;
     }
 
-    type CollectorModuleKey = 'data_refresh' | 'monitor' | 'asr' | 'ai_review' | 'knowledge' | 'dataease';
+    type CollectorModuleKey = 'data_refresh' | 'monitor' | 'asr' | 'ai_review' | 'knowledge';
 
     interface CollectorModuleStatus {
       key: CollectorModuleKey;
@@ -773,30 +819,6 @@ declare namespace Api {
       postprocess_completed_count: number;
       postprocess_failed_count: number;
       message: string;
-    }
-
-    interface DataEaseStatus {
-      source_session_count: number;
-      synced_session_count: number;
-      pending_session_count: number;
-      outdated_session_count: number;
-      coverage_rate: number;
-      metric_row_count: number;
-      profile_row_count: number;
-      comment_summary_count: number;
-      transcript_summary_count: number;
-      ai_summary_count: number;
-      last_synced_at: string | null;
-    }
-
-    interface DataEaseSyncResult {
-      status: 'ok' | 'partial';
-      selected_count: number;
-      synced_count: number;
-      failed_count: number;
-      removed_stale_row_count: number;
-      errors: Array<{ session_id: number; message: string }>;
-      dataease: DataEaseStatus;
     }
 
     /* ---------- 监控 ---------- */
@@ -1234,8 +1256,6 @@ declare namespace Api {
       history_detail_remaining_count: number;
       history_detail_batch_size: number;
       history_detail_failed_count: number;
-      dataease_synced_count: number;
-      dataease_failed_count: number;
       asr_queued_count: number;
       asr_active_count: number;
       asr_queue_capacity: number;

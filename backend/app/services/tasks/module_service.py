@@ -27,14 +27,13 @@ from app.services.collector.browser import browser_manager
 from app.services.collector.scheduler import scheduler_manager
 from app.services.resources.system_usage import get_system_usage
 from app.services.resources.asr_policy import build_asr_resource_plan
-from app.services.sync.de_sync import pending_complete_session_count
 from app.services.tasks.batch_runners import pending_knowledge_session_count
 from app.services.tasks.control import MODULE_TASK_TYPES, collector_task_control
 
 
-MODULE_KEYS = ("data_refresh", "monitor", "asr", "knowledge", "dataease")
-SCHEDULED_SERVICE_MODULE_KEYS = ("knowledge", "dataease")
-AUTOMATIC_MODULE_KEYS = ("knowledge", "dataease")
+MODULE_KEYS = ("data_refresh", "monitor", "asr", "knowledge")
+SCHEDULED_SERVICE_MODULE_KEYS = ("knowledge",)
+AUTOMATIC_MODULE_KEYS = ("knowledge",)
 
 
 def _module_intervals() -> dict[str, int]:
@@ -44,7 +43,6 @@ def _module_intervals() -> dict[str, int]:
         "asr": 5,
         "ai_review": settings.AI_REVIEW_INTERVAL_SECONDS,
         "knowledge": settings.KNOWLEDGE_SYNC_INTERVAL_SECONDS,
-        "dataease": settings.DATAEASE_SYNC_INTERVAL_SECONDS,
     }
 
 
@@ -205,8 +203,7 @@ class CollectorModuleServiceManager:
             return task, message
         if module_key in AUTOMATIC_MODULE_KEYS:
             self._set_enabled(module_key, True)
-            label = "知识库入库" if module_key == "knowledge" else "DataEase 只读宽表同步"
-            return None, f"{label}为后台自动服务，无需手动开启"
+            return None, "知识库入库为后台自动服务，无需手动开启"
 
         if module_key == "monitor":
             await scheduler_manager.start()
@@ -244,8 +241,7 @@ class CollectorModuleServiceManager:
             stopped_count = len(collector_task_control.request_cancel_task_type("collect_all"))
             return stopped_count, f"已请求停止全部场次数据补齐刷新，共 {stopped_count} 个任务"
         if module_key in AUTOMATIC_MODULE_KEYS:
-            label = "知识库入库" if module_key == "knowledge" else "DataEase 只读宽表同步"
-            raise ValueError(f"{label}为后台基础服务，已改为自动执行，不能关闭")
+            raise ValueError("知识库入库为后台基础服务，已改为自动执行，不能关闭")
         self._set_enabled(module_key, False)
         stopped_count = 0
 
@@ -416,8 +412,6 @@ class CollectorModuleServiceManager:
     def _pending_count(db, module_key: str) -> int:
         if module_key == "knowledge":
             return pending_knowledge_session_count(db)
-        if module_key == "dataease":
-            return pending_complete_session_count(db, force=False, include_live=False)
         return 1
 
     @staticmethod

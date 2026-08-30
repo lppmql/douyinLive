@@ -38,7 +38,7 @@ const workflow = [
 const currentHint = computed(() => {
   const hints: Record<string, string> = {
     home: '先看异常与运行任务，再决定进入采集或场次页面。',
-    dashboard: '先核对场次详情完整率，再查看 DataEase 可视化。',
+    dashboard: '按主播和日期筛选，优先观察私信、确认留资、线索成本与场次趋势。',
     collector: '首次使用先扫码并检查存活，再启动刷新采集或实时监控。',
     'live-sessions': '优先筛选“详情待补”，补齐后再进行分析。',
     transcripts: '先选择场次；没有音频或 m3u8 时无法生成真实话术。',

@@ -53,11 +53,6 @@ const moduleMeta: Record<
     icon: 'mdi:book-open-page-variant-outline',
     description: '场次、评论、指标、画像、话术与手动复盘变化后自动入库',
     accent: '#0891b2'
-  },
-  dataease: {
-    icon: 'mdi:chart-box-outline',
-    description: '发现直播数据变化后自动增量同步到 DataEase 只读宽表',
-    accent: '#4f46e5'
   }
 };
 
@@ -116,7 +111,7 @@ function intervalLabel(seconds: number): string {
             数据处理控制中心
           </div>
           <div class="mt-4px text-12px leading-20px text-gray-500">
-            补齐刷新按需执行；直播监控与 ASR 可随时关闭；知识库、DataEase 和客资在后台自动增量同步。
+            补齐刷新按需执行；直播监控与 ASR 可随时关闭；知识库和客资在后台自动增量同步。
           </div>
         </div>
         <NSpace align="center" wrap>
@@ -213,7 +208,7 @@ function intervalLabel(seconds: number): string {
       </NGi>
       <!--
         客资同步使用独立的后台定时器，所以不伪装成任务队列模块。
-        视觉上放进同一个网格，并紧跟后端返回列表末尾的 DataEase，方便用户按数据流顺序查看。
+        视觉上放进同一个网格，并紧跟知识库模块，方便用户按数据流顺序查看。
       -->
       <NGi>
         <CollectorLeadSyncCard

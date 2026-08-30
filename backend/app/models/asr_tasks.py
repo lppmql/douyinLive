@@ -88,5 +88,5 @@ class AsrTask(Base, TimestampMixin):
         Integer, nullable=False, default=0, comment="后处理执行次数"
     )
     postprocess_result = Column(
-        JSON, nullable=True, comment="话术、复盘、知识库和DataEase处理结果"
+        JSON, nullable=True, comment="话术、复盘和知识库处理结果"
     )

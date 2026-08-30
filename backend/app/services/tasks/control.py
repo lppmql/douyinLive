@@ -27,7 +27,6 @@ from app.services.tasks.batch_runners import (
     run_ai_review_batch,
     run_clip_batch,
     run_data_refresh,
-    run_dataease_sync_batch,
     run_knowledge_sync_batch,
 )
 from app.services.tasks.exceptions import TaskBatchFailed, TaskCancellationRequested
@@ -44,7 +43,6 @@ MODULE_TASK_TYPES = {
     "data_refresh": "collect_all",
     "ai_review": "ai_review",
     "knowledge": "knowledge_sync",
-    "dataease": "dataease_sync",
     "clip": "clip_task",
 }
 TASK_TYPE_MODULES = {
@@ -55,7 +53,6 @@ TASK_LABELS = {
     "collect_all": "全部场次数据补齐刷新",
     "ai_review": "AI 复盘",
     "knowledge_sync": "存入知识库",
-    "dataease_sync": "DataEase 数据库同步",
     "clip_task": "AI 手动剪辑",
 }
 
@@ -541,7 +538,6 @@ class CollectorTaskControlManager:
             runner = {
                 "ai_review": run_ai_review_batch,
                 "knowledge_sync": run_knowledge_sync_batch,
-                "dataease_sync": run_dataease_sync_batch,
                 "clip_task": run_clip_batch,
             }.get(task_type)
             if not runner:

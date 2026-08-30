@@ -51,7 +51,6 @@ export function getStageLabel(stage: unknown): string {
     history_sync: '历史同步',
     detail_enrichment: '详情补齐',
     cookie_refresh: '保存登录态',
-    dataease_sync: '同步 DataEase',
     ai_review: '生成 AI 复盘',
     knowledge_sync: '写入知识库',
     asr_queue: '排队生成话术',

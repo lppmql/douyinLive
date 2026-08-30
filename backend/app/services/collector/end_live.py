@@ -75,7 +75,6 @@ async def process_live_end(db: Session, session_id: int):
                 "duration_seconds": session.live_duration_seconds,
                 "comment_count": comment_count,
                 "lead_count": lead_count,
-                "dataease_status": "等待独立同步",
             },
         )
         db.commit()

@@ -1,39 +1,72 @@
 <script setup lang="ts">
-defineOptions({
-  name: 'Dashboard'
-});
+import { watch } from 'vue';
+import DashboardAnchorTable from './modules/DashboardAnchorTable.vue';
+import DashboardFilter from './modules/DashboardFilter.vue';
+import DashboardFunnel from './modules/DashboardFunnel.vue';
+import DashboardMetricGrid from './modules/DashboardMetricGrid.vue';
+import DashboardSessionTable from './modules/DashboardSessionTable.vue';
+import DashboardTrendChart from './modules/DashboardTrendChart.vue';
+import { useDashboardData } from './composables/useDashboardData';
 
-const dataeaseShareUrl = import.meta.env.VITE_DATAEASE_URL || 'http://localhost:8100/#/de-link/ioyH1hYC';
+defineOptions({ name: 'Dashboard' });
+
+const {
+  loading,
+  loadError,
+  anchorKey,
+  dateRange,
+  anchorOptions,
+  dashboard,
+  loadDashboard,
+  refresh,
+  resetFilters
+} = useDashboardData();
+
+watch([anchorKey, dateRange], loadDashboard, { deep: true });
 </script>
 
 <template>
-  <iframe
-    class="dataease-screen"
-    :src="dataeaseShareUrl"
-    title="DataEase 数据大屏"
-    loading="eager"
-    referrerpolicy="strict-origin-when-cross-origin"
-    allow="fullscreen; clipboard-read; clipboard-write"
-    allowfullscreen
-  />
+  <NSpace vertical :size="16" class="business-page">
+    <DashboardFilter
+      v-model:anchor-key="anchorKey"
+      v-model:date-range="dateRange"
+      :anchor-options="anchorOptions"
+      :loading="loading"
+      @refresh="loadDashboard"
+      @reset="resetFilters"
+    />
+
+    <NAlert v-if="loadError" type="warning" :bordered="false" show-icon>
+      <NFlex justify="space-between" align="center">
+        <span>{{ loadError }}</span>
+        <NButton size="small" secondary :loading="loading" @click="refresh">重新加载</NButton>
+      </NFlex>
+    </NAlert>
+
+    <NSpin :show="loading && !dashboard">
+      <NSpace v-if="dashboard" vertical :size="16">
+        <DashboardMetricGrid :summary="dashboard.summary" />
+
+        <NGrid cols="1 l:5" responsive="screen" :x-gap="16" :y-gap="16">
+          <NGi span="1 l:3">
+            <DashboardTrendChart :data="dashboard.trend" />
+          </NGi>
+          <NGi span="1 l:2">
+            <DashboardFunnel :data="dashboard.funnel" />
+          </NGi>
+        </NGrid>
+
+        <DashboardAnchorTable :data="dashboard.anchors" />
+        <DashboardSessionTable :data="dashboard.recent_sessions" />
+      </NSpace>
+
+      <NCard v-else-if="!loading" :bordered="false" class="card-wrapper">
+        <NEmpty description="当前筛选范围暂无真实直播数据" class="py-70px">
+          <template #extra>
+            <NButton type="primary" secondary @click="refresh">重新加载</NButton>
+          </template>
+        </NEmpty>
+      </NCard>
+    </NSpin>
+  </NSpace>
 </template>
-
-<style scoped>
-.dataease-screen {
-  display: block;
-  width: 100%;
-  height: calc(100vh - 112px);
-  min-height: 640px;
-  border: 0;
-  border-radius: 8px;
-  background: #0b1220;
-}
-
-@media (max-width: 768px) {
-  .dataease-screen {
-    height: calc(100vh - 96px);
-    min-height: 560px;
-    border-radius: 0;
-  }
-}
-</style>

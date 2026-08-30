@@ -3,7 +3,6 @@ from types import SimpleNamespace
 
 from app.core.observability import new_trace_id
 from app.services.ai.time_slice_service import _slice_payload, format_offset
-from app.services.metrics.semantic import METRIC_DEFINITIONS, SEMANTIC_DATASETS
 
 
 def test_time_slice_only_maps_comments_inside_platform_time_window():
@@ -60,26 +59,6 @@ def test_unmapped_comment_count_does_not_fabricate_comment_content():
     assert payload["unmapped_comment_count"] == 1
     assert payload["comment_count"] == 0
     assert payload["comments_text"] is None
-
-
-def test_semantic_layer_has_unique_metrics_and_readonly_views():
-    metric_keys = [item["key"] for item in METRIC_DEFINITIONS]
-    dataset_views = [item["view"] for item in SEMANTIC_DATASETS]
-
-    assert len(metric_keys) == len(set(metric_keys))
-    assert all(item["time_semantics"] for item in METRIC_DEFINITIONS)
-    assert len(dataset_views) == 11
-    assert all(view.startswith("de_v_") for view in dataset_views)
-    assert {
-        "private_message_rate",
-        "review_action_completion_rate",
-        "approved_script_asset_count",
-        "ai_call_success_rate",
-        "ai_total_tokens",
-    }.issubset(metric_keys)
-    ai_metrics = [item for item in METRIC_DEFINITIONS if item["dataset"] == "de_v_fact_ai_call_trace"]
-    assert ai_metrics
-    assert all(item["time_semantics"] == "使用模型调用发生时的系统观测时间" for item in ai_metrics)
 
 
 def test_trace_id_reuses_valid_header_and_rejects_unsafe_value():

@@ -194,7 +194,7 @@ export function useCollectorData(message: MessageApi, dialog: DialogApi) {
     const content =
       task.task_type === 'collect_all'
         ? '停止后会保留已补齐的数据；实时监控将立即恢复。需要时可重新点击补齐刷新或在任务队列重试。'
-        : ['knowledge_sync', 'dataease_sync'].includes(task.task_type)
+        : task.task_type === 'knowledge_sync'
           ? '这里只停止当前后台同步批次；源数据不会丢失，系统下一轮会自动继续处理尚未同步的场次。'
           : '这里只停止当前任务；已写入的真实数据和完成的音频分片会保留。ASR 开关仍开启时会继续处理下一场。';
     dialog.warning({

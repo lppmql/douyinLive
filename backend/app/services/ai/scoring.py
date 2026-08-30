@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.transcript_segments import TranscriptSegment
 from app.models.analysis_reports import AnalysisReport
-from app.models.de_tables import DeAnchorTranscriptSummary
 from app.prompts import get_system_prompt
 from app.services.ai.llm_client import chat_json
 from app.services.ai.prompt_service import get_prompt_template
@@ -23,7 +22,7 @@ def score_session_transcript(session_id: int, db: Session | None = None) -> dict
     1. 从 transcript_segments 获取话术内容
     2. 拼接话术文本，按 3000 字分段
     3. 调用本地模型评分
-    4. 保存结果到 analysis_reports 和 de_anchor_transcript_summary
+    4. 保存结果到 analysis_reports，并回写话术分段的整体评分
     """
     if db is None:
         db = SessionLocal()
@@ -97,13 +96,6 @@ def score_session_transcript(session_id: int, db: Session | None = None) -> dict
             avg_score = float(total_score)
             for seg in segments:
                 seg.ai_score = Decimal(str(avg_score))
-
-        # 更新 de_anchor_transcript_summary
-        summary = db.query(DeAnchorTranscriptSummary).filter(
-            DeAnchorTranscriptSummary.session_id == session_id
-        ).first()
-        if summary:
-            summary.avg_ai_score = float(total_score) if total_score else None
 
         db.commit()
         logger.info("场次 %d 话术评分完成: total=%s", session_id, total_score)

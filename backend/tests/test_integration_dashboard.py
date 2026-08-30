@@ -2,12 +2,14 @@
 M8 核心链路集成测试 — 经营仪表盘 (dashboard)
 =============================================
 测试链条：汇总数据 → 日期筛选 → 按主播分组
-覆盖端点：GET /dashboard/summary, GET /dashboard/summary/by-anchor
+覆盖端点：GET /dashboard/summary、GET /dashboard/summary/by-anchor、GET /dashboard/operations
 
 ⚠️  P0-01 后所有业务 API 要求登录鉴权，所有测试均需带 auth_headers
 """
 
 from datetime import datetime
+
+import pytest
 
 
 class TestDashboardSummary:
@@ -262,3 +264,134 @@ class TestDashboardByAnchor:
         assert data["anchors"][0]["session_count"] == 1
         assert data["anchors"][0]["total_viewers"] == 2000
         assert data["total"]["session_count"] == 1
+
+    def test_by_anchor_uses_live_time_instead_of_backfill_id_for_latest_snapshot(self, client, db, auth_headers):
+        """历史回填的高 ID 不能覆盖时间上更新的主播身份快照。"""
+        from app.models.live_rooms import LiveRoom
+        from app.models.live_sessions import LiveSession
+
+        room = LiveRoom(account_name="回填测试账号", anchor_name="主播新名称")
+        db.add(room)
+        db.flush()
+        newest = LiveSession(
+            room_id=room.id,
+            douyin_id="stable_anchor",
+            anchor_name="主播新名称",
+            anchor_avatar_url="https://example.invalid/new-avatar.png",
+            live_start_time=datetime(2026, 8, 29, 10, 0, 0),
+        )
+        db.add(newest)
+        db.flush()
+        historical_backfill = LiveSession(
+            room_id=room.id,
+            douyin_id="stable_anchor",
+            anchor_name="主播旧名称",
+            anchor_avatar_url="https://example.invalid/old-avatar.png",
+            live_start_time=datetime(2026, 7, 1, 10, 0, 0),
+        )
+        db.add(historical_backfill)
+        db.commit()
+
+        resp = client.get("/api/v1/dashboard/summary/by-anchor", headers=auth_headers)
+
+        assert resp.status_code == 200
+        item = resp.json()["anchors"][0]
+        assert historical_backfill.id > newest.id
+        assert item["anchor_name"] == "主播新名称"
+        assert item["anchor_avatar_url"] == "https://example.invalid/new-avatar.png"
+        assert item["anchor_avatar_session_id"] == newest.id
+
+
+class TestDashboardOperations:
+    """GET /api/v1/dashboard/operations — 原生经营大屏组合数据。"""
+
+    def test_operations_returns_filtered_real_business_metrics(self, client, db, auth_headers):
+        """组合接口应复用公共主播键，并返回趋势、漏斗和场次明细。"""
+        from app.models.live_rooms import LiveRoom
+        from app.models.live_sessions import LiveSession
+
+        room = LiveRoom(account_name="原生大屏测试账号", anchor_name="主播A")
+        db.add(room)
+        db.flush()
+        db.add_all([
+            LiveSession(
+                room_id=room.id,
+                douyin_id="douyin_a",
+                anchor_name="主播A",
+                session_title="主播A真实场次",
+                live_start_time=datetime(2026, 8, 28, 10, 0, 0),
+                live_exposure_users=1000,
+                live_enter_users=400,
+                card_click_users=80,
+                private_message_count=20,
+                leads_count=10,
+                total_viewers=500,
+                comments_count=60,
+                ad_cost=200,
+            ),
+            LiveSession(
+                room_id=room.id,
+                douyin_id="douyin_b",
+                anchor_name="主播B",
+                session_title="主播B真实场次",
+                live_start_time=datetime(2026, 8, 28, 14, 0, 0),
+                live_exposure_users=2000,
+                live_enter_users=800,
+                card_click_users=160,
+                private_message_count=40,
+                leads_count=20,
+                total_viewers=1000,
+                comments_count=120,
+                ad_cost=500,
+            ),
+        ])
+        db.commit()
+
+        resp = client.get(
+            "/api/v1/dashboard/operations",
+            params={
+                "start_date": "2026-08-28",
+                "end_date": "2026-08-28",
+                "anchor_key": "dyid:douyin_a",
+            },
+            headers=auth_headers,
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["summary"]["session_count"] == 1
+        assert data["summary"]["total_leads"] == 10
+        assert data["summary"]["average_lead_cost"] == 20.0
+        assert [item["anchor_key"] for item in data["anchors"]] == ["dyid:douyin_a"]
+        assert data["trend"] == [{
+            "date_key": "2026-08-28",
+            "session_count": 1,
+            "total_viewers": 500,
+            "total_comments": 60,
+            "total_private_messages": 20,
+            "total_leads": 10,
+            "total_ad_cost": 200.0,
+        }]
+        assert [item["value"] for item in data["funnel"]] == [1000, 400, 80, 20, 10]
+        assert [item["step_rate"] for item in data["funnel"]] == [100.0, 40.0, 20.0, 25.0, 50.0]
+        assert len(data["recent_sessions"]) == 1
+        assert data["recent_sessions"][0]["session_title"] == "主播A真实场次"
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "/api/v1/dashboard/summary",
+        "/api/v1/dashboard/summary/by-anchor",
+        "/api/v1/dashboard/operations",
+    ),
+)
+def test_dashboard_routes_reject_reversed_date_range(path, client, auth_headers):
+    """三个大屏接口必须和公共场次选择器一样把反向日期返回为 422。"""
+    resp = client.get(
+        path,
+        params={"start_date": "2026-08-30", "end_date": "2026-08-01"},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 422

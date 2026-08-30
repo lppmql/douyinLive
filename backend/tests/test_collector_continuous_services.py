@@ -14,7 +14,6 @@ from app.models.live_sessions import LiveSession
 from app.models.scraper_tasks import ScraperTask
 from app.models.transcript_segments import TranscriptSegment
 from app.services.resources.system_usage import _parse_size, _pressure, get_system_usage
-from app.services.sync.de_sync import pending_complete_session_count, pending_complete_session_ids, sync_all
 from app.services.tasks.batch_runners import (
     _pending_ai_session_ids,
     _pending_knowledge_session_ids,
@@ -96,10 +95,10 @@ def test_restart_recovery_processes_all_pending_sessions_without_legacy_limit(db
     monkeypatch.setattr(settings, "CONTINUOUS_TASK_BATCH_SIZE", 0)
     task = ScraperTask(
         id=2002,
-        task_type="dataease_sync",
+        task_type="knowledge_sync",
         status=TaskStatus.RUNNING,
         task_options_json={},
-        progress_stage="dataease_sync",
+        progress_stage="knowledge_sync",
         progress_message="旧版全量任务",
     )
     db.add(task)
@@ -131,60 +130,6 @@ def test_initial_state_table_contains_action_switches_and_automatic_modules(db, 
     states_by_key = {state.module_key: state for state in states}
     assert states_by_key["data_refresh"].enabled is False
     assert states_by_key["knowledge"].enabled is True
-    assert states_by_key["dataease"].enabled is True
-
-
-def test_only_finished_session_with_offline_final_is_selected_for_dataease(db, monkeypatch):
-    room = LiveRoom(account_name="真实测试账号", anchor_name="测试主播", room_id_str="room-order")
-    db.add(room)
-    db.flush()
-    now = datetime.utcnow()
-    oldest_live = LiveSession(
-        room_id=room.id,
-        anchor_name="正在开播主播",
-        live_status="live",
-        detail_collection_status="pending",
-        live_start_time=now - timedelta(hours=3),
-    )
-    latest_finished = LiveSession(
-        room_id=room.id,
-        anchor_name="最新已下播主播",
-        live_status="finished",
-        detail_collection_status="complete",
-        live_start_time=now - timedelta(minutes=5),
-    )
-    older_finished = LiveSession(
-        room_id=room.id,
-        anchor_name="较早已下播主播",
-        live_status="finished",
-        detail_collection_status="complete",
-        live_start_time=now - timedelta(hours=1),
-    )
-    db.add_all([oldest_live, latest_finished, older_finished])
-    db.flush()
-    db.add(
-        AsrTask(
-            session_id=latest_finished.id,
-            status="completed",
-            task_type="offline",
-            idempotency_key=f"asr:offline:session:{latest_finished.id}",
-        )
-    )
-    db.commit()
-
-    selected = pending_complete_session_ids(db, limit=2, include_live=True)
-
-    assert selected == [latest_finished.id]
-    assert pending_complete_session_count(db, include_live=True) == 1
-
-    captured: dict[str, list[int]] = {}
-    monkeypatch.setattr(
-        "app.services.sync.de_sync.sync_sessions",
-        lambda _db, session_ids: captured.update(session_ids=session_ids)
-        or {"synced_count": len(session_ids), "failed_count": 0},
-    )
-    sync_all(db)
-    assert captured["session_ids"] == [latest_finished.id]
 
 
 def test_live_draft_never_enters_ai_or_knowledge_candidates(db):

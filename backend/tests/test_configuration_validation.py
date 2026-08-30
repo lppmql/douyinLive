@@ -14,7 +14,6 @@ def make_settings(**overrides) -> Settings:
         "DB_PASSWORD": "local-test-password",
         "JWT_SECRET_KEY": "local-test-secret",
         "DB_USER": "douyin_app",
-        "DATAEASE_READER_PASSWORD": "dataease-test-password",
         "REDIS_URL": "redis://:redis-test-password@localhost:6379/0",
     }
     values.update(overrides)
@@ -56,14 +55,12 @@ def test_unsafe_local_services_are_reported_without_exposing_secrets():
     errors, warnings = make_settings(
         DB_USER="root",
         REDIS_URL="redis://localhost:6379",
-        DATAEASE_READER_PASSWORD="dataease_reader_change_me",
     ).runtime_configuration_issues()
 
     assert errors == []
     assert warnings == [
         "DATABASE_ROOT_USER",
         "REDIS_AUTH_DISABLED",
-        "DATAEASE_READER_PASSWORD_INSECURE",
     ]
 
 
@@ -112,7 +109,7 @@ def test_alembic_uses_runtime_database_configuration_without_stored_password():
     assert "mysql+pymysql://localhost/douyin_live" in ini_source
 
 
-def test_one_click_start_requires_core_health_and_keeps_optional_services_optional():
+def test_one_click_start_requires_core_health_and_excludes_retired_services():
     start_source = (BACKEND_ROOT.parent / "start.sh").read_text(encoding="utf-8")
 
     assert "scripts.check_local_ai --service-url" in start_source
@@ -121,25 +118,14 @@ def test_one_click_start_requires_core_health_and_keeps_optional_services_option
     assert "ollama pull" not in start_source
 
     assert "docker compose up -d mysql redis qdrant" in start_source
-    assert 'if [ "$RUN_MODE" = "full" ] && [ -f "$ROOT_DIR/dataease/conf/application.yml" ]; then' in start_source
-    assert "docker compose --profile observability up -d prometheus grafana" in start_source
     assert "if ! wait_for_backend; then" in start_source
-    assert '[ "$DATAEASE_DB_READY" = "true" ] && wait_for_dataease' in start_source
-    assert "scripts/check_dataease_crypto.py" in start_source
-    assert "local ATTEMPTS=600" in start_source
-    assert "douyinLive.dataeaseKeySha256" in start_source
-    assert 'wait_for_http "Prometheus"' in start_source
-    assert 'wait_for_http "Grafana"' in start_source
+    assert "dataease" not in start_source.lower()
+    assert "prometheus" not in start_source.lower()
+    assert "grafana" not in start_source.lower()
     assert 'wait_for_http "Qdrant"' in start_source
     assert "docker compose --profile funasr up -d funasr" in start_source
     assert 'if [ "$RUN_MODE" = "lite" ] || [ "$(env_value ASR_AUTO_START)" != "true" ]; then' in start_source
     assert 'FUNASR_WAIT_SECONDS="$(env_value ASR_ENGINE_READY_TIMEOUT_SECONDS)"' in start_source
     assert "FunASR 容器异常退出，主系统将继续启动" in start_source
     assert "FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，将在后台继续加载" in start_source
-    assert start_source.index('echo "[2/6] 启动 Prometheus 与 Grafana..."') < start_source.index(
-        'echo "[3/6] 启动后端 FastAPI..."'
-    )
     assert start_source.index("if ! wait_for_backend; then") < start_source.index('echo "  ✅ 后端: http://localhost:8000"')
-    assert start_source.index('[ "$DATAEASE_DB_READY" = "true" ] && wait_for_dataease') < start_source.index(
-        'echo "  ✅ DataEase: http://localhost:8100"'
-    )

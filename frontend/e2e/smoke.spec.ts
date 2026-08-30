@@ -2,7 +2,7 @@
  * P0-05：核心页面 Playwright 冒烟测试
  *
  * 覆盖 11 个核心页面的基本可用性检查：
- *   登录 → 首页 → DataEase → 采集 → 场次列表 → 场次详情
+ *   登录 → 首页 → 原生经营大屏 → 采集 → 场次列表 → 场次详情
  *   → 话术 → AI复盘 → AI手动剪辑 → 知识库 → 主播排班 → 用户管理
  *
  * 每页检查：
@@ -105,14 +105,15 @@ test.describe('核心页面冒烟', () => {
     await expect(page.getByText('刷新')).toBeVisible({ timeout: 3000 });
   });
 
-  test('DataEase 大屏', async ({ page }) => {
+  test('原生经营大屏', async ({ page }) => {
     await page.goto('/dashboard');
     await page.waitForLoadState('networkidle');
     await checkNotBlank(page);
 
-    // 至少有一个 iframe 或者提示信息
-    const hasContent = await page.locator('iframe, .n-empty, [class*="error"]').count();
-    expect(hasContent, 'DataEase 页面应有 iframe 或提示').toBeGreaterThan(0);
+    await expect(page.getByText('零食店直播经营大屏')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('iframe')).toHaveCount(0);
+    const hasContent = await page.locator('.n-card, .n-empty, [class*="error"]').count();
+    expect(hasContent, '原生经营大屏应显示经营卡片或真实空状态').toBeGreaterThan(0);
   });
 
   test('数据采集页', async ({ page }) => {

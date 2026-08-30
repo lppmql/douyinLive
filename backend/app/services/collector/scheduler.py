@@ -462,7 +462,7 @@ class SchedulerManager:
                 task.progress_message = (
                     f"汇总字段 {result['overview_field_count']}，趋势 {result['trend_row_count']} 条，"
                     f"指标写入 {result['new_metric_count']} 条，评论记录 {result['new_comment_count']} 条，"
-                    f"画像 {result['profile_count']} 条；DataEase 等待独立同步任务处理"
+                    f"画像 {result['profile_count']} 条；知识库等待独立同步任务处理"
                 )
             elif job_type != "stream_refresh":
                 collector_cls = collector_map.get(job_type)
