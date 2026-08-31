@@ -154,31 +154,11 @@ def _build_anchor_summary(
 ) -> dict[str, Any]:
     condition = _session_condition(start_date, end_date, anchor_key)
     stable_anchor_key = build_session_anchor_key_expression()
-    agg_sub = (
-        db.query(
-            stable_anchor_key.label("anchor_key"),
-            func.count(LiveSession.id).label("session_count"),
-            func.coalesce(func.sum(LiveSession.total_viewers), 0).label("total_viewers"),
-            func.coalesce(func.sum(LiveSession.comments_count), 0).label("total_comments"),
-            func.coalesce(func.sum(LiveSession.private_message_count), 0).label(
-                "total_private_messages"
-            ),
-            func.coalesce(func.sum(LiveSession.leads_count), 0).label("total_leads"),
-            func.coalesce(func.sum(LiveSession.ad_cost), 0).label("total_ad_cost"),
-            func.coalesce(func.sum(LiveSession.interaction_count), 0).label(
-                "total_interactions"
-            ),
-            func.coalesce(func.sum(LiveSession.new_followers), 0).label(
-                "total_new_followers"
-            ),
-        )
-        .filter(condition)
-        .group_by(stable_anchor_key)
-        .subquery()
-    )
-    # 历史补采会产生更高的自增 ID，但它不一定是主播最新开播场次；这里和公共
-    # 主播选择接口统一按“开播时间倒序、ID 倒序”选择身份与头像快照。
-    ranked_snapshots = (
+    # 在同一个窗口查询中同时计算汇总指标和最新身份快照。旧实现会先生成两份
+    # 主播键子查询，再用动态字符串 anchor_key 关联；MySQL 会因为 CASE/CONCAT
+    # 表达式的排序规则可协商性不同而报 1267。现在外层只按数字场次 ID 关联，
+    # 既规避字符集比较问题，也避免重复扫描直播场次表。
+    ranked_aggregates = (
         db.query(
             LiveSession.id.label("session_id"),
             stable_anchor_key.label("anchor_key"),
@@ -186,34 +166,84 @@ def _build_anchor_summary(
                 partition_by=stable_anchor_key,
                 order_by=(LiveSession.live_start_time.desc(), LiveSession.id.desc()),
             ).label("snapshot_rank"),
+            func.count(LiveSession.id)
+            .over(partition_by=stable_anchor_key)
+            .label("session_count"),
+            func.coalesce(
+                func.sum(LiveSession.total_viewers).over(
+                    partition_by=stable_anchor_key
+                ),
+                0,
+            ).label("total_viewers"),
+            func.coalesce(
+                func.sum(LiveSession.comments_count).over(
+                    partition_by=stable_anchor_key
+                ),
+                0,
+            ).label("total_comments"),
+            func.coalesce(
+                func.sum(LiveSession.private_message_count).over(
+                    partition_by=stable_anchor_key
+                ),
+                0,
+            ).label(
+                "total_private_messages"
+            ),
+            func.coalesce(
+                func.sum(LiveSession.leads_count).over(
+                    partition_by=stable_anchor_key
+                ),
+                0,
+            ).label("total_leads"),
+            func.coalesce(
+                func.sum(LiveSession.ad_cost).over(partition_by=stable_anchor_key),
+                0,
+            ).label("total_ad_cost"),
+            func.coalesce(
+                func.sum(LiveSession.interaction_count).over(
+                    partition_by=stable_anchor_key
+                ),
+                0,
+            ).label(
+                "total_interactions"
+            ),
+            func.coalesce(
+                func.sum(LiveSession.new_followers).over(
+                    partition_by=stable_anchor_key
+                ),
+                0,
+            ).label(
+                "total_new_followers"
+            ),
         )
         .filter(condition)
         .subquery()
     )
+    # 历史补采会产生更高的自增 ID，但它不一定是主播最新开播场次；这里和公共
+    # 主播选择接口统一按“开播时间倒序、ID 倒序”选择身份与头像快照。
     rows = (
         db.query(
-            agg_sub.c.anchor_key,
+            ranked_aggregates.c.anchor_key,
             LiveSession.douyin_id,
             LiveSession.anchor_name,
             LiveSession.anchor_nickname,
             LiveSession.anchor_avatar_url,
             LiveSession.id.label("anchor_avatar_session_id"),
-            agg_sub.c.session_count,
-            agg_sub.c.total_viewers,
-            agg_sub.c.total_comments,
-            agg_sub.c.total_private_messages,
-            agg_sub.c.total_leads,
-            agg_sub.c.total_ad_cost,
-            agg_sub.c.total_interactions,
-            agg_sub.c.total_new_followers,
+            ranked_aggregates.c.session_count,
+            ranked_aggregates.c.total_viewers,
+            ranked_aggregates.c.total_comments,
+            ranked_aggregates.c.total_private_messages,
+            ranked_aggregates.c.total_leads,
+            ranked_aggregates.c.total_ad_cost,
+            ranked_aggregates.c.total_interactions,
+            ranked_aggregates.c.total_new_followers,
         )
-        .join(
-            ranked_snapshots,
-            (ranked_snapshots.c.anchor_key == agg_sub.c.anchor_key)
-            & (ranked_snapshots.c.snapshot_rank == 1),
+        .join(LiveSession, LiveSession.id == ranked_aggregates.c.session_id)
+        .filter(ranked_aggregates.c.snapshot_rank == 1)
+        .order_by(
+            ranked_aggregates.c.total_leads.desc(),
+            ranked_aggregates.c.session_count.desc(),
         )
-        .join(LiveSession, LiveSession.id == ranked_snapshots.c.session_id)
-        .order_by(agg_sub.c.total_leads.desc(), agg_sub.c.session_count.desc())
         .all()
     )
     anchors = [

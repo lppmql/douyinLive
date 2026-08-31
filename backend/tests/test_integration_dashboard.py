@@ -10,6 +10,7 @@ M8 核心链路集成测试 — 经营仪表盘 (dashboard)
 from datetime import datetime
 
 import pytest
+from sqlalchemy import event
 
 
 class TestDashboardSummary:
@@ -167,6 +168,30 @@ class TestDashboardByAnchor:
         data = resp.json()
         assert data["anchors"] == []
         assert data["total"]["session_count"] == 0
+
+    def test_by_anchor_does_not_join_computed_anchor_keys(
+        self, client, db, auth_headers
+    ):
+        """主播汇总不能用动态字符串键 JOIN，避免 MySQL 排序规则 1267 错误。"""
+        statements: list[str] = []
+        engine = db.get_bind()
+
+        def capture_statement(_conn, _cursor, statement, _params, _context, _many):
+            statements.append(statement.lower())
+
+        event.listen(engine, "before_cursor_execute", capture_statement)
+        try:
+            resp = client.get(
+                "/api/v1/dashboard/summary/by-anchor", headers=auth_headers
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", capture_statement)
+
+        assert resp.status_code == 200
+        window_queries = [sql for sql in statements if "row_number() over" in sql]
+        assert len(window_queries) == 1
+        assert "anchor_key =" not in window_queries[0]
+        assert "live_sessions.id =" in window_queries[0]
 
     def test_by_anchor_groups_correctly(self, client, db, auth_headers):
         """按主播分组，每个主播一行"""
