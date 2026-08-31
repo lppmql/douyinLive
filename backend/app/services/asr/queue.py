@@ -310,11 +310,22 @@ def list_queued_task_ids_for_available_lanes(
         .filter(AsrTask.id.in_(ordered_ids))
         .all()
     )
+    # 已有实时任务占用通道且还有另一场直播等待时，第二个资源槽不能反复领取
+    # 离线任务再立即礼让。保持离线任务安静排队，直到实时积压清空。
+    realtime_backlog = any(
+        task_types.get(task_id) == "realtime" for task_id in ordered_ids
+    )
     selected: list[int] = []
     selected_lanes = set(occupied)
     for task_id in ordered_ids:
         lane = str(task_types.get(task_id) or "")
         if lane not in {"realtime", "offline"} or lane in selected_lanes:
+            continue
+        if (
+            lane == "offline"
+            and "realtime" in occupied
+            and realtime_backlog
+        ):
             continue
         selected.append(task_id)
         selected_lanes.add(lane)

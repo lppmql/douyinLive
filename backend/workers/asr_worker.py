@@ -15,6 +15,7 @@ ASR Worker 进程 — 独立运行的话术转写服务
 import asyncio
 import hashlib
 import os
+import re
 import signal
 from pathlib import Path
 from time import monotonic
@@ -65,6 +66,10 @@ from app.services.asr.queue import (
 )
 from app.services.asr.websocket_manager import ws_manager
 from app.services.asr.corrector import correct_text as correct_asr_text
+from app.services.asr.llm_corrector import (
+    build_correction_batches,
+    correct_transcript_batch,
+)
 from app.services.asr.control import (
     clear_asr_worker_heartbeat,
     write_asr_worker_heartbeat,
@@ -154,8 +159,77 @@ def should_handoff_realtime_failure(
 
 
 def postprocess_status_for_task(task_type: str) -> str:
-    """ASR 只负责转写；AI 复盘已改为人工生成，旧后处理状态统一跳过。"""
+    """离线终稿进入本地模型纠错，实时初稿不增加额外延迟。"""
+    if task_type == "offline" and settings.ASR_LLM_CORRECTION_ENABLED:
+        return "pending"
     return "skipped"
+
+
+def is_transient_realtime_failure(error_message: str) -> bool:
+    """识别刷新流地址后可断点恢复的实时音频故障。"""
+    message = (error_message or "").casefold()
+    return any(
+        marker in message
+        for marker in (
+            "直播音频缓存不完整",
+            "直播音频缓存等待超时",
+            "未输出任何音频帧",
+            "404",
+            "403",
+            "410",
+            "流地址已失效",
+            "connection reset",
+            "connection refused",
+            "input/output error",
+        )
+    )
+
+
+def reset_failed_chunks_for_automatic_retry(db, task_id: int) -> int:
+    """任务级续接时只重置失败分片，绝不重跑已经完成的真实文字。"""
+    chunks = (
+        db.query(AsrAudioChunk)
+        .filter(
+            AsrAudioChunk.task_id == task_id,
+            AsrAudioChunk.status == TaskStatus.FAILED,
+        )
+        .all()
+    )
+    for chunk in chunks:
+        chunk.status = TaskStatus.PENDING
+        chunk.retry_count = 0
+        chunk.error_message = "任务级自动续接，正在刷新流地址后重试该分片"
+        chunk.completed_at = None
+        chunk.worker_id = None
+        chunk.heartbeat_at = None
+    return len(chunks)
+
+
+def seal_partial_realtime_chunk(db, task, chunk, error_message: str) -> bool:
+    """缓存收尾不足一个窗口时，封存已提交文字并从真实结束点继续。"""
+    if task.task_type != "realtime" or "直播音频缓存不完整" not in error_message:
+        return False
+    segments = (
+        db.query(TranscriptSegment)
+        .filter(TranscriptSegment.asr_chunk_id == chunk.id)
+        .order_by(TranscriptSegment.segment_end.asc(), TranscriptSegment.id.asc())
+        .all()
+    )
+    if not segments:
+        return False
+    actual_match = re.search(r"实际(?:仅|只)?读取\s*([0-9.]+)\s*秒", error_message)
+    actual_end = float(chunk.start_seconds or 0)
+    if actual_match:
+        actual_end += float(actual_match.group(1))
+    spoken_end = max(float(segment.segment_end or 0) for segment in segments)
+    chunk.end_seconds = max(actual_end, spoken_end, float(chunk.start_seconds or 0))
+    chunk.status = TaskStatus.COMPLETED
+    chunk.segment_count = len(segments)
+    chunk.completed_at = datetime.utcnow()
+    chunk.heartbeat_at = datetime.utcnow()
+    chunk.error_message = "直播尾段不足完整窗口，已保留实际识别文字并从真实结束点续接"
+    touch_task(task)
+    return True
 
 
 def build_chunk_failure_message(error: Exception, pipe: object | None = None) -> str:
@@ -209,6 +283,7 @@ class AsrWorker:
         self._active_tasks: set[asyncio.Task] = set()
         self._active_task_ids: set[int] = set()
         self._active_chunk_task_ids: set[int] = set()
+        self._correction_task: asyncio.Task | None = None
         self._resource_slot_lock = asyncio.Lock()
         # 两个逻辑任务可以同时准备，但真正连接 FunASR 时仍然严格单连接。
         self._lane_coordinator = AsrLaneCoordinator(settings.ASR_LIVE_CHUNK_QUOTA)
@@ -236,8 +311,9 @@ class AsrWorker:
             try:
                 write_asr_worker_heartbeat(self._worker_id)
                 await self._poll_tasks()
+                await self._poll_corrections()
                 write_asr_worker_heartbeat(self._worker_id)
-                # AI 复盘由详情页手动生成，知识库由后台自动同步。
+                # AI 复盘仍由详情页手动生成；这里只做低优先级终稿文字纠错。
                 await asyncio.sleep(self._poll_interval)
             except asyncio.CancelledError:
                 break
@@ -249,6 +325,8 @@ class AsrWorker:
         """停止领取任务，并尽量在外部强制清理期限前结束全部子协程。"""
         self._running = False
         pending_tasks = [task for task in self._active_tasks if not task.done()]
+        if self._correction_task and not self._correction_task.done():
+            pending_tasks.append(self._correction_task)
         for task in pending_tasks:
             task.cancel()
         if pending_tasks:
@@ -304,6 +382,24 @@ class AsrWorker:
                     )
                 logger.warning("Worker 从断点回收 %s 个遗留 ASR 任务", len(stale))
 
+            # 本地模型调用随 Worker 退出时，已完成批次已经落库；只需把执行态退回
+            # pending，下次从 postprocess_result 记录的段落 ID 继续。
+            if recover_all:
+                stale_corrections = (
+                    db.query(AsrTask)
+                    .filter(
+                        AsrTask.status == TaskStatus.COMPLETED,
+                        AsrTask.task_type == "offline",
+                        AsrTask.postprocess_status == TaskStatus.PROCESSING,
+                    )
+                    .all()
+                )
+                for task in stale_corrections:
+                    task.postprocess_status = TaskStatus.PENDING
+                    task.postprocess_error = "Worker 中断，已保留纠错进度并等待续接"
+                if stale_corrections:
+                    db.commit()
+
         finally:
             db.close()
 
@@ -326,6 +422,10 @@ class AsrWorker:
                 limit=settings.ASR_MAX_QUEUED,
                 queue_capacity=settings.ASR_MAX_QUEUED,
             )
+            # 纠错协程必须先在 _poll_corrections 中完成取消并关闭 Ollama HTTP
+            # 连接；这一轮只负责发现/排队 ASR，绝不提前创建 FunASR 协程。
+            if self._correction_task and not self._correction_task.done():
+                return
             if available_slots == 0:
                 return
             occupied_lanes = (
@@ -381,6 +481,246 @@ class AsrWorker:
                     self._active_task_ids.discard(claimed_task_id)
 
                 worker_task.add_done_callback(discard_finished)
+        finally:
+            db.close()
+
+    @staticmethod
+    def _has_asr_pressure(db) -> bool:
+        """任何 ASR 排队或处理中时，本地模型纠错都必须主动让路。"""
+        return (
+            db.query(AsrTask.id)
+            .filter(
+                AsrTask.status.in_([TaskStatus.QUEUED, TaskStatus.PROCESSING]),
+                AsrTask.cancel_requested_at.is_(None),
+            )
+            .first()
+            is not None
+        )
+
+    async def _poll_corrections(self) -> None:
+        """在不影响实时初稿的前提下领取一条离线终稿纠错任务。"""
+        if not settings.ASR_LLM_CORRECTION_ENABLED:
+            return
+        db = SessionLocal()
+        try:
+            if self._correction_task and not self._correction_task.done():
+                if self._has_asr_pressure(db):
+                    correction = self._correction_task
+                    correction.cancel()
+                    await asyncio.gather(correction, return_exceptions=True)
+                    if self._correction_task is correction:
+                        self._correction_task = None
+                return
+            if self._has_asr_pressure(db) or self._active_tasks:
+                return
+            task = (
+                db.query(AsrTask)
+                .filter(
+                    AsrTask.task_type == "offline",
+                    AsrTask.status == TaskStatus.COMPLETED,
+                    AsrTask.postprocess_status.in_(
+                        [TaskStatus.PENDING, TaskStatus.FAILED]
+                    ),
+                    AsrTask.postprocess_attempt_count
+                    < settings.ASR_LLM_CORRECTION_MAX_ATTEMPTS,
+                )
+                .order_by(AsrTask.completed_at.desc(), AsrTask.id.desc())
+                .first()
+            )
+            if not task:
+                return
+            task.postprocess_status = TaskStatus.PROCESSING
+            task.postprocess_started_at = datetime.utcnow()
+            task.postprocess_completed_at = None
+            task.postprocess_error = None
+            task.postprocess_attempt_count = (
+                int(task.postprocess_attempt_count or 0) + 1
+            )
+            db.commit()
+            correction = asyncio.create_task(self._process_correction(task.id))
+            self._correction_task = correction
+
+            def clear_correction(done_task: asyncio.Task) -> None:
+                if self._correction_task is done_task:
+                    self._correction_task = None
+
+            correction.add_done_callback(clear_correction)
+        finally:
+            db.close()
+
+    @staticmethod
+    def _refresh_corrected_full_text(db, session_id: int) -> None:
+        """把当前已公开的离线终稿重新拼接到全文缓存。"""
+        segments = (
+            db.query(TranscriptSegment)
+            .filter(
+                TranscriptSegment.session_id == session_id,
+                TranscriptSegment.segment_type == "asr_offline",
+                TranscriptSegment.asr_status == TaskStatus.COMPLETED,
+            )
+            .order_by(
+                TranscriptSegment.segment_start.asc(),
+                TranscriptSegment.id.asc(),
+            )
+            .all()
+        )
+        full_text = "\n".join(
+            f"[{float(segment.segment_start or 0):.1f}s] {segment.text_content}"
+            for segment in segments
+            if segment.text_content
+        )
+        existing = (
+            db.query(TranscriptFullText)
+            .filter(TranscriptFullText.session_id == session_id)
+            .first()
+        )
+        if existing:
+            existing.full_text = full_text
+        else:
+            db.add(TranscriptFullText(session_id=session_id, full_text=full_text))
+
+    async def _process_correction(self, task_id: int) -> None:
+        """分批纠正一场离线终稿；每批落库，可在直播到来后断点续接。"""
+        db = SessionLocal()
+        committed_progress: dict = {}
+        try:
+            task = db.get(AsrTask, task_id)
+            if not task or task.postprocess_status != TaskStatus.PROCESSING:
+                return
+            committed_progress = dict(task.postprocess_result or {})
+            last_segment_id = int(
+                committed_progress.get("correction_last_segment_id") or 0
+            )
+            corrected_count = int(committed_progress.get("corrected_count") or 0)
+            changed_count = int(committed_progress.get("changed_count") or 0)
+            segments = (
+                db.query(TranscriptSegment)
+                .filter(
+                    TranscriptSegment.session_id == task.session_id,
+                    TranscriptSegment.segment_type == "asr_offline",
+                    TranscriptSegment.asr_status == TaskStatus.COMPLETED,
+                )
+                .order_by(TranscriptSegment.id.asc())
+                .all()
+            )
+            items = [
+                {"id": int(segment.id), "text": str(segment.text_content or "")}
+                for segment in segments
+                if str(segment.text_content or "").strip()
+            ]
+            batches = build_correction_batches(
+                items,
+                settings.ASR_LLM_CORRECTION_BATCH_CHARS,
+                start_after_id=last_segment_id,
+            )
+            for batch, context_before, context_after in batches:
+                db.expire_all()
+                task = db.get(AsrTask, task_id)
+                if not task or task.postprocess_status != TaskStatus.PROCESSING:
+                    return
+                if self._has_asr_pressure(db):
+                    task.postprocess_status = TaskStatus.PENDING
+                    task.postprocess_error = "检测到 ASR 任务，已保存纠错进度并主动礼让"
+                    task.postprocess_attempt_count = max(
+                        0, int(task.postprocess_attempt_count or 0) - 1
+                    )
+                    db.commit()
+                    return
+
+                corrected = await correct_transcript_batch(
+                    batch,
+                    context_before=context_before,
+                    context_after=context_after,
+                    session_id=task.session_id,
+                )
+                batch_changed_count = 0
+                batch_corrected_count = 0
+                batch_last_segment_id = last_segment_id
+                for item in batch:
+                    segment = db.get(TranscriptSegment, int(item["id"]))
+                    if not segment:
+                        raise RuntimeError("本地模型纠错期间话术段落已被删除")
+                    source_text = str(segment.text_content or "")
+                    corrected_text = corrected[int(segment.id)]
+                    if corrected_text != source_text:
+                        words, source = remap_corrected_text(
+                            source_text,
+                            corrected_text,
+                            list(segment.word_timestamps_json or []),
+                            str(segment.timestamp_source or "segment_estimated"),
+                        )
+                        segment.text_content = corrected_text
+                        segment.word_timestamps_json = words or None
+                        segment.timestamp_source = source
+                        batch_changed_count += 1
+                    batch_corrected_count += 1
+                    batch_last_segment_id = max(batch_last_segment_id, int(segment.id))
+                proposed_progress = {
+                    "correction_last_segment_id": batch_last_segment_id,
+                    "corrected_count": corrected_count + batch_corrected_count,
+                    "changed_count": changed_count + batch_changed_count,
+                    "correction_provider": "ollama",
+                    "correction_model": settings.OLLAMA_MODEL,
+                }
+                task.postprocess_result = proposed_progress
+                self._refresh_corrected_full_text(db, task.session_id)
+                db.commit()
+                committed_progress = proposed_progress
+                last_segment_id = batch_last_segment_id
+                corrected_count += batch_corrected_count
+                changed_count += batch_changed_count
+
+            task = db.get(AsrTask, task_id)
+            if task:
+                task.postprocess_status = TaskStatus.COMPLETED
+                task.postprocess_completed_at = datetime.utcnow()
+                task.postprocess_error = None
+                task.postprocess_result = {
+                    **committed_progress,
+                    "corrected_count": corrected_count,
+                    "changed_count": changed_count,
+                    "correction_provider": "ollama",
+                    "correction_model": settings.OLLAMA_MODEL,
+                }
+                self._refresh_corrected_full_text(db, task.session_id)
+                db.commit()
+                publish_task_event(
+                    "asr",
+                    task,
+                    "transcript_correction_completed",
+                    {
+                        "corrected_count": corrected_count,
+                        "changed_count": changed_count,
+                    },
+                )
+        except asyncio.CancelledError:
+            db.rollback()
+            task = db.get(AsrTask, task_id)
+            if task and task.postprocess_status == TaskStatus.PROCESSING:
+                task.postprocess_status = TaskStatus.PENDING
+                task.postprocess_error = "Worker 停止，已保留纠错进度并等待续接"
+                task.postprocess_attempt_count = max(
+                    0, int(task.postprocess_attempt_count or 0) - 1
+                )
+                db.commit()
+            raise
+        except Exception as exc:
+            db.rollback()
+            task = db.get(AsrTask, task_id)
+            if task:
+                task.postprocess_status = TaskStatus.FAILED
+                task.postprocess_completed_at = datetime.utcnow()
+                task.postprocess_error = str(exc)[:500]
+                db.commit()
+                publish_task_event(
+                    "asr",
+                    task,
+                    "transcript_correction_failed",
+                    {"error": task.postprocess_error},
+                )
+            logger.warning(
+                "任务 %s 本地模型纠错失败，不影响 ASR 终稿: %s", task_id, exc
+            )
         finally:
             db.close()
 
@@ -639,6 +979,13 @@ class AsrWorker:
                                 chunk.status == TaskStatus.FAILED
                                 and chunk.retry_count < chunk.max_retries
                             ):
+                                # 实时缓存中断后继续重试同一个 LiveAudioBuffer 不会产生
+                                # 新音频，只会白等第二个超时。立即交给任务级续接，让下次
+                                # 领取先刷新真实流地址并创建新的连续缓存。
+                                if is_live and is_transient_realtime_failure(
+                                    chunk.error_message or ""
+                                ):
+                                    break
                                 # 离线分片读到 0 帧时先按分片起点分类，避免两种误判：
                                 # 1) 分片起点已超出回放真实时长 → 内容不存在，安全跳过；
                                 # 2) 地址有效但 fast-seek 在 HLS 末尾定位越界 → slow-seek 兜底。
@@ -958,10 +1305,25 @@ class AsrWorker:
                 try:
                     task = db.get(AsrTask, task_id)
                     if task:
+                        error_message = str(exc)
+                        retry_budget_available = int(task.retry_count or 0) < int(
+                            task.max_retries or 3
+                        )
                         should_auto_repair = (
-                            task.task_type == "offline"
-                            and int(task.retry_count or 0) < int(task.max_retries or 3)
+                            retry_budget_available
                             and not isinstance(exc, _CompletenessRepairLimitExceeded)
+                            and (
+                                task.task_type == "offline"
+                                or (
+                                    task.task_type == "realtime"
+                                    and is_transient_realtime_failure(error_message)
+                                )
+                            )
+                        )
+                        reset_chunk_count = (
+                            reset_failed_chunks_for_automatic_retry(db, task.id)
+                            if should_auto_repair
+                            else 0
                         )
                         task.status = (
                             TaskStatus.QUEUED
@@ -969,9 +1331,10 @@ class AsrWorker:
                             else TaskStatus.FAILED
                         )
                         task.error_message = (
-                            f"完整度补齐第 {task.retry_count} 轮未完成，已自动续接：{exc}"
+                            f"第 {task.retry_count}/{task.max_retries} 次未完成，"
+                            f"已保留成功分片并刷新流地址续接（重置 {reset_chunk_count} 个失败分片）：{exc}"
                             if should_auto_repair
-                            else str(exc)
+                            else error_message
                         )[:500]
                         task.completed_at = (
                             None if should_auto_repair else datetime.utcnow()
@@ -1584,8 +1947,22 @@ class AsrWorker:
             task = db.get(AsrTask, task.id)
             if not chunk or not task:
                 raise
+            error_message = build_chunk_failure_message(exc, pipe)
+            if seal_partial_realtime_chunk(db, task, chunk, error_message):
+                db.commit()
+                publish_task_event(
+                    "asr",
+                    task,
+                    "chunk_partial_completed",
+                    {
+                        "chunk_index": chunk.chunk_index,
+                        "segment_count": chunk.segment_count,
+                        "end_seconds": chunk.end_seconds,
+                    },
+                )
+                return
             chunk.status = "failed"
-            chunk.error_message = build_chunk_failure_message(exc, pipe)
+            chunk.error_message = error_message
             chunk.completed_at = datetime.utcnow()
             chunk.heartbeat_at = datetime.utcnow()
             touch_task(task, self._worker_id)

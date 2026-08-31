@@ -56,7 +56,9 @@ def get_local_ai_runtime_status(timeout_seconds: float = 1.5) -> dict[str, Any]:
             for item in response.json().get("models", [])
         }
         configured = settings.OLLAMA_MODEL
-        model_available = configured in model_names or f"{configured}:latest" in model_names
+        model_available = (
+            configured in model_names or f"{configured}:latest" in model_names
+        )
         return {
             "service_running": True,
             "model_available": model_available,
@@ -222,6 +224,82 @@ def chat_json(
         response_mode="json",
     )
     return json.loads(content)
+
+
+async def async_chat_json(
+    system_prompt: str,
+    user_message: str,
+    model: str | None = None,
+    temperature: float = 0.3,
+    operation: str = "chat_json",
+    session_id: int | None = None,
+    prompt_name: str | None = None,
+    prompt_version: int | None = None,
+) -> dict:
+    """异步调用本地 JSON 模型；协程取消时立即关闭连接并释放 Ollama 请求。"""
+    selected_model = model or settings.OLLAMA_MODEL
+    started_at = time.perf_counter()
+    input_chars = len(system_prompt) + len(user_message)
+    content = ""
+    client = None
+    status = "failed"
+    error: BaseException | None = None
+    usage = None
+    try:
+        client = get_async_client()
+        response = await client.chat.completions.create(
+            model=selected_model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=temperature,
+            max_tokens=4096,
+            reasoning_effort="none",
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or ""
+        if getattr(response.choices[0], "finish_reason", None) == "length":
+            raise ValueError("本地模型输出达到长度上限，请缩小分析范围后重试")
+        payload = json.loads(content)
+        if not isinstance(payload, dict):
+            raise ValueError("本地模型 JSON 结果必须是对象")
+        usage = getattr(response, "usage", None)
+        status = "success"
+        return payload
+    except asyncio.CancelledError as exc:
+        status = "cancelled"
+        error = exc
+        raise
+    except Exception as exc:
+        error = exc
+        raise
+    finally:
+        prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+        completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
+        total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+        _record_safely(
+            AiCallObservation(
+                operation=operation,
+                provider="ollama",
+                model_name=selected_model,
+                status=status,
+                input_chars=input_chars,
+                output_chars=len(content),
+                latency_ms=round((time.perf_counter() - started_at) * 1000),
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                session_id=session_id,
+                prompt_name=prompt_name,
+                prompt_version=prompt_version,
+                response_mode="json",
+                error_code=type(error).__name__ if error else None,
+                error_message=str(error) if error else None,
+            )
+        )
+        if client is not None:
+            await client.close()
 
 
 async def chat_stream(

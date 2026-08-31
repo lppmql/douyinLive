@@ -102,6 +102,12 @@ class Settings(BaseSettings):
     ASR_ONLINE_FRAME_INTERVAL_SECONDS: float = 0.05
     ASR_ONLINE_RESULT_TIMEOUT_SECONDS: int = 3
     ASR_COMPLETENESS_REPAIR_ROUNDS: int = 3
+    # 离线终稿完成后，使用本机 Ollama 分批做保守纠错；失败不影响原始转写。
+    ASR_LLM_CORRECTION_ENABLED: bool = True
+    ASR_LLM_CORRECTION_BATCH_CHARS: int = 1600
+    ASR_LLM_CORRECTION_MAX_ATTEMPTS: int = 3
+    # 纠错是可中断的低优先级任务，限制单批等待时间，避免新 ASR 任务长期等模型。
+    ASR_LLM_CORRECTION_TIMEOUT_SECONDS: int = 120
     ASR_ALLOW_MOCK: bool = False
 
     # P1: 知识库时间片
@@ -259,6 +265,12 @@ class Settings(BaseSettings):
             errors.append("ASR_ONLINE_RESULT_TIMEOUT_INVALID")
         if not 1 <= self.ASR_COMPLETENESS_REPAIR_ROUNDS <= 10:
             errors.append("ASR_COMPLETENESS_REPAIR_ROUNDS_INVALID")
+        if not 300 <= self.ASR_LLM_CORRECTION_BATCH_CHARS <= 8000:
+            errors.append("ASR_LLM_CORRECTION_BATCH_INVALID")
+        if not 1 <= self.ASR_LLM_CORRECTION_MAX_ATTEMPTS <= 10:
+            errors.append("ASR_LLM_CORRECTION_RETRY_INVALID")
+        if not 15 <= self.ASR_LLM_CORRECTION_TIMEOUT_SECONDS <= 300:
+            errors.append("ASR_LLM_CORRECTION_TIMEOUT_INVALID")
         if not 2 <= self.ASR_DYNAMIC_MAX_TASKS <= 16:
             errors.append("ASR_DYNAMIC_MAX_TASKS_INVALID")
         if self.MONITOR_CHECK_INTERVAL < 10:

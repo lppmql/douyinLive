@@ -78,6 +78,7 @@ class AsrTask(Base, TimestampMixin):
         comment="后处理状态: pending/processing/completed/failed/skipped",
     )
     postprocess_started_at = Column(
+        # 复用已退役后处理字段承载轻量纠错进度；保留数据库旧注释以免为说明文字加迁移。
         DateTime, nullable=True, comment="话术评分与复盘处理开始时间"
     )
     postprocess_completed_at = Column(

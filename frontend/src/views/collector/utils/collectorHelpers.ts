@@ -56,7 +56,7 @@ export function getStageLabel(stage: unknown): string {
     asr_queue: '排队生成话术',
     asr_transcription: '话术转写',
     live_end: '场次收口',
-    post_collection: '旧版自动后处理',
+    post_collection: '本地话术纠错',
     queued: '等待执行',
     starting: '准备执行',
     stopping: '正在安全停止',

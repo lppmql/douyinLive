@@ -35,7 +35,7 @@ class TestTaskStatus:
         assert TaskStatus.QUEUED == "queued"
 
     def test_asr_postprocess_default_matches(self):
-        """AsrTask.postprocess_status 已退役，新任务固定为 skipped。"""
+        """新任务尚未完成终稿时默认不启动本地模型纠错。"""
         assert AsrTask.postprocess_status.default.arg == "skipped"
 
     def test_live_session_detail_default_matches(self):

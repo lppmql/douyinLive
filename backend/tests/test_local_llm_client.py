@@ -31,7 +31,11 @@ class StubStream:
 
 def chunk(text="", finish_reason=None, usage=None):
     return SimpleNamespace(
-        choices=[SimpleNamespace(delta=SimpleNamespace(content=text), finish_reason=finish_reason)],
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=text), finish_reason=finish_reason
+            )
+        ],
         usage=usage,
     )
 
@@ -43,18 +47,28 @@ def install_response(monkeypatch, response):
         calls.append(kwargs)
         return response
 
-    monkeypatch.setattr(llm_client, "get_client", lambda: SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
-    ))
+    monkeypatch.setattr(
+        llm_client,
+        "get_client",
+        lambda: SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+        ),
+    )
+
     async def async_create(**kwargs):
         return create(**kwargs)
 
     async def async_close():
         pass
 
-    monkeypatch.setattr(llm_client, "get_async_client", lambda: SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=async_create)), close=async_close,
-    ))
+    monkeypatch.setattr(
+        llm_client,
+        "get_async_client",
+        lambda: SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=async_create)),
+            close=async_close,
+        ),
+    )
     monkeypatch.setattr(llm_client, "record_ai_call", observations.append)
     return calls, observations
 
@@ -79,11 +93,20 @@ def test_standalone_client_also_rejects_remote_url(monkeypatch):
         llm_client.get_client()
 
 
-@pytest.mark.parametrize("content,finish_reason", [("", "stop"), ("{}", "length"), ("[]", "stop")])
-def test_empty_truncated_and_non_object_json_are_failures(monkeypatch, content, finish_reason):
-    response = SimpleNamespace(choices=[SimpleNamespace(
-        message=SimpleNamespace(content=content), finish_reason=finish_reason,
-    )])
+@pytest.mark.parametrize(
+    "content,finish_reason", [("", "stop"), ("{}", "length"), ("[]", "stop")]
+)
+def test_empty_truncated_and_non_object_json_are_failures(
+    monkeypatch, content, finish_reason
+):
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=content),
+                finish_reason=finish_reason,
+            )
+        ]
+    )
     calls, observations = install_response(monkeypatch, response)
     with pytest.raises(ValueError):
         llm_client.chat_json("返回对象", "协议校验")
@@ -92,13 +115,40 @@ def test_empty_truncated_and_non_object_json_are_failures(monkeypatch, content, 
 
 
 @pytest.mark.anyio
+async def test_async_json_records_success_and_closes_client(monkeypatch):
+    response = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"ok":true}'), finish_reason="stop"
+            )
+        ],
+        usage=SimpleNamespace(prompt_tokens=2, completion_tokens=1, total_tokens=3),
+    )
+    calls, observations = install_response(monkeypatch, response)
+    assert await llm_client.async_chat_json("系统", "用户") == {"ok": True}
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert observations[0].status == "success"
+
+
+@pytest.mark.anyio
 async def test_stream_records_usage_and_releases_connection(monkeypatch):
-    stream = StubStream([
-        chunk("连接"), chunk("成功", "stop"),
-        SimpleNamespace(choices=[], usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2, total_tokens=12)),
-    ])
+    stream = StubStream(
+        [
+            chunk("连接"),
+            chunk("成功", "stop"),
+            SimpleNamespace(
+                choices=[],
+                usage=SimpleNamespace(
+                    prompt_tokens=10, completion_tokens=2, total_tokens=12
+                ),
+            ),
+        ]
+    )
     calls, observations = install_response(monkeypatch, stream)
-    assert "".join([part async for part in llm_client.chat_stream("连接测试", "请回复")]) == "连接成功"
+    assert (
+        "".join([part async for part in llm_client.chat_stream("连接测试", "请回复")])
+        == "连接成功"
+    )
     assert stream.closed
     assert calls[0]["max_tokens"] == 4096
     assert observations[0].status == "success"
@@ -137,7 +187,9 @@ def test_asr_worker_has_no_automatic_clip_entrypoint():
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("phase", ["before_first_token", "send_backpressure", "send_error"])
+@pytest.mark.parametrize(
+    "phase", ["before_first_token", "send_backpressure", "send_error"]
+)
 async def test_qa_endpoint_disconnect_cancels_model_and_closes_http(monkeypatch, phase):
     """模拟实际 SSE 断开，不用手动关闭生成器来代替浏览器断开。"""
     from starlette.requests import ClientDisconnect
@@ -147,10 +199,16 @@ async def test_qa_endpoint_disconnect_cancels_model_and_closes_http(monkeypatch,
     ready = anyio.Event()
     observations = []
     state = {"client_closed": False, "stream_closed": False}
-    monkeypatch.setattr(kb_service, "_prepare_qa_context", lambda *_args: {
-        "system_prompt": "连接测试", "user_message": "请回复", "sources": [],
-        "prompt_template": SimpleNamespace(type="qa", version=1),
-    })
+    monkeypatch.setattr(
+        kb_service,
+        "_prepare_qa_context",
+        lambda *_args: {
+            "system_prompt": "连接测试",
+            "user_message": "请回复",
+            "sources": [],
+            "prompt_template": SimpleNamespace(type="qa", version=1),
+        },
+    )
     monkeypatch.setattr(llm_client, "record_ai_call", observations.append)
 
     class WaitingStream:
@@ -170,9 +228,14 @@ async def test_qa_endpoint_disconnect_cancels_model_and_closes_http(monkeypatch,
     async def close_client():
         state["client_closed"] = True
 
-    monkeypatch.setattr(llm_client, "get_async_client", lambda: SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=create)), close=close_client,
-    ))
+    monkeypatch.setattr(
+        llm_client,
+        "get_async_client",
+        lambda: SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+            close=close_client,
+        ),
+    )
 
     async def receive():
         await ready.wait()
@@ -186,14 +249,19 @@ async def test_qa_endpoint_disconnect_cancels_model_and_closes_http(monkeypatch,
             await anyio.sleep_forever()
 
     response = knowledge_qa_stream(QaRequest(question="协议验收"), db=object())
-    scope = {"type": "http", "asgi": {"spec_version": "2.4" if phase == "send_error" else "2.3"}}
+    scope = {
+        "type": "http",
+        "asgi": {"spec_version": "2.4" if phase == "send_error" else "2.3"},
+    }
     with anyio.fail_after(1):
         if phase == "send_error":
             # 项目当前 Starlette 会包装为异常组；新版本会抛 ClientDisconnect。
             with pytest.raises((ClientDisconnect, OSError, ExceptionGroup)) as raised:
                 await response(scope, receive, send)
             if isinstance(raised.value, ExceptionGroup):
-                assert all(isinstance(error, OSError) for error in raised.value.exceptions)
+                assert all(
+                    isinstance(error, OSError) for error in raised.value.exceptions
+                )
         else:
             await response(scope, receive, send)
     assert state["client_closed"]

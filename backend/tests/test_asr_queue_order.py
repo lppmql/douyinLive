@@ -115,6 +115,13 @@ def test_auto_queue_and_worker_default_to_latest_real_session(monkeypatch):
         db,
         2,
         occupied_lanes={"realtime"},
+    ) == []
+    live_task.status = TaskStatus.PROCESSING
+    db.commit()
+    assert list_queued_task_ids_for_available_lanes(
+        db,
+        2,
+        occupied_lanes={"realtime"},
     ) == [oldest_task.id]
     db.close()
 
