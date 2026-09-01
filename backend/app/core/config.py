@@ -148,6 +148,8 @@ class Settings(BaseSettings):
     DOUYIN_PROFILE_BATCH_PAUSE_SECONDS: float = 10
     DOUYIN_PROFILE_CACHE_DAYS: int = 30
     DOUYIN_PROFILE_REQUEST_TIMEOUT_SECONDS: int = 20
+    # 常驻后台只负责发现新增评论用户，单人请求节奏仍由上面的限速参数控制。
+    DOUYIN_PROFILE_AUTO_CHECK_INTERVAL_SECONDS: int = 60
 
     # 数据采集控制中心调度。0 表示自动同步一次处理全部待补齐场次。
     COLLECTOR_SERVICE_TICK_SECONDS: int = 10
@@ -285,6 +287,8 @@ class Settings(BaseSettings):
             errors.append("DOUYIN_PROFILE_BATCH_PAUSE_INVALID")
         if not 1 <= self.DOUYIN_PROFILE_CACHE_DAYS <= 365:
             errors.append("DOUYIN_PROFILE_CACHE_DAYS_INVALID")
+        if not 30 <= self.DOUYIN_PROFILE_AUTO_CHECK_INTERVAL_SECONDS <= 3600:
+            errors.append("DOUYIN_PROFILE_AUTO_INTERVAL_INVALID")
         if self.CONTINUOUS_TASK_BATCH_SIZE < 0:
             errors.append("CONTINUOUS_TASK_BATCH_INVALID")
         if not is_local_ollama_url(self.OLLAMA_BASE_URL):

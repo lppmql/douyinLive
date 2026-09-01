@@ -1,6 +1,7 @@
 """
 零食店避坑直播运营复盘系统 - FastAPI 入口
 """
+
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, Request
@@ -13,7 +14,9 @@ from app.core.error_handler import register_exception_handlers
 from app.models.scraper_tasks import ScraperTask
 from app.api.v1 import v1_router
 from app.api.v1.auth import router as auth_router
-from app.api.v1.live_sessions import stream_router  # 原生媒体标签使用短时 HttpOnly Cookie
+from app.api.v1.live_sessions import (
+    stream_router,
+)  # 原生媒体标签使用短时 HttpOnly Cookie
 from app.services.collector.scheduler import scheduler_manager
 from app.services.tasks.runtime import publish_task_event, touch_task
 from app.services.tasks.control import CONTROL_TASK_TYPES, collector_task_control
@@ -26,16 +29,23 @@ from app.core.observability import (
 )
 from app.core.status import TaskStatus
 from app.services.leads import kezi_lead_sync_manager
+from app.services.collector.comment_profile_enrichment import (
+    comment_profile_enrichment_manager,
+)
 
 
 def recover_interrupted_collector_tasks() -> int:
     """进程重启后关闭无法继续执行的遗留采集任务。"""
     db = SessionLocal()
     try:
-        tasks = db.query(ScraperTask).filter(
-            ScraperTask.status == TaskStatus.RUNNING,
-            ~ScraperTask.task_type.in_(CONTROL_TASK_TYPES),
-        ).all()
+        tasks = (
+            db.query(ScraperTask)
+            .filter(
+                ScraperTask.status == TaskStatus.RUNNING,
+                ~ScraperTask.task_type.in_(CONTROL_TASK_TYPES),
+            )
+            .all()
+        )
         for task in tasks:
             task.status = TaskStatus.FAILED
             task.completed_at = datetime.utcnow()
@@ -46,7 +56,9 @@ def recover_interrupted_collector_tasks() -> int:
         if tasks:
             db.commit()
             for task in tasks:
-                publish_task_event("scraper", task, "interrupted", {"reason": task.error_message})
+                publish_task_event(
+                    "scraper", task, "interrupted", {"reason": task.error_message}
+                )
         return len(tasks)
     finally:
         db.close()
@@ -55,7 +67,9 @@ def recover_interrupted_collector_tasks() -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期"""
-    configuration_errors, configuration_warnings = settings.runtime_configuration_issues()
+    configuration_errors, configuration_warnings = (
+        settings.runtime_configuration_issues()
+    )
     for warning in configuration_warnings:
         logger.warning("配置安全提醒 code=%s，请运行 make doctor 查看处理建议", warning)
     if configuration_errors:
@@ -104,6 +118,7 @@ async def lifespan(app: FastAPI):
     await collector_task_control.start()
     await collector_module_service.start()
     await kezi_lead_sync_manager.start()
+    await comment_profile_enrichment_manager.start_automatic()
     logger.info("✅ 数据采集控制中心已恢复监控、ASR 与后台自动同步状态")
 
     # Phase 36: 初始化 Qdrant 向量集合（知识库 RAG 语义检索）
@@ -115,7 +130,9 @@ async def lifespan(app: FastAPI):
             if ok:
                 logger.info("✅ Qdrant 集合 '%s' 就绪", collection)
             else:
-                logger.warning("⚠️  Qdrant 集合 '%s' 初始化失败，向量搜索将降级", collection)
+                logger.warning(
+                    "⚠️  Qdrant 集合 '%s' 初始化失败，向量搜索将降级", collection
+                )
     except Exception as exc:
         logger.warning("⚠️  Qdrant 初始化跳过（服务未启动或不可用）: %s", exc)
 
@@ -125,7 +142,11 @@ async def lifespan(app: FastAPI):
 
         result = import_industry_knowledge()
         if result["created"] > 0 or result["updated"] > 0:
-            logger.info("✅ 行业知识已同步：新建 %d 条，更新 %d 条", result["created"], result["updated"])
+            logger.info(
+                "✅ 行业知识已同步：新建 %d 条，更新 %d 条",
+                result["created"],
+                result["updated"],
+            )
         else:
             logger.debug("行业知识无变化，跳过导入")
     except Exception as exc:
@@ -135,6 +156,7 @@ async def lifespan(app: FastAPI):
 
     # 先关掉所有“任务生产者”，再等待控制任务和实时页面完成，避免停机期间又创建浏览器。
     await collector_module_service.stop_scheduling()
+    await comment_profile_enrichment_manager.stop_automatic()
     await kezi_lead_sync_manager.stop()
     scheduler_manager.pause_scheduling()
     await collector_task_control.stop()
@@ -185,7 +207,9 @@ def root():
 
 @app.get("/health")
 def health():
-    configuration_errors, configuration_warnings = settings.runtime_configuration_issues()
+    configuration_errors, configuration_warnings = (
+        settings.runtime_configuration_issues()
+    )
     from app.services.ai.llm_client import get_local_ai_runtime_status
 
     local_ai = get_local_ai_runtime_status()
@@ -203,7 +227,9 @@ def health():
     try:
         from redis import Redis
 
-        redis_client = Redis.from_url(settings.REDIS_URL, socket_connect_timeout=1, socket_timeout=1)
+        redis_client = Redis.from_url(
+            settings.REDIS_URL, socket_connect_timeout=1, socket_timeout=1
+        )
         redis_ok = bool(redis_client.ping())
         redis_client.close()
     except Exception:
@@ -218,7 +244,11 @@ def health():
         "local_ai_model": local_ai["model"],
         "local_ai_message": local_ai["message"],
         "monitor": TaskStatus.RUNNING if scheduler_manager.running else "stopped",
-        "configuration": "error" if configuration_errors else "warning" if configuration_warnings else "ok",
+        "configuration": "error"
+        if configuration_errors
+        else "warning"
+        if configuration_warnings
+        else "ok",
         "configuration_issues": configuration_errors + configuration_warnings,
     }
 
