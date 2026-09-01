@@ -31,7 +31,7 @@ from app.schemas.review import (
     AudienceAnalysisOverrideRequest,
 )
 from app.services.ai.review_service import build_workbench, compare_sessions, generate_findings
-from app.services.ai.unified_review import AnalysisGenerationBusyError, generate_unified_review
+from app.services.ai.unified_review import AnalysisGenerationBusyError, LocalAiUnavailableError, generate_unified_review
 from app.services.ai.unified_review import get_unified_review, refresh_unified_summary_counts
 
 
@@ -136,6 +136,8 @@ def generate_session_review(session_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, str(exc)) from exc
     except AnalysisGenerationBusyError as exc:
         raise HTTPException(409, str(exc)) from exc
+    except LocalAiUnavailableError as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @router.patch("/{session_id}/audience/{analysis_id}", response_model=dict)

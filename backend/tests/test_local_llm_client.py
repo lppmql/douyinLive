@@ -93,6 +93,20 @@ def test_standalone_client_also_rejects_remote_url(monkeypatch):
         llm_client.get_client()
 
 
+def test_reset_client_closes_stale_connection_pool(monkeypatch):
+    closed = []
+    monkeypatch.setattr(
+        llm_client,
+        "_client",
+        SimpleNamespace(close=lambda: closed.append(True)),
+    )
+
+    llm_client.reset_client()
+
+    assert llm_client._client is None
+    assert closed == [True]
+
+
 @pytest.mark.parametrize(
     "content,finish_reason", [("", "stop"), ("{}", "length"), ("[]", "stop")]
 )

@@ -7,12 +7,14 @@ import json
 import logging
 import re
 import threading
+import time
 import uuid
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from openai import APIConnectionError
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -24,7 +26,7 @@ from app.models.lead_conversion_pairs import LeadConversionPair
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
 from app.models.unified_ai_review import AudienceInteractionAnalysis, UnifiedAiReviewRun
-from app.services.ai.llm_client import chat
+from app.services.ai.llm_client import chat, get_local_ai_runtime_status, reset_client
 from app.services.analysis.session_conversion import build_session_conversion_analysis
 
 
@@ -52,6 +54,15 @@ class AnalysisInputChangedError(RuntimeError):
 
 class AnalysisGenerationBusyError(RuntimeError):
     """同场次已有有效生成租约。"""
+
+
+class LocalAiUnavailableError(RuntimeError):
+    """本地 Ollama 连接在有限次恢复后仍不可用。"""
+
+
+def _is_local_ai_connection_error(exc: Exception) -> bool:
+    """只恢复连接中断；长推理超时不能自动重复执行数次。"""
+    return type(exc) is APIConnectionError or isinstance(exc, ConnectionError)
 
 
 SYSTEM_PROMPT = """
@@ -203,6 +214,7 @@ def _bounded(value: Any, allowed: set[str], fallback: str) -> str:
 def _chat_json_with_retry(**kwargs) -> dict[str, Any]:
     """对模型偶发空响应做有限重试，不无限重试或伪造结果。"""
     last_error: Exception | None = None
+    connection_retry_delays = (2, 5)
     for attempt in range(3):
         try:
             content = chat(
@@ -220,7 +232,18 @@ def _chat_json_with_retry(**kwargs) -> dict[str, Any]:
         except Exception as exc:
             last_error = exc
             logger.warning("统一AI复盘调用失败，尝试=%s 错误=%s", attempt + 1, type(exc).__name__)
+            if _is_local_ai_connection_error(exc):
+                # Ollama 重启后旧连接池可能已经失效；重建客户端并留出恢复时间。
+                reset_client()
+                if attempt < len(connection_retry_delays):
+                    time.sleep(connection_retry_delays[attempt])
     assert last_error is not None
+    if _is_local_ai_connection_error(last_error):
+        runtime = get_local_ai_runtime_status(timeout_seconds=2)
+        detail = runtime["message"]
+        raise LocalAiUnavailableError(
+            f"本地 AI 暂时不可用，已自动重试；{detail}。请确认项目服务正常后重试"
+        ) from last_error
     raise last_error
 
 
@@ -699,6 +722,8 @@ def _generate_unified_review(db: Session, session_id: int, *, force: bool = Fals
         failure_message = (
             "分析期间数据已更新，请重新生成"
             if isinstance(exc, AnalysisInputChangedError)
+            else str(exc)
+            if isinstance(exc, LocalAiUnavailableError)
             else f"{type(exc).__name__}: AI分析失败，可重试"
         )[:500]
         db.query(UnifiedAiReviewRun).filter(

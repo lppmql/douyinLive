@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from typing import Any
 from urllib.parse import urlparse, urlunparse
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 OLLAMA_SDK_PLACEHOLDER = "ollama-local"
 
 _client: OpenAI | None = None
+_client_lock = threading.Lock()
 
 
 def _record_safely(observation: AiCallObservation) -> None:
@@ -81,17 +83,31 @@ def get_local_ai_runtime_status(timeout_seconds: float = 1.5) -> dict[str, Any]:
 def get_client() -> OpenAI:
     """获取只连接本机 Ollama 的 OpenAI 兼容客户端。"""
     global _client
-    if _client is None:
-        get_ollama_service_url()  # 独立脚本调用也必须经过本机地址校验。
-        _client = OpenAI(
-            api_key=OLLAMA_SDK_PLACEHOLDER,
-            base_url=settings.OLLAMA_BASE_URL,
-            timeout=settings.OLLAMA_REQUEST_TIMEOUT_SECONDS,
-            max_retries=0,
-            # 忽略系统代理并拒绝重定向，防止本机请求被转发到外网。
-            http_client=httpx.Client(trust_env=False, follow_redirects=False),
-        )
+    with _client_lock:
+        if _client is None:
+            get_ollama_service_url()  # 独立脚本调用也必须经过本机地址校验。
+            _client = OpenAI(
+                api_key=OLLAMA_SDK_PLACEHOLDER,
+                base_url=settings.OLLAMA_BASE_URL,
+                timeout=settings.OLLAMA_REQUEST_TIMEOUT_SECONDS,
+                max_retries=0,
+                # 忽略系统代理并拒绝重定向，防止本机请求被转发到外网。
+                http_client=httpx.Client(trust_env=False, follow_redirects=False),
+            )
     return _client
+
+
+def reset_client() -> None:
+    """连接中断后丢弃旧连接池，下次请求重新建立本机连接。"""
+    global _client
+    with _client_lock:
+        client = _client
+        _client = None
+    if client is not None:
+        try:
+            client.close()
+        except Exception as exc:  # noqa: BLE001 - 清理失败不应覆盖原始连接错误
+            logger.debug("释放失效 Ollama 客户端失败: %s", type(exc).__name__)
 
 
 def get_async_client() -> AsyncOpenAI:

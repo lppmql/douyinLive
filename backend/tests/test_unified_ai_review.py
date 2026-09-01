@@ -3,11 +3,56 @@
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+import pytest
+
 from app.models.comments import Comment
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
 from app.models.transcript_segments import TranscriptSegment
-from app.services.ai.unified_review import generate_unified_review, overlay_user_analyses
+from app.services.ai import unified_review
+from app.services.ai.unified_review import LocalAiUnavailableError, generate_unified_review, overlay_user_analyses
+
+
+def test_unified_review_rebuilds_client_and_backs_off_after_connection_loss(monkeypatch):
+    responses = iter([
+        ConnectionError("Ollama restarting"),
+        ConnectionError("Ollama starting"),
+        '{"ok": true}',
+    ])
+    resets = []
+    sleeps = []
+
+    def fake_chat(**_kwargs):
+        result = next(responses)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(unified_review, "chat", fake_chat)
+    monkeypatch.setattr(unified_review, "reset_client", lambda: resets.append(True))
+    monkeypatch.setattr(unified_review.time, "sleep", sleeps.append)
+
+    assert unified_review._chat_json_with_retry() == {"ok": True}
+    assert resets == [True, True]
+    assert sleeps == [2, 5]
+
+
+def test_unified_review_reports_local_runtime_after_connection_retries(monkeypatch):
+    monkeypatch.setattr(
+        unified_review,
+        "chat",
+        lambda **_kwargs: (_ for _ in ()).throw(ConnectionError("offline")),
+    )
+    monkeypatch.setattr(unified_review, "reset_client", lambda: None)
+    monkeypatch.setattr(unified_review.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        unified_review,
+        "get_local_ai_runtime_status",
+        lambda **_kwargs: {"message": "本地 Ollama 不可用：ConnectError"},
+    )
+
+    with pytest.raises(LocalAiUnavailableError, match="已自动重试.*ConnectError"):
+        unified_review._chat_json_with_retry()
 
 
 def test_unified_review_uses_cache_and_keeps_business_facts(db):
