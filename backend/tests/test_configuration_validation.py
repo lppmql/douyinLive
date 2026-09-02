@@ -132,15 +132,31 @@ def test_one_click_start_requires_core_health_and_excludes_retired_services():
     assert start_source.index("if ! wait_for_backend; then") < start_source.index('echo "  ✅ 后端: http://localhost:8000"')
 
 
-def test_start_sh_is_the_only_daily_start_entrypoint():
+def test_daily_start_entrypoints_are_explicit_per_operating_system():
     root = BACKEND_ROOT.parent
     makefile_source = (root / "Makefile").read_text(encoding="utf-8")
     development_guide = (root / "docs" / "开发.md").read_text(encoding="utf-8")
     beginner_guide = (root / "docs" / "beginner-guide.md").read_text(encoding="utf-8")
+    windows_start_source = (root / "start.ps1").read_text(encoding="utf-8")
 
     assert "\nstart:" not in makefile_source
     assert "make start" not in development_guide
     assert "项目不再提供 `make start` 等启动别名" in beginner_guide
+    assert "./start.sh" in development_guide
+    assert "start.ps1 standard" in development_guide
+
+    assert '$PSVersionTable.PSVersion.Major -lt 7' in windows_start_source
+    assert '.venv\\Scripts\\python.exe' in windows_start_source
+    assert '@("compose", "up", "-d", "mysql", "redis", "qdrant")' in windows_start_source
+    assert '@("-m", "alembic", "upgrade", "head")' in windows_start_source
+    assert '"uvicorn", "app.main:app", "--port", "8000"' in windows_start_source
+    assert '@("compose", "--profile", "funasr", "up", "-d", "funasr")' in windows_start_source
+    assert 'Wait-Http -Name "后端"' in windows_start_source
+    assert '-RequireHealthyStatus' in windows_start_source
+    assert 'Wait-Http -Name "前端"' in windows_start_source
+    assert "[System.IO.FileMode]::CreateNew" in windows_start_source
+    assert '"System32\\taskkill.exe"' in windows_start_source
+    assert "/PID $Process.Id /T /F" in windows_start_source
 
     legacy_start = subprocess.run(
         ["make", "-n", "start"],

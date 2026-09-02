@@ -29,6 +29,54 @@ def test_worker_pids_excludes_pgrep_and_shell_commands():
         )
 
 
+def test_worker_pids_uses_native_process_table_on_windows(monkeypatch):
+    processes = [
+        SimpleNamespace(
+            info={
+                "pid": 201,
+                "name": "python.exe",
+                "cmdline": ["C:\\Python312\\python.exe", "-m", "workers.asr_worker"],
+            }
+        ),
+        SimpleNamespace(
+            info={
+                "pid": 202,
+                "name": "python.exe",
+                "cmdline": ["C:\\Python312\\python.exe", "-m", "app.main"],
+            }
+        ),
+    ]
+    monkeypatch.setattr(control.os, "name", "nt")
+    monkeypatch.setattr(control.psutil, "process_iter", lambda _attrs: processes)
+
+    assert _worker_pids() == [201]
+
+
+def test_windows_worker_termination_uses_psutil(monkeypatch):
+    worker_snapshots = iter(([456], [456], []))
+    actions = []
+
+    class FakeProcess:
+        def __init__(self, pid):
+            self.pid = pid
+
+        def terminate(self):
+            actions.append((self.pid, "terminate"))
+
+        def kill(self):
+            actions.append((self.pid, "kill"))
+
+    monkeypatch.setattr(control.os, "name", "nt")
+    monkeypatch.setattr(control, "_worker_pids", lambda: next(worker_snapshots))
+    monkeypatch.setattr(control.psutil, "Process", FakeProcess)
+    monkeypatch.setattr(control, "clear_asr_worker_heartbeat", lambda: None)
+
+    forced = control._terminate_worker_processes(grace_seconds=0)
+
+    assert forced == [456]
+    assert actions == [(456, "terminate"), (456, "kill")]
+
+
 def test_runtime_status_requires_fresh_worker_heartbeat(tmp_path, monkeypatch):
     heartbeat_path = tmp_path / "asr-worker.json"
     clock = [1000.0]

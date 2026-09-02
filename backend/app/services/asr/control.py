@@ -7,9 +7,12 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
+
+import psutil
 
 from app.core.config import PROJECT_ROOT
 from app.core.config import settings
@@ -46,6 +49,26 @@ def _docker_bin() -> str:
 
 def _worker_pids() -> list[int]:
     """只识别真实 Python Worker，避免 macOS 的 pgrep 把查询进程自身算进去。"""
+    if os.name == "nt":
+        worker_pids = []
+        for process in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                command = process.info.get("cmdline") or []
+                name = str(process.info.get("name") or "")
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+            if not command:
+                continue
+            executable_name = (str(command[0]) or name).replace("\\", "/").rsplit("/", 1)[-1]
+            if "python" not in executable_name.lower():
+                continue
+            if any(
+                command[index] == "-m" and command[index + 1] == "workers.asr_worker"
+                for index in range(len(command) - 1)
+            ):
+                worker_pids.append(int(process.info["pid"]))
+        return worker_pids
+
     result = subprocess.run(
         ["ps", "-axo", "pid=,comm=,args="],
         capture_output=True,
@@ -139,8 +162,11 @@ def _terminate_worker_processes(grace_seconds: float = 8) -> list[int]:
     target_pids = _worker_pids()
     for pid in target_pids:
         try:
-            os.kill(pid, signal.SIGTERM)
-        except ProcessLookupError:
+            if os.name == "nt":
+                psutil.Process(pid).terminate()
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, psutil.NoSuchProcess):
             pass
     deadline = time.monotonic() + max(0, grace_seconds)
     while time.monotonic() < deadline:
@@ -152,8 +178,11 @@ def _terminate_worker_processes(grace_seconds: float = 8) -> list[int]:
     forced_pids = remaining[:]
     for pid in remaining:
         try:
-            os.kill(pid, signal.SIGKILL)
-        except ProcessLookupError:
+            if os.name == "nt":
+                psutil.Process(pid).kill()
+            else:
+                os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, psutil.NoSuchProcess):
             pass
     kill_deadline = time.monotonic() + 2
     while remaining and time.monotonic() < kill_deadline:
@@ -212,23 +241,24 @@ def start_asr_runtime() -> dict:
         if not _worker_pids():
             ASR_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
             _archive_oversized_log()
-            worker_command = [
-                str(BACKEND_DIR / ".venv" / "bin" / "python"),
-                "-m",
-                "workers.asr_worker",
-            ]
+            worker_command = [sys.executable, "-m", "workers.asr_worker"]
             nice = shutil.which("nice")
-            if nice:
+            if nice and os.name != "nt":
                 worker_command = [nice, "-n", "10", *worker_command]
             worker_env = os.environ.copy()
             worker_env["ASR_WORKER_LOG_PATH"] = str(ASR_LOG_PATH)
+            process_options = (
+                {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                if os.name == "nt"
+                else {"start_new_session": True}
+            )
             subprocess.Popen(
                 worker_command,
                 cwd=BACKEND_DIR,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.STDOUT,
                 env=worker_env,
-                start_new_session=True,
+                **process_options,
             )
         deadline = time.monotonic() + 12
         runtime = get_asr_runtime_status()

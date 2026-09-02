@@ -47,7 +47,7 @@ make doctor
 `doctor` 的意思是“环境体检”，会检查 Docker、Python、Node、ffmpeg、数据库和常见弱配置。
 
 `setup.sh` 只在新电脑首次部署或依赖版本升级时运行；`start.sh` 不再临时下载大体积依赖。
-项目不再提供 `make start` 等启动别名，日常启动统一执行 `./start.sh`。
+项目不再提供 `make start` 等启动别名。macOS/Linux 日常启动执行 `./start.sh`；Windows 原生部署按根目录 README 教程执行 `pwsh -File .\start.ps1 standard`。
 日常模式分为 `lite` 和 `standard`（推荐）；`lite` 不自动启动 FunASR，适合临时查看数据或低资源电脑。
 
 ## 3. 首次登录和采集账号

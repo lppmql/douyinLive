@@ -7,7 +7,7 @@
 ## [2026-09-02]
 
 ### Changed
-- 日常启动入口收敛为唯一的 `./start.sh`，删除 `make start` 别名并统一新手及开发文档；首次安装、环境诊断和模型初始化工具继续按各自职责保留。
+- macOS/Linux 日常启动入口收敛为 `./start.sh`，删除 `make start` 别名；Windows 原生入口随后按 ADR 0052 独立提供，首次安装、环境诊断和模型初始化工具继续按各自职责保留。
 
 ### Fixed
 - 公共主播筛选不再将 `CASE/CONCAT` 动态主播键与请求参数直接比较，而是按 UID、抖音号和直播间兜底键查询原始字段，修复 MySQL 混合排序规则导致的数据大屏等共享入口 500。
@@ -15,6 +15,7 @@
 
 ### Added
 - 离线 ASR 终稿与本地话术纠错稳定后，后台自动生成话术评分、证据发现和完整统一 AI 复盘；每轮一场且主动礼让 ASR 资源。架构边界见 ADR 0050。
+- 新增 Windows 原生 PowerShell 7 启动入口和 README 部署教程，复用 Windows Python、Node.js、Ollama 与 Docker Desktop Linux containers，无需进入 WSL。
 
 ### Verification
 - 完整 `make check` 通过 566 项后端测试、60.95% 覆盖率、前端类型与全量 Lint、生产构建、Alembic 和 Docker 配置。

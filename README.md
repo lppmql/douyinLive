@@ -17,7 +17,7 @@
 
 ## 环境要求
 
-- macOS 或 Linux
+- macOS、Linux，或 64 位 Windows 10 22H2 / Windows 11
 - Docker Desktop
 - Python 3.12（项目通过 `.python-version` 固定）
 - Node.js 22 与 pnpm 10.12.4（项目通过 `.nvmrc` 和 `packageManager` 固定）
@@ -27,7 +27,7 @@
 docker --version && python3 --version && node --version && pnpm --version && ffmpeg -version
 ```
 
-## 快速开始
+## macOS / Linux 快速开始
 
 ```bash
 # 1. 首次部署：安装固定版本依赖并创建 .env
@@ -49,6 +49,105 @@ docker --version && python3 --version && node --version && pnpm --version && ffm
 | 健康检查 | http://localhost:8000/health |
 
 > 首次使用建议先看[新手上手指南](docs/beginner-guide.md)。
+
+## Windows 原生部署（PowerShell 7）
+
+Windows 使用原生 Python、Node.js、Ollama 和 PowerShell，MySQL、Redis、Qdrant、FunASR 仍由 Docker Desktop 的 Linux containers 运行，不需要进入 WSL 终端。建议至少 16GB 内存，运行本地 9B 模型和 ASR 时推荐 32GB；项目请放在不含中文和空格的短路径，例如 `C:\douyinLive`。
+
+### 1. 安装系统依赖
+
+先在 PowerShell 中安装 Git、PowerShell 7、Python 3.12、ffmpeg 和 Docker Desktop：
+
+```powershell
+winget install --id Git.Git --exact
+winget install --id Microsoft.PowerShell --exact
+winget install --id Python.Python.3.12 --exact
+winget install --id Gyan.FFmpeg --exact
+winget install --id Docker.DockerDesktop --exact
+```
+
+另外安装以下固定组件：
+
+- 从 [Node.js 官方归档](https://nodejs.org/en/download/archive/v22.22.0)安装 Node.js 22.x，不要使用 24.x 等其他主版本。
+- 从 [Ollama Windows 官网](https://ollama.com/download/windows)安装 Ollama；安装后会在本机后台提供 `http://127.0.0.1:11434`。
+- 打开 Docker Desktop，确认使用 **Linux containers**。Docker 官方推荐大多数 Windows 电脑使用 WSL 2 后端，具体要求见 [Docker Desktop Windows 安装文档](https://docs.docker.com/desktop/setup/install/windows-install/)。
+
+安装完成后关闭旧终端，从开始菜单打开 **PowerShell 7**，确认版本：
+
+```powershell
+$PSVersionTable.PSVersion
+git --version
+docker version
+py -3.12 --version
+node --version
+ffmpeg -version
+ollama --version
+```
+
+其中 PowerShell 必须是 7.x、Python 必须是 3.12.x、Node.js 必须是 22.x。
+
+### 2. 克隆项目并安装依赖
+
+以下命令全部在 PowerShell 7 中执行：
+
+```powershell
+Set-Location C:\
+git clone https://github.com/lppmql/douyinLive.git
+Set-Location C:\douyinLive
+
+Copy-Item .env.example .env
+
+py -3.12 -m venv backend\.venv
+.\backend\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+.\backend\.venv\Scripts\python.exe -m playwright install chromium
+
+Push-Location frontend
+corepack pnpm@10.12.4 install --frozen-lockfile
+Pop-Location
+```
+
+打开 `.env`，至少修改 `MYSQL_ROOT_PASSWORD`、`DB_PASSWORD`、`REDIS_PASSWORD`、`REDIS_URL` 和 `JWT_SECRET_KEY`。`REDIS_URL` 中的密码必须与 `REDIS_PASSWORD` 完全一致，不要把 `DB_USER` 改成 `root`。
+
+### 3. 初始化本地 AI 模型
+
+确认 Windows 任务栏中的 Ollama 已运行，然后执行：
+
+```powershell
+ollama pull qwen3.5:9b
+ollama create douyin-live-qwen -f .\deploy\ollama\Modelfile
+ollama list
+```
+
+列表中出现 `douyin-live-qwen` 即表示初始化成功。模型约占 7GB，仅保存在本机，不需要 DeepSeek 等云端 API Key。
+
+### 4. 启动项目
+
+Windows 原生日常启动入口是：
+
+```powershell
+pwsh -File .\start.ps1 standard
+```
+
+低资源电脑可执行 `pwsh -File .\start.ps1 lite`，此模式不自动启动 FunASR。启动终端必须保持打开；按 `Ctrl+C` 停止前后端，MySQL、Redis、Qdrant 等 Docker 数据服务会继续运行，保证数据不会因退出终端而丢失。
+
+启动后在 Windows 浏览器访问：
+
+| 服务 | 地址 |
+|------|------|
+| 前端 | http://localhost:9527 |
+| API 文档 | http://localhost:8000/docs |
+| 健康检查 | http://localhost:8000/health |
+
+### 5. Windows 常见问题
+
+- **脚本禁止运行**：确认使用的是 `pwsh` 而不是旧版 `powershell.exe`；必要时仅对当前进程执行 `Set-ExecutionPolicy -Scope Process Bypass` 后重试。
+- **Docker 命令存在但启动失败**：打开 Docker Desktop，并从托盘菜单切换到 Linux containers。
+- **端口 8000 或 9527 被占用**：先到原启动终端按 `Ctrl+C`；脚本不会强制结束其他软件的进程。
+- **找不到 Node、ffmpeg 或 Ollama**：安装后重新打开 PowerShell 7，让新的 `PATH` 生效。
+- **模型不存在**：重新执行上面的三条 Ollama 初始化命令；日常启动不会自动下载大模型。
+- **AI 剪辑提示字幕能力缺失**：确认 `ffmpeg -filters` 输出中包含 `subtitles` 或 `ass` 滤镜。
+- **采集 Cookie 或浏览器指纹异常**：重新在本机浏览器扫码登录并保存真实指纹，不要只修改 `.env` 中的平台名称来伪造指纹。
 
 ## 核心功能
 
@@ -78,7 +177,8 @@ douyinLive/
 ├── Makefile               检查维护命令（make doctor/test/lint/build）
 ├── docker-compose.yml
 ├── setup.sh               首次安装/依赖升级
-└── start.sh               唯一日常启动脚本
+├── start.sh               macOS/Linux 日常启动脚本
+└── start.ps1              Windows 原生日常启动脚本
 ```
 
 ## 文档导航
