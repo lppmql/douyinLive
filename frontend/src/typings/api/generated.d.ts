@@ -5225,6 +5225,11 @@ export interface components {
              * @default 0
              */
             paired_count: number;
+            /**
+             * Sanitized Douyin Id Count
+             * @default 0
+             */
+            sanitized_douyin_id_count: number;
             /** Rematch */
             rematch?: {
                 [key: string]: unknown;

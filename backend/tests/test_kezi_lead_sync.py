@@ -40,6 +40,25 @@ def test_kezi_item_requires_real_source_id():
         raise AssertionError("缺少 sourceId 的客资不应通过校验")
 
 
+def test_kezi_item_clears_only_oversized_douyin_id():
+    """上游异常长身份值不能阻塞整页，也不能截断后冒充真实抖音号。"""
+    item = KeziLeadItem.model_validate(
+        {
+            "sourceId": 99,
+            "phone": "13800138000",
+            "douyinId": "x" * 166,
+            "anchor": "主播甲",
+            "createdAt": "2026-09-02T10:30:00",
+        }
+    )
+
+    assert item.douyin_id == ""
+    assert item.douyin_id_sanitized is True
+    assert item.phone == "13800138000"
+    assert item.anchor == "主播甲"
+    assert "douyin_id_sanitized" not in item.model_dump()
+
+
 def test_kezi_key_rejects_long_chinese_placeholder():
     """中文占位内容即使超过 32 位也不能放进 HTTP 请求头冒充真实密钥。"""
     assert is_valid_kezi_api_key("read-key-abcdefghijklmnopqrstuvwxyz-123456")
@@ -261,6 +280,42 @@ def test_incremental_sync_persists_cursor_and_deduplicates(db, monkeypatch):
     assert lead.session_id == session.id
     assert lead.external_id == 201
     assert session.leads_count == 1
+
+
+def test_incremental_sync_keeps_lead_and_advances_cursor_when_douyin_id_is_oversized(
+    db, monkeypatch
+):
+    """单个异常抖音号只降级身份字段，真实客资和增量游标仍要保存。"""
+
+    class FakeClient:
+        async def fetch_page(self, last_id: int, limit: int) -> KeziLeadPage:
+            del limit
+            return KeziLeadPage(
+                lastId=last_id + 1,
+                count=1,
+                hasMore=False,
+                data=[
+                    {
+                        "sourceId": last_id + 1,
+                        "phone": "13800138000",
+                        "douyinId": "x" * 166,
+                        "anchor": "暂无真实场次主播",
+                        "createdAt": "2026-09-02T10:30:00",
+                    }
+                ],
+            )
+
+    monkeypatch.setattr("app.services.leads.kezi_sync.settings.KEZI_SYNC_PAGE_SIZE", 100)
+    result = asyncio.run(sync_kezi_leads(db, client=FakeClient()))
+
+    state = db.query(LeadSyncState).one()
+    lead = db.query(Lead).one()
+    assert result["added_count"] == 1
+    assert result["sanitized_douyin_id_count"] == 1
+    assert state.last_external_id == 1
+    assert lead.external_id == 1
+    assert lead.lead_phone == "13800138000"
+    assert lead.douyin_id is None
 
 
 def test_page_cursor_rejects_old_or_out_of_order_source_ids():

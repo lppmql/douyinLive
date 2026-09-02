@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -41,8 +41,22 @@ class KeziLeadItem(BaseModel):
     source_id: int = Field(alias="sourceId", gt=0)
     phone: str = Field(default="", max_length=100)
     douyin_id: str = Field(default="", alias="douyinId", max_length=100)
+    douyin_id_sanitized: bool = Field(default=False, exclude=True, repr=False)
     anchor: str = Field(default="", max_length=100)
     created_at: datetime = Field(alias="createdAt")
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_oversized_douyin_id(cls, value):
+        """异常长身份值不阻断整页，也不截断后冒充真实公开抖音号。"""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        raw_douyin_id = data.get("douyinId", data.get("douyin_id"))
+        if isinstance(raw_douyin_id, str) and len(raw_douyin_id.strip()) > 100:
+            data["douyinId"] = ""
+            data["douyin_id_sanitized"] = True
+        return data
 
     @field_validator("phone", "douyin_id", "anchor", mode="before")
     @classmethod
@@ -459,6 +473,7 @@ async def sync_kezi_leads(
         duplicates = 0
         matched = 0
         pending = 0
+        sanitized_douyin_ids = 0
         pages = 0
         pair_result = {"pair_count": 0}
         try:
@@ -471,6 +486,7 @@ async def sync_kezi_leads(
                 page_duplicates = 0
                 affected_session_ids: set[int] = set()
                 for item in page.data:
+                    sanitized_douyin_ids += int(item.douyin_id_sanitized)
                     created, session_id = _save_item(db, item)
                     if created:
                         added += 1
@@ -504,11 +520,12 @@ async def sync_kezi_leads(
             db.commit()
 
             logger.info(
-                "客资增量同步完成：新增 %s 条，重复 %s 条，已归属 %s 条，待归属 %s 条",
+                "客资增量同步完成：新增 %s 条，重复 %s 条，已归属 %s 条，待归属 %s 条，异常抖音号降级 %s 条",
                 added,
                 duplicates,
                 matched,
                 pending,
+                sanitized_douyin_ids,
             )
             return {
                 "success": True,
@@ -520,6 +537,7 @@ async def sync_kezi_leads(
                 "last_external_id": int(state.last_external_id or 0),
                 "page_count": pages,
                 "paired_count": pair_result["pair_count"] if pages else 0,
+                "sanitized_douyin_id_count": sanitized_douyin_ids,
             }
         except Exception as exc:
             db.rollback()

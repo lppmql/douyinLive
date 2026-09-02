@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -27,13 +27,16 @@ from app.services.collector.browser import browser_manager
 from app.services.collector.scheduler import scheduler_manager
 from app.services.resources.system_usage import get_system_usage
 from app.services.resources.asr_policy import build_asr_resource_plan
-from app.services.tasks.batch_runners import pending_knowledge_session_count
+from app.services.tasks.batch_runners import (
+    pending_ai_session_count,
+    pending_knowledge_session_count,
+)
 from app.services.tasks.control import MODULE_TASK_TYPES, collector_task_control
 
 
-MODULE_KEYS = ("data_refresh", "monitor", "asr", "knowledge")
-SCHEDULED_SERVICE_MODULE_KEYS = ("knowledge",)
-AUTOMATIC_MODULE_KEYS = ("knowledge",)
+MODULE_KEYS = ("data_refresh", "monitor", "asr", "ai_review", "knowledge")
+SCHEDULED_SERVICE_MODULE_KEYS = ("ai_review", "knowledge")
+AUTOMATIC_MODULE_KEYS = ("ai_review", "knowledge")
 
 
 def _module_intervals() -> dict[str, int]:
@@ -64,7 +67,7 @@ def _active_task_types() -> set[str]:
 
 
 class CollectorModuleServiceManager:
-    """管理手动补齐刷新、长期服务开关和知识库自动入库。"""
+    """管理手动补齐刷新、长期服务和后台 AI/知识库任务。"""
 
     def __init__(self) -> None:
         self._loop_task: asyncio.Task | None = None
@@ -75,7 +78,7 @@ class CollectorModuleServiceManager:
         return bool(self._loop_task and not self._loop_task.done())
 
     def ensure_states(self) -> None:
-        """建立控制状态；知识库固定后台运行，刷新固定为手动动作。"""
+        """建立控制状态；AI/知识库自动运行，刷新为手动动作。"""
         active_types = _active_task_types()
         intervals = _module_intervals()
         db = SessionLocal()
@@ -122,12 +125,6 @@ class CollectorModuleServiceManager:
                         next_run_at=now if enabled else None,
                     )
                 )
-            # AI 复盘改由场次详情页手动生成，旧版本留下的自动开关必须停用。
-            legacy_ai_state = db.get(CollectorModuleState, "ai_review")
-            if legacy_ai_state:
-                legacy_ai_state.enabled = False
-                legacy_ai_state.next_run_at = None
-                legacy_ai_state.disabled_at = datetime.utcnow()
             db.commit()
         finally:
             db.close()
@@ -136,11 +133,10 @@ class CollectorModuleServiceManager:
         if self.running:
             return
         self.ensure_states()
-        await asyncio.to_thread(collector_task_control.request_cancel_task_type, "ai_review")
         await self._restore_runtime_services()
         self._stop_event = asyncio.Event()
         self._loop_task = asyncio.create_task(self._run_loop(), name="collector-module-service-loop")
-        logger.info("数据采集服务与知识库自动入库调度器已启动")
+        logger.info("数据采集、AI 复盘与知识库自动调度器已启动")
 
     async def shutdown(self) -> None:
         """应用退出时释放运行资源，但不改变用户保存的开关状态。"""
@@ -203,7 +199,8 @@ class CollectorModuleServiceManager:
             return task, message
         if module_key in AUTOMATIC_MODULE_KEYS:
             self._set_enabled(module_key, True)
-            return None, "知识库入库为后台自动服务，无需手动开启"
+            label = "AI 复盘" if module_key == "ai_review" else "知识库入库"
+            return None, f"{label}为后台自动服务，无需手动开启"
 
         if module_key == "monitor":
             await scheduler_manager.start()
@@ -241,7 +238,8 @@ class CollectorModuleServiceManager:
             stopped_count = len(collector_task_control.request_cancel_task_type("collect_all"))
             return stopped_count, f"已请求停止全部场次数据补齐刷新，共 {stopped_count} 个任务"
         if module_key in AUTOMATIC_MODULE_KEYS:
-            raise ValueError("知识库入库为后台基础服务，已改为自动执行，不能关闭")
+            label = "AI 复盘" if module_key == "ai_review" else "知识库入库"
+            raise ValueError(f"{label}为后台基础服务，已改为自动执行，不能关闭")
         self._set_enabled(module_key, False)
         stopped_count = 0
 
@@ -344,6 +342,12 @@ class CollectorModuleServiceManager:
             for state in states:
                 if state.next_run_at and state.next_run_at > now:
                     continue
+                if state.module_key == "ai_review" and self._asr_blocks_ai_review(db):
+                    state.next_run_at = now + timedelta(
+                        seconds=max(15, state.interval_seconds)
+                    )
+                    state.last_error = "正在等待 ASR 转写与本地话术纠错完成"
+                    continue
                 if usage.get("pressure_level") in {"high", "critical"}:
                     delay = max(30, state.interval_seconds * settings.RESOURCE_BACKOFF_MULTIPLIER)
                     state.next_run_at = now + timedelta(seconds=delay)
@@ -400,7 +404,10 @@ class CollectorModuleServiceManager:
         options = {
             "continuous": True,
             "latest_first": True,
-            "batch_size": settings.CONTINUOUS_TASK_BATCH_SIZE or None,
+            # 完整复盘会调用本地大模型，固定单场串行，不抢 ASR 资源。
+            "batch_size": 1
+            if state.module_key == "ai_review"
+            else settings.CONTINUOUS_TASK_BATCH_SIZE or None,
             "scheduled_at": now.isoformat(),
         }
         task, _created = collector_task_control.enqueue(state.module_key, options=options)
@@ -410,9 +417,32 @@ class CollectorModuleServiceManager:
 
     @staticmethod
     def _pending_count(db, module_key: str) -> int:
+        if module_key == "ai_review":
+            return pending_ai_session_count(db)
         if module_key == "knowledge":
             return pending_knowledge_session_count(db)
         return 1
+
+    @staticmethod
+    def _asr_blocks_ai_review(db) -> bool:
+        """ASR 与话术纠错优先，避免 Ollama/FunASR 同时抢占本机。"""
+        active_asr = db.query(AsrTask.id).filter(
+            AsrTask.status.in_([TaskStatus.QUEUED, TaskStatus.PROCESSING]),
+            AsrTask.cancel_requested_at.is_(None),
+        )
+        unfinished_correction = db.query(AsrTask.id).filter(
+            AsrTask.task_type == "offline",
+            AsrTask.status == TaskStatus.COMPLETED,
+            or_(
+                AsrTask.postprocess_status.in_([TaskStatus.PENDING, TaskStatus.PROCESSING]),
+                and_(
+                    AsrTask.postprocess_status == TaskStatus.FAILED,
+                    AsrTask.postprocess_attempt_count
+                    < settings.ASR_LLM_CORRECTION_MAX_ATTEMPTS,
+                ),
+            ),
+        )
+        return active_asr.first() is not None or unfinished_correction.first() is not None
 
     @staticmethod
     def _has_available_account() -> bool:

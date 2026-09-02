@@ -122,9 +122,12 @@ export function useCollectorData(message: MessageApi, dialog: DialogApi) {
     try {
       const response = await syncKeziLeads();
       const result = unwrapServiceData(response, '客资同步失败');
-      message.success(
-        `新增 ${result.added_count} 条，匹配场次 ${result.matched_count} 条，待归属 ${result.pending_count} 条`
-      );
+      const summary = `新增 ${result.added_count} 条，匹配场次 ${result.matched_count} 条，待归属 ${result.pending_count} 条`;
+      if (result.sanitized_douyin_id_count) {
+        message.warning(`${summary}；${result.sanitized_douyin_id_count} 条异常超长抖音号已安全置空，客资未丢失`);
+      } else {
+        message.success(summary);
+      }
       await loadData(true);
     } catch (error) {
       message.error(errorText(error, '客资同步失败'));

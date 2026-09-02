@@ -19,6 +19,7 @@ from app.models.scraper_tasks import ScraperTask
 from app.services.collector.scheduler import scheduler_manager
 from app.services.resources.asr_policy import build_asr_resource_plan
 from app.services.tasks.batch_runners import (
+    pending_ai_session_count,
     pending_knowledge_session_count,
 )
 from app.services.tasks.control import CONTROL_TASK_TYPES, TASK_LABELS, TASK_TYPE_MODULES
@@ -235,12 +236,25 @@ def build_control_center(
         },
         {
             **_persistent_module(
-            "knowledge_sync",
-            latest.get("knowledge_sync"),
-            active.get("knowledge_sync"),
-            states.get("knowledge"),
-            counts.get("knowledge_sync", {}),
-            pending_knowledge_session_count(db),
+                "ai_review",
+                latest.get("ai_review"),
+                active.get("ai_review"),
+                states.get("ai_review"),
+                counts.get("ai_review", {}),
+                pending_ai_session_count(db),
+            ),
+            "mode": "automatic",
+            "enabled": True,
+            "running": True,
+        },
+        {
+            **_persistent_module(
+                "knowledge_sync",
+                latest.get("knowledge_sync"),
+                active.get("knowledge_sync"),
+                states.get("knowledge"),
+                counts.get("knowledge_sync", {}),
+                pending_knowledge_session_count(db),
             ),
             "mode": "automatic",
             "enabled": True,

@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import and_, case, exists, func, or_
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.analysis_reports import AnalysisReport
 from app.models.asr_tasks import AsrTask
 from app.models.comments import Comment
@@ -22,9 +23,11 @@ from app.models.live_sessions import LiveSession
 from app.models.review import ReviewFinding
 from app.models.scraper_tasks import ScraperTask
 from app.models.transcript_segments import TranscriptSegment
+from app.models.unified_ai_review import UnifiedAiReviewRun
 from app.services.ai.kb_service import sync_session_to_kb
 from app.services.ai.review_service import generate_findings
 from app.services.ai.scoring import score_session_transcript
+from app.services.ai.unified_review import generate_unified_review
 from app.services.collector.log_service import add_collector_log
 from app.services.collector.manual_collect import collect_all
 from app.services.collector.comment_profile_enrichment import (
@@ -50,6 +53,25 @@ def completed_offline_transcript_exists():
             AsrTask.session_id == LiveSession.id,
             AsrTask.task_type == "offline",
             AsrTask.status == "completed",
+        )
+    )
+
+
+def review_ready_offline_transcript_exists():
+    """AI 只读取已稳定终稿：纠错成功、跳过或已用完重试次数。"""
+    return exists().where(
+        and_(
+            AsrTask.session_id == LiveSession.id,
+            AsrTask.task_type == "offline",
+            AsrTask.status == "completed",
+            or_(
+                AsrTask.postprocess_status.in_(["completed", "skipped"]),
+                and_(
+                    AsrTask.postprocess_status == "failed",
+                    AsrTask.postprocess_attempt_count
+                    >= settings.ASR_LLM_CORRECTION_MAX_ATTEMPTS,
+                ),
+            ),
         )
     )
 
@@ -107,7 +129,7 @@ def _pending_ai_session_ids(db: Session, limit: int | None = None) -> list[int]:
 
 
 def _pending_ai_query(db: Session):
-    """AI 状态数量和实际候选共用同一套“下播终稿”门禁。"""
+    """AI 候选会等待终稿稳定，并在话术变化后自动重新生成。"""
     has_offline_transcript = exists().where(
         TranscriptSegment.session_id == LiveSession.id,
         TranscriptSegment.asr_status == "completed",
@@ -121,11 +143,30 @@ def _pending_ai_query(db: Session):
         AnalysisReport.report_type == "speech_score",
     )
     has_finding = exists().where(ReviewFinding.session_id == LiveSession.id)
-    return db.query(LiveSession.id).filter(
-        LiveSession.live_status != "live",
-        completed_offline_transcript_exists(),
-        has_offline_transcript,
-        or_(~has_score, ~has_finding),
+    transcript_changed_after_review = exists().where(
+        TranscriptSegment.session_id == LiveSession.id,
+        TranscriptSegment.asr_status == "completed",
+        TranscriptSegment.updated_at > UnifiedAiReviewRun.completed_at,
+    )
+    return (
+        db.query(LiveSession.id)
+        .outerjoin(
+            UnifiedAiReviewRun,
+            UnifiedAiReviewRun.session_id == LiveSession.id,
+        )
+        .filter(
+            LiveSession.live_status != "live",
+            review_ready_offline_transcript_exists(),
+            has_offline_transcript,
+            or_(
+                ~has_score,
+                ~has_finding,
+                UnifiedAiReviewRun.id.is_(None),
+                UnifiedAiReviewRun.status != "completed",
+                UnifiedAiReviewRun.completed_at.is_(None),
+                transcript_changed_after_review,
+            ),
+        )
     )
 
 
@@ -147,7 +188,7 @@ def run_ai_review_batch(
     should_cancel: CancellationChecker,
     batch_size: int | None = None,
 ) -> dict[str, Any]:
-    """为已有真实话术但缺少复盘结果的场次补齐 AI 评分和证据发现。"""
+    """为已稳定的真实终稿生成评分、证据发现和完整统一复盘。"""
     session_ids = _pending_ai_session_ids(db, limit=batch_size)
     total = len(session_ids)
     completed = 0
@@ -169,23 +210,17 @@ def run_ai_review_batch(
         if not session:
             continue
         stage_errors: list[str] = []
+        score_result: dict[str, Any] | None = None
         try:
-            score_report = (
-                db.query(AnalysisReport)
-                .filter(
-                    AnalysisReport.session_id == session_id,
-                    AnalysisReport.report_type == "speech_score",
-                )
-                .order_by(AnalysisReport.id.desc())
-                .first()
-            )
-            if not score_report:
-                try:
-                    score_session_transcript(session_id, db)
-                except Exception as exc:
-                    db.rollback()
-                    stage_errors.append(f"话术评分：{str(exc)[:300]}")
+            try:
+                score_result = score_session_transcript(session_id, db)
+                if not score_result:
+                    stage_errors.append("话术评分：本场话术过短或本地模型未返回有效结果")
+            except Exception as exc:
+                db.rollback()
+                stage_errors.append(f"话术评分：{str(exc)[:300]}")
             findings = generate_findings(db, session_id)
+            unified_review = generate_unified_review(db, session_id)
             completed += 1
             warnings += int(bool(stage_errors))
             add_collector_log(
@@ -201,7 +236,11 @@ def run_ai_review_batch(
                 ),
                 details={
                     "finding_count": len(findings),
-                    "score_generated": not bool(score_report),
+                    "score_generated": bool(score_result),
+                    "unified_review_status": unified_review.get("status"),
+                    "analyzed_user_count": int(
+                        unified_review.get("analyzed_user_count") or 0
+                    ),
                     "warnings": stage_errors,
                 },
             )

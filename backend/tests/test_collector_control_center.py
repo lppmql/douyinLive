@@ -261,4 +261,7 @@ def test_control_center_converts_empty_module_errors_to_contract_strings(db):
     validated = CollectorControlCenterResponse.model_validate(payload)
 
     asr_module = next(item for item in validated.modules if item.key == "asr")
+    ai_review_module = next(item for item in validated.modules if item.key == "ai_review")
     assert asr_module.disabled_reason == ""
+    assert ai_review_module.mode == "automatic"
+    assert ai_review_module.enabled is True

@@ -796,6 +796,7 @@ declare namespace Api {
       pending_count: number;
       last_external_id: number;
       page_count: number;
+      sanitized_douyin_id_count: number;
     }
 
     interface CollectorTaskAction {

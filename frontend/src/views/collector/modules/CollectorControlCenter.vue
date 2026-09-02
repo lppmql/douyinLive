@@ -46,7 +46,7 @@ const moduleMeta: Record<
   },
   ai_review: {
     icon: 'mdi:creation-outline',
-    description: '持续从最新话术生成评分与复盘证据',
+    description: '终稿及本地纠错完成后，自动生成评分、证据与完整复盘',
     accent: '#dc2626'
   },
   knowledge: {
@@ -111,7 +111,7 @@ function intervalLabel(seconds: number): string {
             数据处理控制中心
           </div>
           <div class="mt-4px text-12px leading-20px text-gray-500">
-            补齐刷新按需执行；直播监控与 ASR 可随时关闭；知识库和客资在后台自动增量同步。
+            补齐刷新按需执行；直播监控与 ASR 可随时关闭；AI 复盘、知识库和客资在后台自动处理。
           </div>
         </div>
         <NSpace align="center" wrap>

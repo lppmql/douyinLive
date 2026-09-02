@@ -224,7 +224,9 @@ class CollectorTaskControlManager:
                 options = dict(task.task_options_json or {})
                 options.setdefault("continuous", task.task_type != "collect_all")
                 options.setdefault("latest_first", True)
-                if task.task_type != "collect_all":
+                if task.task_type == "ai_review":
+                    options["batch_size"] = 1
+                elif task.task_type != "collect_all":
                     options["batch_size"] = settings.CONTINUOUS_TASK_BATCH_SIZE or None
                 task.task_options_json = options
                 if task.status == TaskStatus.RUNNING:

@@ -18,6 +18,7 @@ from app.services.tasks.batch_runners import (
     _pending_ai_session_ids,
     _pending_knowledge_session_ids,
     pending_ai_session_count,
+    run_ai_review_batch,
 )
 from app.services.tasks.module_service import CollectorModuleServiceManager, MODULE_KEYS
 
@@ -129,6 +130,7 @@ def test_initial_state_table_contains_action_switches_and_automatic_modules(db, 
     assert all(state.interval_seconds >= 5 for state in states)
     states_by_key = {state.module_key: state for state in states}
     assert states_by_key["data_refresh"].enabled is False
+    assert states_by_key["ai_review"].enabled is True
     assert states_by_key["knowledge"].enabled is True
 
 
@@ -186,6 +188,248 @@ def test_live_draft_never_enters_ai_or_knowledge_candidates(db):
     assert _pending_ai_session_ids(db) == [offline_session.id]
     assert pending_ai_session_count(db) == 1
     assert _pending_knowledge_session_ids(db) == [offline_session.id]
+
+
+def test_ai_review_waits_until_local_transcript_correction_is_stable(db, monkeypatch):
+    """本地纠错还在排队或未用完重试时，不能拿旧终稿生成复盘。"""
+    monkeypatch.setattr(settings, "ASR_LLM_CORRECTION_MAX_ATTEMPTS", 3)
+    room = LiveRoom(
+        account_name="终稿纠错门禁账号",
+        anchor_name="测试主播",
+        room_id_str="room-review-correction-gate",
+    )
+    db.add(room)
+    db.flush()
+    session = LiveSession(
+        room_id=room.id,
+        anchor_name="已下播主播",
+        live_status="ended",
+        live_start_time=datetime.utcnow() - timedelta(hours=1),
+    )
+    db.add(session)
+    db.flush()
+    task = AsrTask(
+        session_id=session.id,
+        status="completed",
+        task_type="offline",
+        postprocess_status="pending",
+        postprocess_attempt_count=0,
+        idempotency_key=f"asr:offline:session:{session.id}",
+    )
+    db.add_all(
+        [
+            task,
+            TranscriptSegment(
+                session_id=session.id,
+                text_content="这是已经完成识别但还在等待本地模型纠错的真实终稿。",
+                segment_type="asr_offline",
+                asr_status="completed",
+            ),
+        ]
+    )
+    db.commit()
+
+    assert _pending_ai_session_ids(db) == []
+
+    task.postprocess_status = "failed"
+    task.postprocess_attempt_count = 2
+    db.commit()
+    assert _pending_ai_session_ids(db) == []
+
+    task.postprocess_attempt_count = 3
+    db.commit()
+    assert _pending_ai_session_ids(db) == [session.id]
+
+
+def test_ai_review_automatic_batch_is_single_session_and_waits_for_asr(db, monkeypatch):
+    """自动复盘固定单场串行，ASR 任务存在时不进入控制队列。"""
+    _use_test_database(monkeypatch)
+    manager = CollectorModuleServiceManager()
+    state = CollectorModuleState(
+        module_key="ai_review",
+        enabled=True,
+        interval_seconds=120,
+        next_run_at=datetime.utcnow() - timedelta(seconds=1),
+    )
+    db.add(state)
+    room = LiveRoom(
+        account_name="AI 资源门禁账号",
+        anchor_name="测试主播",
+        room_id_str="room-ai-resource-gate",
+    )
+    db.add(room)
+    db.flush()
+    session = LiveSession(
+        room_id=room.id,
+        anchor_name="测试主播",
+        live_status="ended",
+    )
+    db.add(session)
+    db.flush()
+    db.commit()
+    monkeypatch.setattr(manager, "_pending_count", lambda _db, _key: 1)
+
+    asr_task = AsrTask(
+        session_id=session.id,
+        status=TaskStatus.QUEUED,
+        task_type="offline",
+        postprocess_status="pending",
+        idempotency_key="asr:offline:session:automatic-review-gate",
+    )
+    db.add(asr_task)
+    db.commit()
+    manager._schedule_due_modules_sync(
+        {"pressure_level": "normal", "pressure_message": "资源正常"}
+    )
+    assert db.query(ScraperTask).filter(ScraperTask.task_type == "ai_review").count() == 0
+
+    asr_task.status = TaskStatus.COMPLETED
+    asr_task.postprocess_status = TaskStatus.COMPLETED
+    state.next_run_at = datetime.utcnow() - timedelta(seconds=1)
+    db.commit()
+    manager._schedule_due_modules_sync(
+        {"pressure_level": "normal", "pressure_message": "资源正常"}
+    )
+
+    queued = db.query(ScraperTask).filter(ScraperTask.task_type == "ai_review").one()
+    assert queued.task_options_json["batch_size"] == 1
+
+
+def test_ai_review_batch_generates_score_findings_and_unified_review(db, monkeypatch):
+    """后台任务必须产出页面使用的完整统一复盘，不能只做旧评分。"""
+    room = LiveRoom(
+        account_name="AI 完整复盘账号",
+        anchor_name="测试主播",
+        room_id_str="room-complete-ai-review",
+    )
+    db.add(room)
+    db.flush()
+    session = LiveSession(
+        room_id=room.id,
+        anchor_name="测试主播",
+        live_status="ended",
+        live_start_time=datetime.utcnow() - timedelta(hours=1),
+    )
+    db.add(session)
+    db.flush()
+    control_task = ScraperTask(
+        task_type="ai_review",
+        status=TaskStatus.RUNNING,
+        progress_stage="ai_review",
+    )
+    db.add_all(
+        [
+            control_task,
+            AsrTask(
+                session_id=session.id,
+                status="completed",
+                task_type="offline",
+                postprocess_status="completed",
+                idempotency_key=f"asr:offline:session:complete-review:{session.id}",
+            ),
+            TranscriptSegment(
+                session_id=session.id,
+                text_content="这是已经完成转写和纠错的真实话术终稿，用于验证后台自动完整复盘。",
+                segment_type="asr_offline",
+                asr_status="completed",
+            ),
+        ]
+    )
+    db.commit()
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "app.services.tasks.batch_runners.score_session_transcript",
+        lambda _session_id, _db: calls.append("score") or {"total_score": 80},
+    )
+    monkeypatch.setattr(
+        "app.services.tasks.batch_runners.generate_findings",
+        lambda _db, _session_id: calls.append("findings") or [],
+    )
+    monkeypatch.setattr(
+        "app.services.tasks.batch_runners.generate_unified_review",
+        lambda _db, _session_id: calls.append("unified")
+        or {"status": "completed", "analyzed_user_count": 2},
+    )
+
+    result = run_ai_review_batch(
+        db,
+        control_task.id,
+        lambda *_args: None,
+        lambda: False,
+        batch_size=1,
+    )
+
+    assert calls == ["score", "findings", "unified"]
+    assert result["completed_count"] == 1
+    assert result["failed_count"] == 0
+
+
+def test_ai_review_batch_degrades_score_failure_without_losing_unified_review(
+    db, monkeypatch
+):
+    """话术评分异常只记警告，已成功的完整复盘不能被误标失败。"""
+    room = LiveRoom(
+        account_name="AI 评分降级账号",
+        anchor_name="测试主播",
+        room_id_str="room-ai-score-degradation",
+    )
+    db.add(room)
+    db.flush()
+    session = LiveSession(
+        room_id=room.id,
+        anchor_name="测试主播",
+        live_status="ended",
+        live_start_time=datetime.utcnow() - timedelta(hours=1),
+    )
+    db.add(session)
+    db.flush()
+    control_task = ScraperTask(
+        task_type="ai_review",
+        status=TaskStatus.RUNNING,
+        progress_stage="ai_review",
+    )
+    db.add_all(
+        [
+            control_task,
+            AsrTask(
+                session_id=session.id,
+                status="completed",
+                task_type="offline",
+                postprocess_status="completed",
+                idempotency_key=f"asr:offline:session:score-degrade:{session.id}",
+            ),
+            TranscriptSegment(
+                session_id=session.id,
+                text_content="这是用于验证评分异常降级的稳定话术终稿，完整复盘仍应继续生成。",
+                segment_type="asr_offline",
+                asr_status="completed",
+            ),
+        ]
+    )
+    db.commit()
+    monkeypatch.setattr(
+        "app.services.tasks.batch_runners.score_session_transcript",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("评分失败")),
+    )
+    monkeypatch.setattr(
+        "app.services.tasks.batch_runners.generate_findings", lambda *_args: []
+    )
+    monkeypatch.setattr(
+        "app.services.tasks.batch_runners.generate_unified_review",
+        lambda *_args: {"status": "completed", "analyzed_user_count": 1},
+    )
+
+    result = run_ai_review_batch(
+        db,
+        control_task.id,
+        lambda *_args: None,
+        lambda: False,
+        batch_size=1,
+    )
+
+    assert result["completed_count"] == 1
+    assert result["failed_count"] == 0
+    assert result["warning_count"] == 1
 
 
 def test_resource_snapshot_uses_real_system_values_and_pressure_thresholds():

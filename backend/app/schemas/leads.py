@@ -16,6 +16,7 @@ class LeadSyncResponse(BaseModel):
     last_external_id: int = 0
     page_count: int = 0
     paired_count: int = 0
+    sanitized_douyin_id_count: int = 0
     rematch: dict | None = None  # 仅 ?rematch=true 时返回重匹配统计
 
 
