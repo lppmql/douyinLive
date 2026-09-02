@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -129,3 +130,24 @@ def test_one_click_start_requires_core_health_and_excludes_retired_services():
     assert "FunASR 容器异常退出，主系统将继续启动" in start_source
     assert "FunASR 在 ${FUNASR_WAIT_SECONDS} 秒内未就绪，将在后台继续加载" in start_source
     assert start_source.index("if ! wait_for_backend; then") < start_source.index('echo "  ✅ 后端: http://localhost:8000"')
+
+
+def test_start_sh_is_the_only_daily_start_entrypoint():
+    root = BACKEND_ROOT.parent
+    makefile_source = (root / "Makefile").read_text(encoding="utf-8")
+    development_guide = (root / "docs" / "开发.md").read_text(encoding="utf-8")
+    beginner_guide = (root / "docs" / "beginner-guide.md").read_text(encoding="utf-8")
+
+    assert "\nstart:" not in makefile_source
+    assert "make start" not in development_guide
+    assert "项目不再提供 `make start` 等启动别名" in beginner_guide
+
+    legacy_start = subprocess.run(
+        ["make", "-n", "start"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    assert legacy_start.returncode != 0
+    assert "No rule to make target" in legacy_start.stderr
+    assert "start" in legacy_start.stderr

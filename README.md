@@ -75,10 +75,10 @@ douyinLive/
 ├── scripts/               维护脚本
 ├── data/                  本地数据（不提交 Git）
 ├── .github/               CI/CD 工作流
-├── Makefile               统一命令入口（make doctor/test/lint/build）
+├── Makefile               检查维护命令（make doctor/test/lint/build）
 ├── docker-compose.yml
 ├── setup.sh               首次安装/依赖升级
-└── start.sh               一键启动脚本
+└── start.sh               唯一日常启动脚本
 ```
 
 ## 文档导航

@@ -1,12 +1,10 @@
-.PHONY: doctor start check check-diff check-docs check-backend check-frontend test test-backend test-backend-cov test-frontend test-frontend-e2e lint lint-backend lint-frontend build migrate db-check docker-check
+.SUFFIXES:
+
+.PHONY: doctor check check-diff check-docs check-backend check-frontend test test-backend test-backend-cov test-frontend test-frontend-e2e lint lint-backend lint-frontend build migrate db-check docker-check
 
 # ── 环境诊断 ──
 doctor:
 	./scripts/doctor.sh
-
-# ── 启动 ──
-start:
-	./start.sh
 
 # ── 按风险选择检查，不把小改动升级成全项目验收 ──
 check-diff:
