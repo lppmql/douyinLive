@@ -2,11 +2,15 @@
 from datetime import datetime
 from types import SimpleNamespace
 
+from sqlalchemy import select
+from sqlalchemy.dialects import mysql
+
 from app.models.knowledge_time_slices import KnowledgeTimeSlice
 from app.models.live_rooms import LiveRoom
 from app.models.live_sessions import LiveSession
 from app.services.ai.time_slice_service import search_time_slices
 from app.services.ai import vector_store
+from app.services.live_session_selector import build_session_anchor_key_condition
 
 
 def _seed_sessions(db):
@@ -63,6 +67,49 @@ def test_public_selector_filters_real_anchor_and_inclusive_date(client, db, auth
 
     assert response.status_code == 200
     assert [item["id"] for item in response.json()] == [sessions[1].id]
+
+
+def test_public_selector_filters_douyin_id_when_uid_is_missing(client, db, auth_headers):
+    sessions = _seed_sessions(db)
+    dyid_session = LiveSession(
+        room_id=sessions[0].room_id,
+        anchor_name="仅抖音号主播",
+        douyin_id="only-dyid",
+        session_title="抖音号兜底场次",
+        live_start_time=datetime(2026, 8, 30, 9, 0),
+        live_status="ended",
+        detail_collection_status="complete",
+    )
+    db.add(dyid_session)
+    db.commit()
+
+    response = client.get(
+        "/api/v1/live-sessions/selector-options",
+        params={"anchor_key": "dyid:only-dyid"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert [item["id"] for item in response.json()] == [dyid_session.id]
+
+
+def test_mysql_anchor_filters_compare_source_fields_without_computed_key():
+    """生产 MySQL 的 WHERE 不再比较 CASE/CONCAT，规避混合排序规则 1267。"""
+    expected_columns = {
+        "uid:uid-dan": "live_sessions.douyin_uid =",
+        "dyid:dan-jie": "live_sessions.douyin_id =",
+        "room:12:name:轮班:主播": "live_sessions.room_id =",
+    }
+
+    for anchor_key, expected_column in expected_columns.items():
+        statement = select(LiveSession.id).where(
+            build_session_anchor_key_condition(anchor_key)
+        )
+        sql = str(statement.compile(dialect=mysql.dialect())).lower()
+
+        assert expected_column in sql
+        assert "case" not in sql
+        assert "concat" not in sql
 
 
 def test_public_selector_always_includes_deep_link_session(client, db, auth_headers):
