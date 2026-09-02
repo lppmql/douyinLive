@@ -13,7 +13,8 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 30_000,
+  // 本套测试连接真实后端；首次编译页面或本机 ASR 高负载时允许合理波动。
+  timeout: 45_000,
   retries: 1,
   use: {
     baseURL: 'http://localhost:9527',

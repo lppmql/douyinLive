@@ -39,7 +39,7 @@ function navigate(target: WorkflowPage) {
 </script>
 
 <template>
-  <div class="session-workflow-nav">
+  <nav class="session-workflow-nav" aria-label="场次复盘工作流">
     <div class="session-workflow-nav__context">
       <SvgIcon icon="mdi:link-variant" class="text-17px text-primary" />
       <span>{{ validSessionId ? `场次 #${validSessionId}` : '未指定场次' }}</span>
@@ -58,7 +58,7 @@ function navigate(target: WorkflowPage) {
         {{ step.label }}
       </NButton>
     </div>
-  </div>
+  </nav>
 </template>
 
 <style scoped>

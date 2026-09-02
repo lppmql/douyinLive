@@ -12,33 +12,61 @@
  *
  * 前置条件：
  *   1. 后端运行在 localhost:8000
- *   2. 数据库中有可用账号，或通过 TEST_ACCESS_TOKEN 传入本机临时令牌
- *   3. 账号方式可通过 TEST_USERNAME / TEST_PASSWORD 覆盖
+ *   2. 推荐通过 TEST_ACCESS_TOKEN 传入本机临时令牌
+ *   3. 也可同时配置 TEST_USERNAME / TEST_PASSWORD 使用真实测试账号
  */
 import { test, expect } from '@playwright/test';
 
 const BACKEND = process.env.BACKEND_URL || 'http://localhost:8000';
-const TEST_USER = process.env.TEST_USERNAME || 'admin';
-const TEST_PASS = process.env.TEST_PASSWORD || 'Admin123456';
+const TEST_USER = process.env.TEST_USERNAME?.trim() || '';
+const TEST_PASS = process.env.TEST_PASSWORD || '';
 const TEST_ACCESS_TOKEN = process.env.TEST_ACCESS_TOKEN || '';
 const STORAGE_PREFIX = process.env.VITE_STORAGE_PREFIX || 'SOY_';
+let cachedAccessToken = TEST_ACCESS_TOKEN;
+const browserErrors = new WeakMap<any, string[]>();
+
+/** 在导航前监听浏览器错误，避免漏掉首屏初始化异常。 */
+function monitorBrowserErrors(page: any) {
+  const errors: string[] = [];
+  browserErrors.set(page, errors);
+  page.on('console', (msg: any) => {
+    if (msg.type() === 'error') errors.push(msg.text());
+  });
+  page.on('pageerror', (error: Error) => errors.push(error.message));
+}
+
+function assertNoFatalErrors(page: any) {
+  const fatalErrors = (browserErrors.get(page) || []).filter(
+    error =>
+      !error.includes('favicon') &&
+      !error.includes('third-party') &&
+      !error.includes('hydrated') &&
+      // 连续切换工作流页面时，Chromium 会把已取消的旧页面请求记为该网络错误。
+      !error.includes('net::ERR_NETWORK_IO_SUSPENDED')
+  );
+  expect(fatalErrors, `页面不应出现浏览器错误：${fatalErrors.slice(0, 3).join(' | ')}`).toEqual([]);
+}
 
 /** 登录获取 Token，将 Token 写入 localStorage */
 async function login(page: ReturnType<typeof test['info']> extends never ? never : any): Promise<string> {
-  let token = TEST_ACCESS_TOKEN;
+  let token = cachedAccessToken;
   if (!token) {
+    expect(
+      TEST_USER && TEST_PASS,
+      '未配置 E2E 登录信息：请设置 TEST_ACCESS_TOKEN，或同时设置 TEST_USERNAME 和 TEST_PASSWORD'
+    ).toBeTruthy();
     const resp = await page.request.post(`${BACKEND}/api/v1/auth/login`, {
       data: { username: TEST_USER, password: TEST_PASS }
     });
     expect(resp.ok(), `登录失败: ${await resp.text()}`).toBeTruthy();
     const body = await resp.json();
     token = body.data?.token;
+    cachedAccessToken = token;
   }
   expect(token, 'Token 不能为空').toBeTruthy();
 
-  // 将 token 写入 localStorage（SoybeanAdmin 格式）
-  await page.goto('/');
-  await page.evaluate(
+  // 在首个业务页面脚本执行前写入 Token，避免先打开未认证首页再刷新的竞态和无效请求。
+  await page.addInitScript(
     ({ token: accessToken, prefix }: { token: string; prefix: string }) => {
       // createStorage 会给键名加前缀，并把字符串再做一次 JSON 序列化。
       localStorage.setItem(`${prefix}token`, JSON.stringify(accessToken));
@@ -46,33 +74,17 @@ async function login(page: ReturnType<typeof test['info']> extends never ? never
     },
     { token, prefix: STORAGE_PREFIX }
   );
-  // 刷新页面让路由守卫识别 token
-  await page.reload();
-  await page.waitForLoadState('networkidle');
   return token;
 }
 
-// ── 通用页面检查辅助函数 ──
-
-/** 检查页面加载后无严重错误 */
-async function checkNoFatalErrors(page: any) {
-  const errors: string[] = [];
-  page.on('console', (msg: any) => {
-    if (msg.type() === 'error') errors.push(msg.text());
-  });
-  // 等待一小段时间让错误有机会触发
-  await page.waitForTimeout(1000);
-  // 过滤掉无关的第三方库错误
-  const fatalErrors = errors.filter(
-    (e) =>
-      !e.includes('favicon') &&
-      !e.includes('third-party') &&
-      !e.includes('hydrated')
-  );
-  if (fatalErrors.length > 0) {
-    console.warn('⚠️  控制台错误:', fatalErrors.slice(0, 3));
-  }
+/** 打开业务页。页面包含轮询和长请求时，不能用 networkidle 判断是否渲染完成。 */
+async function openPage(page: any, path: string) {
+  await page.goto(path, { waitUntil: 'domcontentloaded' });
+  await expect(page).not.toHaveURL(/\/login(?:\/|\?|$)/);
+  await expect(page.locator('main')).toBeVisible({ timeout: 25_000 });
 }
+
+// ── 通用页面检查辅助函数 ──
 
 /** 判断页面不是白屏（body 有可见内容） */
 async function checkNotBlank(page: any) {
@@ -85,17 +97,20 @@ async function checkNotBlank(page: any) {
 
 test.describe('核心页面冒烟', () => {
   let authToken = '';
+  let clipCandidateSessionId = '';
 
   test.beforeEach(async ({ page }) => {
+    monitorBrowserErrors(page);
     authToken = await login(page as any);
   });
 
-  test('首页 - 经营仪表盘', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
+  test.afterEach(async ({ page }) => {
+    assertNoFatalErrors(page);
+  });
 
-    // 页面加载后无严重错误
-    await checkNoFatalErrors(page);
+  test('首页 - 经营仪表盘', async ({ page }) => {
+    await openPage(page, '/');
+
     await checkNotBlank(page);
 
     // 检查日期按钮存在
@@ -106,8 +121,7 @@ test.describe('核心页面冒烟', () => {
   });
 
   test('原生经营大屏', async ({ page }) => {
-    await page.goto('/dashboard');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/dashboard');
     await checkNotBlank(page);
 
     await expect(page.getByText('零食店直播经营大屏')).toBeVisible({ timeout: 5000 });
@@ -117,8 +131,7 @@ test.describe('核心页面冒烟', () => {
   });
 
   test('数据采集页', async ({ page }) => {
-    await page.goto('/collector');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/collector');
     await checkNotBlank(page);
 
     await expect(page.getByText('数据处理控制中心')).toBeVisible({ timeout: 5000 });
@@ -127,13 +140,13 @@ test.describe('核心页面冒烟', () => {
   });
 
   test('直播场次列表', async ({ page }) => {
-    await page.goto('/live-sessions');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/live-sessions');
     await checkNotBlank(page);
 
     // 列表页应显示表格或空状态
-    const hasTableOrEmpty = await page.locator('table, .n-empty, [class*="n-data-table"]').count();
-    expect(hasTableOrEmpty, '应显示表格或空状态').toBeGreaterThan(0);
+    await expect(page.locator('.n-data-table, .n-empty').first(), '应显示表格或空状态').toBeVisible({
+      timeout: 10_000
+    });
   });
 
   test('场次详情与复盘工作流联动', async ({ page }) => {
@@ -146,25 +159,28 @@ test.describe('核心页面冒烟', () => {
     const sessionId = body.records?.[0]?.id;
     expect(sessionId, '真实数据库中至少要有一场直播').toBeTruthy();
 
-    await page.goto(`/live-sessions/${sessionId}`);
-    await page.waitForLoadState('networkidle');
+    await openPage(page, `/live-sessions/${sessionId}`);
     await checkNotBlank(page);
-    await expect(page.getByText('场次详情', { exact: true }).first()).toBeVisible({ timeout: 8000 });
-    await expect(page.getByText('主播话术', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('AI 复盘', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('知识库问答', { exact: true }).first()).toBeVisible();
+    const workflow = page.getByRole('navigation', { name: '场次复盘工作流' });
+    await expect(workflow).toContainText(`场次 #${sessionId}`, { timeout: 8000 });
+    await expect(workflow.getByRole('button', { name: '场次详情', exact: true })).toBeVisible();
+    await expect(workflow.getByRole('button', { name: '主播话术', exact: true })).toBeVisible();
+    await expect(workflow.getByRole('button', { name: 'AI 复盘', exact: true })).toBeVisible();
+    await expect(workflow.getByRole('button', { name: '知识库问答', exact: true })).toBeVisible();
 
-    await page.getByText('主播话术', { exact: true }).first().click();
+    // 连续快速跳转，验证公共工作流始终携带同一个真实场次，而不是回退到最新场次。
+    await workflow.getByRole('button', { name: '主播话术', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/transcripts\\?sessionId=${sessionId}`));
-    await page.getByText('AI 复盘', { exact: true }).first().click();
+    await expect(workflow).toContainText(`场次 #${sessionId}`);
+    await workflow.getByRole('button', { name: 'AI 复盘', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/analysis\\?sessionId=${sessionId}`));
-    await page.getByText('知识库问答', { exact: true }).first().click();
+    await expect(workflow).toContainText(`场次 #${sessionId}`);
+    await workflow.getByRole('button', { name: '知识库问答', exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/knowledge\\?sessionId=${sessionId}`));
   });
 
   test('主播话术', async ({ page }) => {
-    await page.goto('/transcripts');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/transcripts');
     await checkNotBlank(page);
 
     // 页面标题存在
@@ -172,8 +188,7 @@ test.describe('核心页面冒烟', () => {
   });
 
   test('AI 复盘', async ({ page }) => {
-    await page.goto('/analysis');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/analysis');
     await checkNotBlank(page);
 
     // 页面标题存在
@@ -181,68 +196,67 @@ test.describe('核心页面冒烟', () => {
   });
 
   test('AI 自动剪辑', async ({ page }) => {
-    await page.goto('/clip');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/clip');
     await checkNotBlank(page);
 
     // 页面标题存在
     await expect(page.locator('text=AI手动剪辑').first()).toBeVisible({ timeout: 5000 });
 
     // 场次下拉与生成按钮存在（naive-ui NSelect 的 placeholder 是自绘文本，非 input 属性）
-    await expect(page.getByRole('button', { name: '生成/重新生成 5 条成片' })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole('button', { name: /^(重新)?生成本场成片$/ })).toBeVisible({ timeout: 5000 });
     const sessionSelect = page.locator('.clip-page__session-select');
     await expect(sessionSelect).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText('搜索主播或场次')).toBeVisible({ timeout: 5000 });
+    await expect(page).toHaveURL(/\/clip\?sessionId=\d+/, { timeout: 30_000 });
+    clipCandidateSessionId = new URL(page.url()).searchParams.get('sessionId') || '';
+    expect(clipCandidateSessionId, 'AI 剪辑页应选中一个真实候选场次').toBeTruthy();
 
     // 选中第一个候选场次后应加载出成片区（卡片或空提示）
-    const selector = page.locator('.clip-page__session-select');
+    const selector = page.locator('.clip-page__session-select .session-selector__main .n-select');
+    await expect(selector, '场次选择下拉应可操作').toBeVisible({ timeout: 10_000 });
     await selector.click();
     const firstOption = page.locator('.clip-page__option, [class*="n-base-select-option"]').first();
-    if (await firstOption.isVisible().catch(() => false)) {
-      await firstOption.click();
-      await page.waitForTimeout(2000);
-      await checkNotBlank(page);
-      const hasClipsOrEmpty = await page
-        .locator('.clip-card, .n-empty, [class*="n-alert"]')
-        .count();
-      expect(hasClipsOrEmpty, '应显示成片卡片或提示').toBeGreaterThan(0);
-    }
+    await expect(firstOption, '真实候选场次应出现在下拉列表中').toBeVisible({ timeout: 10_000 });
+    await firstOption.click();
+    await checkNotBlank(page);
+    await expect(
+      page.locator('.clip-card, .clip-page__session-info, .n-empty, [class*="n-alert"]').first(),
+      '应显示场次信息、成片卡片或提示'
+    ).toBeVisible({ timeout: 20_000 });
   });
 
   test('AI 自动剪辑 - sessionId 直达（场次详情入口）', async ({ page }) => {
-    // 取一个真实候选场次
-    const response = await page.request.get(`${BACKEND}/api/v1/clip/candidate-sessions`, {
-      headers: { Authorization: `Bearer ${authToken}` },
-      params: { limit: 1 }
-    });
-    expect(response.ok(), '候选场次读取失败').toBeTruthy();
-    const items = await response.json();
-    expect(items.length, '至少有一个候选场次').toBeGreaterThan(0);
+    test.setTimeout(90_000);
+    // Worker 重试会清空模块变量；此时先由页面自身选出一个真实候选场次。
+    if (!clipCandidateSessionId) {
+      await openPage(page, '/clip');
+      await expect(page).toHaveURL(/\/clip\?sessionId=\d+/, { timeout: 45_000 });
+      clipCandidateSessionId = new URL(page.url()).searchParams.get('sessionId') || '';
+    }
+    expect(clipCandidateSessionId, '至少有一个真实候选场次').toBeTruthy();
 
     // 带 sessionId 直达：应自动加载该场次（显示场次信息或成片区）
-    await page.goto(`/clip?sessionId=${items[0].session_id}`);
-    await page.waitForLoadState('networkidle');
+    await openPage(page, `/clip?sessionId=${clipCandidateSessionId}`);
     await checkNotBlank(page);
-    const hasSessionContent = await page
-      .locator('.clip-page__session-info, .clip-card, .n-empty')
-      .count();
-    expect(hasSessionContent, '应显示场次信息或成片区').toBeGreaterThan(0);
+    await expect(page).toHaveURL(new RegExp(`/clip\\?sessionId=${clipCandidateSessionId}`));
+    await expect(
+      page.locator('.clip-page__session-info, .clip-card, .n-empty').first(),
+      '应显示指定场次信息或成片区'
+    ).toBeVisible({ timeout: 30_000 });
   });
 
   test('知识库', async ({ page }) => {
-    await page.goto('/knowledge');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/knowledge');
     await checkNotBlank(page);
 
     // 检查聊天输入框存在
-    const hasInput = await page.locator('input[placeholder*="问题"], textarea').count();
-    const hasEmpty = await page.locator('.n-empty').count();
-    expect(hasInput + hasEmpty, '应显示输入框或欢迎提示').toBeGreaterThan(0);
+    await expect(
+      page.locator('textarea[placeholder*="问题"], .n-empty').first(),
+      '应显示输入框或欢迎提示'
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   test('主播排班', async ({ page }) => {
-    await page.goto('/anchor-schedule');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/anchor-schedule');
     await checkNotBlank(page);
 
     // 检查日期按钮
@@ -250,13 +264,10 @@ test.describe('核心页面冒烟', () => {
   });
 
   test('用户管理', async ({ page }) => {
-    await page.goto('/user-management');
-    await page.waitForLoadState('networkidle');
+    await openPage(page, '/user-management');
     await checkNotBlank(page);
 
     // 检查表格或空状态
-    const hasTable = await page.locator('table, .n-data-table').count();
-    const hasEmpty = await page.locator('.n-empty').count();
-    expect(hasTable + hasEmpty, '应显示用户表格').toBeGreaterThan(0);
+    await expect(page.locator('.n-data-table, .n-empty').first(), '应显示用户表格').toBeVisible({ timeout: 10_000 });
   });
 });
