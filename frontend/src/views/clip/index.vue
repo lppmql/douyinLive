@@ -34,7 +34,9 @@ const {
   selectedSessionId,
   selectorAnchorKey,
   selectorDateRange,
-  selectorAnchorOptions
+  selectorAnchorOptions,
+  selectorHasMore,
+  selectorLoadingMore
 } = clipData;
 const generateButtonText = computed(() =>
   overview.value?.clips.length ? '重新生成本场成片' : '生成本场成片'
@@ -142,7 +144,10 @@ function fmtDateTime(val: string | null): string {
         :anchor-key="selectorAnchorKey"
         :date-range="selectorDateRange"
         :loading="sessionLoading"
+        :loading-more="selectorLoadingMore"
+        :has-more="selectorHasMore"
         @search="clipData.searchSessionOptions"
+        @load-more="clipData.loadMoreSessionOptions"
         @update:model-value="value => clipData.loadOverview(value)"
         @update:anchor-key="clipData.updateSelectorAnchor"
         @update:date-range="clipData.updateSelectorDateRange"

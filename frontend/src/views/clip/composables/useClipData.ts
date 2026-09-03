@@ -16,6 +16,7 @@ import { getServiceErrorMessage, unwrapServiceData } from '@/utils/service';
 import type { SessionSelectorOption } from '@/adapters/session-selector-adapter';
 import { buildCommonSessionOptions } from '@/adapters/session-selector-adapter';
 import {
+  appendUniqueSelectorPage,
   useSessionSelectorFilters,
   type SessionSelectorChangeContext
 } from '@/hooks/business/session-selector';
@@ -97,12 +98,16 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
   }
 
   /** 回退数据源：项目公共场次列表接口（主播/标题/时间，无话术统计） */
-  async function loadSessionOptionsFallback(context?: SessionSelectorChangeContext) {
+  async function loadSessionOptionsFallback(
+    includeSessionId?: number | null,
+    context?: SessionSelectorChangeContext
+  ) {
     try {
-      const records = unwrapServiceData(
-        await fetchSessionSelectorOptions(selectorFilters.buildQuery(selectedSessionId.value)),
+      const pageRecords = unwrapServiceData(
+        await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId, context)),
         '公共场次加载失败'
-      ).filter(item => item.live_status !== 'live');
+      );
+      const records = pageRecords.filter(item => item.live_status !== 'live');
       const options = buildCommonSessionOptions(records).map((option, index) => {
         const item = records[index];
         const raw: Api.Douyin.ClipCandidateSession = {
@@ -123,11 +128,18 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
         };
         return { ...option, metaLabel: buildClipMetaLabel(raw), raw };
       });
-      if (!context || context.isCurrent()) sessionOptions.value = options;
+      if (!context || context.isCurrent()) {
+        sessionOptions.value = context?.mode === 'append'
+          ? appendUniqueSelectorPage(sessionOptions.value, options, item => item.sessionId)
+          : options;
+      }
+      if (!context) selectorFilters.registerInitialPage(pageRecords.length);
+      return pageRecords.length;
     } catch (fallbackError) {
       if (!context || context.isCurrent()) {
         errorMessage.value = getServiceErrorMessage(fallbackError, '加载失败');
       }
+      return 0;
     }
   }
 
@@ -136,14 +148,14 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     includeSessionId?: number | null,
     context?: SessionSelectorChangeContext
   ) {
-    sessionLoading.value = true;
+    if (!context || context.mode === 'replace') sessionLoading.value = true;
     try {
       const data = unwrapServiceData(
-        await fetchClipCandidateSessions(selectorFilters.buildQuery(includeSessionId)),
+        await fetchClipCandidateSessions(selectorFilters.buildQuery(includeSessionId, context)),
         '候选场次加载失败'
       );
-      if (context && !context.isCurrent()) return;
-      sessionOptions.value = (data || []).map(item => ({
+      if (context && !context.isCurrent()) return 0;
+      const options = (data || []).map(item => ({
         label: `#${item.session_id} ${item.anchor_name || ''} ${item.session_title || ''}`,
         value: item.session_id,
         sessionId: item.session_id,
@@ -154,17 +166,23 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
         metaLabel: buildClipMetaLabel(item),
         raw: item
       }));
+      sessionOptions.value = context?.mode === 'append'
+        ? appendUniqueSelectorPage(sessionOptions.value, options, item => item.sessionId)
+        : options;
+      if (!context) selectorFilters.registerInitialPage(data.length);
+      return data.length;
     } catch {
       // 新接口不可用（后端未升级）时，回退到项目公共的场次列表接口，保证下拉始终有内容
-      if (!context || context.isCurrent()) await loadSessionOptionsFallback(context);
+      if (!context || context.isCurrent()) return loadSessionOptionsFallback(includeSessionId, context);
+      return 0;
     } finally {
-      if (!context || context.isCurrent()) sessionLoading.value = false;
+      if ((!context || context.isCurrent()) && (!context || context.mode === 'replace')) sessionLoading.value = false;
     }
   }
 
   async function reloadFilteredSessions(context: SessionSelectorChangeContext) {
-    await loadSessionOptions(undefined, context);
-    if (!context.isCurrent()) return;
+    const count = await loadSessionOptions(undefined, context);
+    if (!context.isCurrent() || context.mode === 'append') return count;
     const nextSessionId = Number(
       sessionOptions.value.find(item => item.sessionId === selectedSessionId.value)?.sessionId ||
       sessionOptions.value[0]?.sessionId ||
@@ -172,6 +190,7 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     );
     selectedSessionId.value = nextSessionId || null;
     await loadOverview(selectedSessionId.value);
+    return count;
   }
 
   const selectorFilters = useSessionSelectorFilters(reloadFilteredSessions);
@@ -374,9 +393,12 @@ export function useClipData(message: ReturnType<typeof useMessage>) {
     selectorAnchorKey: selectorFilters.anchorKey,
     selectorDateRange: selectorFilters.dateRange,
     selectorAnchorOptions: selectorFilters.anchorOptions,
+    selectorHasMore: selectorFilters.hasMore,
+    selectorLoadingMore: selectorFilters.loadingMore,
     updateSelectorAnchor: selectorFilters.updateAnchor,
     updateSelectorDateRange: selectorFilters.updateDateRange,
     searchSessionOptions: selectorFilters.search,
+    loadMoreSessionOptions: selectorFilters.loadMore,
     resetSelectorFilters: selectorFilters.reset
   };
 }

@@ -17,6 +17,7 @@ import {
 } from '@/service/api/douyin';
 import { buildCommonSessionOptions } from '@/adapters/session-selector-adapter';
 import {
+  appendUniqueSelectorPage,
   useSessionSelectorFilters,
   type SessionSelectorChangeContext
 } from '@/hooks/business/session-selector';
@@ -305,13 +306,18 @@ export function useKnowledgeChat() {
     includeSessionId?: number | null,
     context?: SessionSelectorChangeContext
   ) {
-    sessionLoading.value = true;
+    if (!context || context.mode === 'replace') sessionLoading.value = true;
     try {
-      const response = await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId));
-      if (context && !context.isCurrent()) return;
-      sessions.value = unwrapServiceData(response, '知识库场次读取失败');
+      const response = await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId, context));
+      if (context && !context.isCurrent()) return 0;
+      const records = unwrapServiceData(response, '知识库场次读取失败');
+      sessions.value = context?.mode === 'append'
+        ? appendUniqueSelectorPage(sessions.value, records, item => item.id)
+        : records;
+      if (!context) selectorFilters.registerInitialPage(records.length);
+      return records.length;
     } finally {
-      if (!context || context.isCurrent()) sessionLoading.value = false;
+      if ((!context || context.isCurrent()) && (!context || context.mode === 'replace')) sessionLoading.value = false;
     }
   }
 
@@ -327,7 +333,12 @@ export function useKnowledgeChat() {
     else delete nextQuery.sessionId;
     void router.replace({ query: nextQuery });
     if (value && !sessions.value.some(item => item.id === value)) {
-      const scopeContext = { isCurrent: () => scopeRequest === scopeGeneration };
+      const scopeContext: SessionSelectorChangeContext = {
+        isCurrent: () => scopeRequest === scopeGeneration,
+        mode: 'replace',
+        offset: 0,
+        limit: 100
+      };
       void loadSessionOptions(value, scopeContext).catch(error => {
         if (scopeContext.isCurrent()) {
           message.error(error instanceof Error ? error.message : '场次范围读取失败');
@@ -338,11 +349,12 @@ export function useKnowledgeChat() {
 
   async function reloadFilteredSessions(context: SessionSelectorChangeContext) {
     try {
-      await loadSessionOptions(undefined, context);
-      if (!context.isCurrent()) return;
+      const count = await loadSessionOptions(undefined, context);
+      if (!context.isCurrent() || context.mode === 'append') return count;
       if (selectedSessionId.value && !sessions.value.some(item => item.id === selectedSessionId.value)) {
         await applySessionScope(sessions.value[0]?.id || null);
       }
+      return count;
     } catch (error) {
       if (!context.isCurrent()) return;
       message.error(error instanceof Error ? error.message : '知识库场次筛选失败');
@@ -388,6 +400,8 @@ export function useKnowledgeChat() {
     selectorAnchorKey: selectorFilters.anchorKey,
     selectorDateRange: selectorFilters.dateRange,
     selectorAnchorOptions: selectorFilters.anchorOptions,
+    selectorHasMore: selectorFilters.hasMore,
+    selectorLoadingMore: selectorFilters.loadingMore,
     chatting,
     messages,
     activeSources,
@@ -414,6 +428,7 @@ export function useKnowledgeChat() {
     updateSelectorAnchor: selectorFilters.updateAnchor,
     updateSelectorDateRange: selectorFilters.updateDateRange,
     searchSelectorSessions: selectorFilters.search,
+    loadMoreSelectorSessions: selectorFilters.loadMore,
     resetSelectorFilters: selectorFilters.reset,
     removeConversation,
   };

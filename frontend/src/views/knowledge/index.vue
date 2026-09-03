@@ -42,11 +42,14 @@ onMounted(() => {
         :anchor-key="chat.selectorAnchorKey.value"
         :date-range="chat.selectorDateRange.value"
         :loading="chat.sessionLoading.value"
+        :loading-more="chat.selectorLoadingMore.value"
+        :has-more="chat.selectorHasMore.value"
         allow-global
         @update:model-value="chat.changeSession"
         @update:anchor-key="chat.updateSelectorAnchor"
         @update:date-range="chat.updateSelectorDateRange"
         @search="chat.searchSelectorSessions"
+        @load-more="chat.loadMoreSelectorSessions"
         @reset="chat.resetSelectorFilters"
       />
     </NCard>

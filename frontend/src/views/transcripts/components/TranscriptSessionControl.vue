@@ -33,6 +33,8 @@ const props = defineProps<{
   selectedSessionId: number | null;
   /** 场次列表是否加载中 */
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
   /** 当前选中场次对象 */
   selectedSession: Api.Douyin.LiveSessionListItem | null;
   /** 当前场次对应的转写任务 */
@@ -68,6 +70,7 @@ const emit = defineEmits<{
   'update:anchorKey': [value: string | null];
   'update:dateRange': [value: SessionDateRange];
   searchSessions: [keyword: string];
+  loadMoreSessions: [];
   resetFilters: [];
   startTranscription: [];
   runAiPipeline: [];
@@ -159,11 +162,14 @@ function handleMoreAction(key: string) {
           :anchor-key="anchorKey"
           :date-range="dateRange"
           :loading="loading"
+          :loading-more="loadingMore"
+          :has-more="hasMore"
           :clearable="false"
           @update:model-value="emit('update:selectedSessionId', $event)"
           @update:anchor-key="emit('update:anchorKey', $event)"
           @update:date-range="emit('update:dateRange', $event)"
           @search="emit('searchSessions', $event)"
+          @load-more="emit('loadMoreSessions')"
           @reset="emit('resetFilters')"
         />
         <div

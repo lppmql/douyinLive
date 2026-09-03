@@ -116,6 +116,7 @@ def _session_overview(db: Session, session_id: int) -> ClipSessionOverview:
 @router.get("/candidate-sessions")
 def list_candidate_sessions(
     limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     search: str | None = Query(None, max_length=100),
     anchor_key: str | None = Query(None, max_length=256),
     start_date: date | None = Query(None),
@@ -188,10 +189,11 @@ def list_candidate_sessions(
     rows = (
         query
         .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .offset(offset)
         .limit(limit)
         .all()
     )
-    if include_session_id and all(row[0].id != include_session_id for row in rows):
+    if offset == 0 and include_session_id and all(row[0].id != include_session_id for row in rows):
         included = (
             db.query(
                 LiveSession,
@@ -206,7 +208,8 @@ def list_candidate_sessions(
             .first()
         )
         if included:
-            rows = [included, *rows[: max(0, limit - 1)]]
+            # 深链场次只负责回显，不占用分页名额，保证滚动加载不会漏掉边界记录。
+            rows = [included, *rows]
     items: list[dict[str, Any]] = []
     for session, segment_count, completed_count, clip_count, available_count in rows:
         segment_count = int(segment_count or 0)

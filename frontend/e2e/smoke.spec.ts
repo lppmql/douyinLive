@@ -187,6 +187,42 @@ test.describe('核心页面冒烟', () => {
     await expect(page.locator('text=主播话术').first()).toBeVisible({ timeout: 5000 });
   });
 
+  test('主播话术 - 历史场次滚动加载且列表不跳顶', async ({ page }) => {
+    // 本用例只验收场次分页；历史头像域名的独立降级不应干扰滚动断言。
+    await page.route('**/live-sessions/*/avatar', route => route.fulfill({ status: 204 }));
+    const firstPagePromise = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith('/live-sessions/selector-options') && url.searchParams.get('offset') === '0';
+    });
+    await openPage(page, '/transcripts');
+    const firstPageResponse = await firstPagePromise;
+    expect(firstPageResponse.ok(), `场次第一页读取失败: ${await firstPageResponse.text()}`).toBeTruthy();
+    expect(new URL(firstPageResponse.url()).searchParams.get('limit')).toBe('100');
+
+    const selector = page.locator('.transcript-workbench .session-selector__main .n-select');
+    await expect(selector).toBeVisible({ timeout: 10_000 });
+    await selector.click();
+    await expect(page.getByText('向下滚动加载更多场次')).toBeVisible({ timeout: 5000 });
+
+    // NSelect 开启虚拟滚动后，真正承载 scrollTop 的是 VirtualList，而不是 NScrollbar。
+    const menuScrollbar = page.locator('.n-base-select-menu .n-virtual-list').last();
+    await expect(menuScrollbar).toBeVisible({ timeout: 5000 });
+    const nextPagePromise = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith('/live-sessions/selector-options') && url.searchParams.get('offset') === '100';
+    });
+    await menuScrollbar.evaluate(element => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event('scroll', { bubbles: true }));
+    });
+    const nextPageResponse = await nextPagePromise;
+    expect(nextPageResponse.ok(), `场次下一页读取失败: ${await nextPageResponse.text()}`).toBeTruthy();
+    expect((await nextPageResponse.json()).length).toBeGreaterThan(0);
+
+    // 分页追加会改变 options；此时菜单必须保持在历史位置，不能恢复到 scrollTop=0。
+    await expect.poll(() => menuScrollbar.evaluate(element => element.scrollTop)).toBeGreaterThan(0);
+  });
+
   test('AI 复盘', async ({ page }) => {
     await openPage(page, '/analysis');
     await checkNotBlank(page);

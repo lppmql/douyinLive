@@ -37,8 +37,10 @@ class LiveSessionDetailsTest(unittest.TestCase):
 
     def test_avatar_proxy_only_allows_douyin_image_hosts(self):
         self.assertTrue(_is_allowed_avatar_url("https://p3.douyinpic.com/avatar.webp"))
+        self.assertTrue(_is_allowed_avatar_url("https://p3.huoshanimg.com/avatar.webp"))
         self.assertFalse(_is_allowed_avatar_url("http://p3.douyinpic.com/avatar.webp"))
         self.assertFalse(_is_allowed_avatar_url("https://douyinpic.com.example.test/avatar.webp"))
+        self.assertFalse(_is_allowed_avatar_url("https://huoshanimg.com.example.test/avatar.webp"))
 
     def test_avatar_proxy_returns_real_image_bytes(self):
         session = SimpleNamespace(anchor_avatar_url="https://p3.douyinpic.com/avatar.webp")

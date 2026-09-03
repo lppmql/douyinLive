@@ -55,6 +55,7 @@ export function fetchLiveSessions() {
 
 export interface SessionSelectorFilters {
   limit?: number;
+  offset?: number;
   search?: string;
   anchor_key?: string;
   start_date?: string;

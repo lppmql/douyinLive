@@ -27,11 +27,15 @@ withDefaults(defineProps<{
   anchorKey: string | null;
   dateRange: SessionDateRange;
   loading?: boolean;
+  loadingMore?: boolean;
+  hasMore?: boolean;
   allowGlobal?: boolean;
   clearable?: boolean;
   sessionPlaceholder?: string;
 }>(), {
   loading: false,
+  loadingMore: false,
+  hasMore: true,
   allowGlobal: false,
   clearable: true,
   sessionPlaceholder: '搜索主播、日期、场次编号或标题'
@@ -42,6 +46,7 @@ const emit = defineEmits<{
   'update:anchorKey': [value: string | null];
   'update:dateRange': [value: SessionDateRange];
   search: [keyword: string];
+  loadMore: [];
   reset: [];
 }>();
 
@@ -85,6 +90,13 @@ function renderAnchorLabel(option: SelectOption) {
     size: 26,
     dense: true
   });
+}
+
+function handleSessionScroll(event: Event) {
+  const target = event.currentTarget as HTMLElement | null;
+  if (!target) return;
+  const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+  if (distanceToBottom <= 48) emit('loadMore');
 }
 </script>
 
@@ -132,11 +144,19 @@ function renderAnchorLabel(option: SelectOption) {
         :loading="loading"
         filterable
         remote
+        :reset-menu-on-options-change="false"
         :clearable="clearable"
         :placeholder="allowGlobal && modelValue === null ? '当前问答范围：全部知识库' : sessionPlaceholder"
+        @scroll="handleSessionScroll"
         @search="keyword => emit('search', keyword)"
         @update:value="value => emit('update:modelValue', value as number | null)"
-      />
+      >
+        <template #action>
+          <div class="w-full text-center text-12px text-gray-400">
+            {{ loadingMore ? '正在加载更多场次…' : hasMore ? '向下滚动加载更多场次' : '已加载全部场次' }}
+          </div>
+        </template>
+      </NSelect>
     </div>
   </div>
 </template>

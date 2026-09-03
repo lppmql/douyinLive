@@ -52,6 +52,8 @@ const {
   selectorAnchorKey,
   selectorDateRange,
   selectorAnchorOptions,
+  selectorHasMore,
+  selectorLoadingMore,
   scoreMetrics,
   improvementSuggestions,
   nextLivePlan,
@@ -66,6 +68,7 @@ const {
   updateSelectorAnchor,
   updateSelectorDateRange,
   searchSelectorSessions,
+  loadMoreSelectorSessions,
   resetSelectorFilters
 } = useReviewWorkbench();
 
@@ -106,6 +109,8 @@ function updateUnifiedReview(review: Api.Douyin.UnifiedAiReview) {
         :sessions="sessions"
         :selected-session-id="selectedSessionId"
         :loading="loading"
+        :loading-more="selectorLoadingMore"
+        :has-more="selectorHasMore"
         :session-options="sessionOptions"
         :anchor-options="selectorAnchorOptions"
         :anchor-key="selectorAnchorKey"
@@ -120,6 +125,7 @@ function updateUnifiedReview(review: Api.Douyin.UnifiedAiReview) {
         @update:anchor-key="updateSelectorAnchor"
         @update:date-range="updateSelectorDateRange"
         @search-sessions="searchSelectorSessions"
+        @load-more-sessions="loadMoreSelectorSessions"
         @reset-filters="resetSelectorFilters"
         @run-full-review="runFullReview"
       />

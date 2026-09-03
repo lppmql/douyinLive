@@ -26,6 +26,7 @@ import {
 import { restoreReportsFromList } from '@/adapters/review-report-adapter';
 import { buildCommonSessionOptions } from '@/adapters/session-selector-adapter';
 import {
+  appendUniqueSelectorPage,
   useSessionSelectorFilters,
   type SessionSelectorChangeContext
 } from '@/hooks/business/session-selector';
@@ -185,24 +186,30 @@ export function useReviewWorkbench() {
     includeSessionId?: number | null,
     context?: SessionSelectorChangeContext
   ) {
-    const response = await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId));
-    if (context && !context.isCurrent()) return;
-    sessions.value = sortSessionsByLatest(unwrapServiceData(response, '直播场次读取失败'));
+    const response = await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId, context));
+    if (context && !context.isCurrent()) return 0;
+    const records = sortSessionsByLatest(unwrapServiceData(response, '直播场次读取失败'));
+    sessions.value = context?.mode === 'append'
+      ? appendUniqueSelectorPage(sessions.value, records, item => item.id)
+      : records;
+    if (!context) selectorFilters.registerInitialPage(records.length);
+    return records.length;
   }
 
   /** 筛选发生变化时，保留仍命中的当前场次，否则打开筛选结果中的最新一场。 */
   async function reloadFilteredSessions(context: SessionSelectorChangeContext) {
-    loading.value = true;
+    if (context.mode === 'replace') loading.value = true;
     try {
-      await loadSessionOptions(undefined, context);
-      if (!context.isCurrent()) return;
+      const count = await loadSessionOptions(undefined, context);
+      if (!context.isCurrent() || context.mode === 'append') return count;
       const nextSession = sessions.value.find(item => item.id === selectedSessionId.value) || sessions.value[0];
       await changeSession(nextSession?.id || null);
+      return count;
     } catch (error) {
       if (!context.isCurrent()) return;
       message.error((error as { message?: string }).message || '场次筛选失败');
     } finally {
-      if (context.isCurrent()) loading.value = false;
+      if (context.isCurrent() && context.mode === 'replace') loading.value = false;
     }
   }
 
@@ -348,6 +355,8 @@ export function useReviewWorkbench() {
     selectorAnchorKey: selectorFilters.anchorKey,
     selectorDateRange: selectorFilters.dateRange,
     selectorAnchorOptions: selectorFilters.anchorOptions,
+    selectorHasMore: selectorFilters.hasMore,
+    selectorLoadingMore: selectorFilters.loadingMore,
     // 操作
     initializePage,
     changeSession,
@@ -358,6 +367,7 @@ export function useReviewWorkbench() {
     updateSelectorAnchor: selectorFilters.updateAnchor,
     updateSelectorDateRange: selectorFilters.updateDateRange,
     searchSelectorSessions: selectorFilters.search,
+    loadMoreSelectorSessions: selectorFilters.loadMore,
     resetSelectorFilters: selectorFilters.reset,
     // 工具
     scoreLevel,

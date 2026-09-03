@@ -8351,6 +8351,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                offset?: number;
                 search?: string | null;
                 anchor_key?: string | null;
                 start_date?: string | null;
@@ -12524,6 +12525,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
+                offset?: number;
                 search?: string | null;
                 anchor_key?: string | null;
                 start_date?: string | null;

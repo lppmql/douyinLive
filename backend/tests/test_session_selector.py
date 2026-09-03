@@ -130,6 +130,30 @@ def test_public_selector_always_includes_deep_link_session(client, db, auth_head
     assert {item["id"] for item in response.json()} == {sessions[0].id, sessions[2].id}
 
 
+def test_public_selector_deep_link_does_not_displace_paginated_records(client, db, auth_headers):
+    sessions = _seed_sessions(db)
+
+    first_page = client.get(
+        "/api/v1/live-sessions/selector-options",
+        params={"limit": 2, "offset": 0, "include_session_id": sessions[0].id},
+        headers=auth_headers,
+    )
+    second_page = client.get(
+        "/api/v1/live-sessions/selector-options",
+        params={"limit": 2, "offset": 2, "include_session_id": sessions[0].id},
+        headers=auth_headers,
+    )
+
+    assert first_page.status_code == 200
+    assert second_page.status_code == 200
+    assert [item["id"] for item in first_page.json()] == [
+        sessions[0].id,
+        sessions[2].id,
+        sessions[1].id,
+    ]
+    assert [item["id"] for item in second_page.json()] == [sessions[0].id]
+
+
 def test_public_anchor_options_use_latest_real_session_snapshot(client, db, auth_headers):
     sessions = _seed_sessions(db)
 
@@ -269,6 +293,19 @@ def test_clip_candidates_reuse_anchor_and_date_filters(client, db, auth_headers)
     response = client.get(
         "/api/v1/clip/candidate-sessions",
         params={"anchor_key": "uid:uid-dan", "start_date": "2026-08-29", "end_date": "2026-08-29"},
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert [item["session_id"] for item in response.json()] == [sessions[1].id]
+
+
+def test_clip_candidates_support_scrolling_pagination(client, db, auth_headers):
+    sessions = _seed_sessions(db)
+
+    response = client.get(
+        "/api/v1/clip/candidate-sessions",
+        params={"limit": 1, "offset": 1, "include_session_id": sessions[0].id},
         headers=auth_headers,
     )
 

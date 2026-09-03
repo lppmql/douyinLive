@@ -48,6 +48,7 @@ import {
 
 import { useTranscriptRealtime } from '@/hooks/business/transcript-realtime';
 import {
+  appendUniqueSelectorPage,
   useSessionSelectorFilters,
   type SessionSelectorChangeContext
 } from '@/hooks/business/session-selector';
@@ -276,21 +277,26 @@ export function useTranscriptWorkbench() {
     includeSessionId?: number | null,
     context?: SessionSelectorChangeContext
   ) {
-    sessionLoading.value = true;
+    if (!context || context.mode === 'replace') sessionLoading.value = true;
     try {
-      const response = await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId));
-      if (context && !context.isCurrent()) return;
-      sessions.value = sortSessionsByLatest(unwrapServiceData(response, '直播场次读取失败'));
+      const response = await fetchSessionSelectorOptions(selectorFilters.buildQuery(includeSessionId, context));
+      if (context && !context.isCurrent()) return 0;
+      const records = sortSessionsByLatest(unwrapServiceData(response, '直播场次读取失败'));
+      sessions.value = context?.mode === 'append'
+        ? appendUniqueSelectorPage(sessions.value, records, item => item.id)
+        : records;
+      if (!context) selectorFilters.registerInitialPage(records.length);
+      return records.length;
     } finally {
-      if (!context || context.isCurrent()) sessionLoading.value = false;
+      if ((!context || context.isCurrent()) && (!context || context.mode === 'replace')) sessionLoading.value = false;
     }
   }
 
   /** 主播、日期或远程搜索变化后，切换到筛选结果中的最新真实场次。 */
   async function reloadFilteredSessions(context: SessionSelectorChangeContext) {
     try {
-      await loadSessions(undefined, context);
-      if (!context.isCurrent()) return;
+      const count = await loadSessions(undefined, context);
+      if (!context.isCurrent() || context.mode === 'append') return count;
       const nextSession = sessions.value.find(item => item.id === selectedSessionId.value) || sessions.value[0];
       if (nextSession && nextSession.id !== selectedSessionId.value) await loadTranscript(nextSession.id);
       if (!nextSession) {
@@ -298,6 +304,7 @@ export function useTranscriptWorkbench() {
         segments.value = [];
         fullText.value = '';
       }
+      return count;
     } catch (error) {
       if (!context.isCurrent()) return;
       message.error(error instanceof Error ? error.message : '场次筛选失败');
@@ -764,6 +771,8 @@ export function useTranscriptWorkbench() {
     selectorAnchorKey: selectorFilters.anchorKey,
     selectorDateRange: selectorFilters.dateRange,
     selectorAnchorOptions: selectorFilters.anchorOptions,
+    selectorHasMore: selectorFilters.hasMore,
+    selectorLoadingMore: selectorFilters.loadingMore,
     // 操作
     initializePage,
     loadTranscript,
@@ -785,6 +794,7 @@ export function useTranscriptWorkbench() {
     updateSelectorAnchor: selectorFilters.updateAnchor,
     updateSelectorDateRange: selectorFilters.updateDateRange,
     searchSelectorSessions: selectorFilters.search,
+    loadMoreSelectorSessions: selectorFilters.loadMore,
     resetSelectorFilters: selectorFilters.reset,
     // 删除相关
     deletingTaskIds,

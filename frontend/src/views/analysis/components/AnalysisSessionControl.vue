@@ -26,6 +26,8 @@ defineProps<{
   sessions: Api.Douyin.LiveSessionListItem[];
   selectedSessionId: number | null;
   loading: boolean;
+  loadingMore: boolean;
+  hasMore: boolean;
   sessionOptions: SessionSelectorOption[];
   anchorOptions: AnchorSelectorOption[];
   anchorKey: string | null;
@@ -43,6 +45,7 @@ defineEmits<{
   'update:anchorKey': [value: string | null];
   'update:dateRange': [value: SessionDateRange];
   searchSessions: [keyword: string];
+  loadMoreSessions: [];
   resetFilters: [];
   runFullReview: [];
 }>();
@@ -68,10 +71,13 @@ defineEmits<{
           :anchor-key="anchorKey"
           :date-range="dateRange"
           :loading="loading"
+          :loading-more="loadingMore"
+          :has-more="hasMore"
           @update:model-value="$emit('update:selectedSessionId', $event)"
           @update:anchor-key="$emit('update:anchorKey', $event)"
           @update:date-range="$emit('update:dateRange', $event)"
           @search="$emit('searchSessions', $event)"
+          @load-more="$emit('loadMoreSessions')"
           @reset="$emit('resetFilters')"
         />
         <div v-if="selectedSession" class="mt-14px flex min-w-0 items-center gap-12px">

@@ -56,7 +56,7 @@ router = APIRouter(prefix="/live-sessions", tags=["直播场次"])
 # 浏览器 <video> 标签不能添加 Authorization 头，因此这里使用短时 HttpOnly 媒体 Cookie。
 stream_router = APIRouter(tags=["直播场次-流"])
 MAX_AVATAR_BYTES = 2 * 1024 * 1024
-AVATAR_HOST_SUFFIXES = (".douyinpic.com", ".byteimg.com")
+AVATAR_HOST_SUFFIXES = (".douyinpic.com", ".byteimg.com", ".huoshanimg.com")
 LIVE_SESSION_LIST_COLUMNS = (
     LiveSession.id,
     LiveSession.anchor_name,
@@ -272,6 +272,7 @@ def list_session_anchor_options(
 @router.get("/selector-options", response_model=list[LiveSessionListItemResponse])
 def list_session_selector_options(
     limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     search: str | None = Query(None, max_length=100),
     anchor_key: str | None = Query(None, max_length=256),
     start_date: date | None = Query(None),
@@ -294,13 +295,15 @@ def list_session_selector_options(
     rows = (
         base_query.filter(condition)
         .order_by(LiveSession.live_start_time.desc(), LiveSession.id.desc())
+        .offset(offset)
         .limit(limit)
         .all()
     )
-    if include_session_id and all(row.id != include_session_id for row in rows):
+    if offset == 0 and include_session_id and all(row.id != include_session_id for row in rows):
         included = base_query.filter(LiveSession.id == include_session_id).first()
         if included:
-            rows = [included, *rows[: max(0, limit - 1)]]
+            # 深链场次是额外的回显项，不能挤掉分页中的真实记录，否则下一页会漏场次。
+            rows = [included, *rows]
     return [LiveSessionListItemResponse(**row._mapping) for row in rows]
 
 

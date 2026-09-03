@@ -35,6 +35,8 @@ const {
   selectorAnchorKey,
   selectorDateRange,
   selectorAnchorOptions,
+  selectorHasMore,
+  selectorLoadingMore,
   hasContent,
   queueLoading,
   batchLoading,
@@ -96,6 +98,7 @@ const {
   updateSelectorAnchor,
   updateSelectorDateRange,
   searchSelectorSessions,
+  loadMoreSelectorSessions,
   resetSelectorFilters
 } = wb;
 </script>
@@ -118,6 +121,8 @@ const {
       :date-range="selectorDateRange"
       :selected-session-id="selectedSessionId"
       :loading="sessionLoading"
+      :loading-more="selectorLoadingMore"
+      :has-more="selectorHasMore"
       :selected-session="selectedSession"
       :selected-task="selectedTask"
       :has-content="hasContent"
@@ -137,6 +142,7 @@ const {
       @update:anchor-key="updateSelectorAnchor"
       @update:date-range="updateSelectorDateRange"
       @search-sessions="searchSelectorSessions"
+      @load-more-sessions="loadMoreSelectorSessions"
       @reset-filters="resetSelectorFilters"
       @start-transcription="startTranscription"
       @run-ai-pipeline="runAiPipeline"
